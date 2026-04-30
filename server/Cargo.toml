@@ -27,6 +27,7 @@ rand = { workspace = true }
 plugin-bridge = { path = "../plugin-bridge" }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 proptest = { workspace = true }
 criterion = { workspace = true }
 rustmc-test-utils = { path = "../test-utils" }
