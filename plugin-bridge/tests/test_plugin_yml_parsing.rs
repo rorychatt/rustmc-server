@@ -9,8 +9,8 @@ fn create_test_jar(plugin_yml_content: &str) -> tempfile::NamedTempFile {
         .expect("Failed to create temp file");
 
     let mut zip = zip::ZipWriter::new(std::io::BufWriter::new(file.as_file()));
-    let options = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Stored);
+    let options =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
 
     zip.start_file("plugin.yml", options)
         .expect("Failed to start plugin.yml");

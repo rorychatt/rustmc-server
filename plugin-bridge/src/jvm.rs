@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::OnceLock;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use jni::objects::JValue;
 use jni::{InitArgsBuilder, JNIVersion, JavaVM};
 use tracing::{debug, error, info};
@@ -17,8 +17,9 @@ impl JvmManager {
             return Ok(jvm);
         }
 
-        let jvm_path = java_locator::locate_jvm_dyn_library()
-            .context("Failed to locate JVM library. Ensure JAVA_HOME is set or Java is installed")?;
+        let jvm_path = java_locator::locate_jvm_dyn_library().context(
+            "Failed to locate JVM library. Ensure JAVA_HOME is set or Java is installed",
+        )?;
 
         info!("Located JVM library: {}", jvm_path);
 

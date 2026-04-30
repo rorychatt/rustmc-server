@@ -23,7 +23,10 @@ fn test_jvm_initialize_fails_without_java() {
             let msg = e.to_string();
             // Should give a meaningful error about missing JVM
             assert!(
-                msg.contains("JVM") || msg.contains("Java") || msg.contains("jvm") || msg.contains("java"),
+                msg.contains("JVM")
+                    || msg.contains("Java")
+                    || msg.contains("jvm")
+                    || msg.contains("java"),
                 "Error should mention JVM/Java: {msg}"
             );
         }

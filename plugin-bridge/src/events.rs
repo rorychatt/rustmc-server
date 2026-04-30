@@ -1,6 +1,6 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EventPriority {
@@ -14,13 +14,39 @@ pub enum EventPriority {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Event {
-    PlayerJoin { uuid: String, name: String },
-    PlayerLeave { uuid: String, name: String },
-    PlayerChat { uuid: String, name: String, message: String },
-    BlockBreak { uuid: String, x: i32, y: i32, z: i32 },
-    BlockPlace { uuid: String, x: i32, y: i32, z: i32, block_type: String },
-    ServerTick { tick_number: u64 },
-    Custom { event_type: String, data: String },
+    PlayerJoin {
+        uuid: String,
+        name: String,
+    },
+    PlayerLeave {
+        uuid: String,
+        name: String,
+    },
+    PlayerChat {
+        uuid: String,
+        name: String,
+        message: String,
+    },
+    BlockBreak {
+        uuid: String,
+        x: i32,
+        y: i32,
+        z: i32,
+    },
+    BlockPlace {
+        uuid: String,
+        x: i32,
+        y: i32,
+        z: i32,
+        block_type: String,
+    },
+    ServerTick {
+        tick_number: u64,
+    },
+    Custom {
+        event_type: String,
+        data: String,
+    },
 }
 
 impl Event {

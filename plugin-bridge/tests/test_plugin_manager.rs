@@ -26,7 +26,9 @@ fn test_discover_empty_directory() {
     let event_bus = Arc::new(EventBus::new());
     let mut manager = PluginManager::new(event_bus);
 
-    let count = manager.discover_and_load(dir.path().to_str().unwrap()).unwrap();
+    let count = manager
+        .discover_and_load(dir.path().to_str().unwrap())
+        .unwrap();
     assert_eq!(count, 0);
 }
 
@@ -94,6 +96,8 @@ fn test_discover_with_non_jar_files() {
     let event_bus = Arc::new(EventBus::new());
     let mut manager = PluginManager::new(event_bus);
 
-    let count = manager.discover_and_load(dir.path().to_str().unwrap()).unwrap();
+    let count = manager
+        .discover_and_load(dir.path().to_str().unwrap())
+        .unwrap();
     assert_eq!(count, 0);
 }

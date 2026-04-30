@@ -82,7 +82,10 @@ impl PluginManager {
             Err(e) => {
                 error!("Failed to initialize JVM: {e}");
                 warn!("Falling back to discovery-only mode — Java plugins will not be loaded");
-                info!("Discovered {} plugin JAR(s) in {plugin_dir} (JVM unavailable)", jar_paths.len());
+                info!(
+                    "Discovered {} plugin JAR(s) in {plugin_dir} (JVM unavailable)",
+                    jar_paths.len()
+                );
                 return Ok(jar_paths.len());
             }
         };
@@ -95,23 +98,20 @@ impl PluginManager {
                     match self.register_plugin(plugin_box) {
                         Ok(()) => count += 1,
                         Err(e) => {
-                            error!(
-                                "Failed to enable plugin from {}: {e}",
-                                jar_path.display()
-                            );
+                            error!("Failed to enable plugin from {}: {e}", jar_path.display());
                         }
                     }
                 }
                 Err(e) => {
-                    warn!(
-                        "Skipping malformed plugin {}: {e}",
-                        jar_path.display()
-                    );
+                    warn!("Skipping malformed plugin {}: {e}", jar_path.display());
                 }
             }
         }
 
-        info!("Loaded {count}/{} plugin(s) from {plugin_dir}", jar_paths.len());
+        info!(
+            "Loaded {count}/{} plugin(s) from {plugin_dir}",
+            jar_paths.len()
+        );
         Ok(count)
     }
 

@@ -1,7 +1,7 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use jni::objects::GlobalRef;
 use jni::JavaVM;
 use tracing::{debug, info, warn};
@@ -42,20 +42,12 @@ impl JavaPlugin {
         if env.exception_check().unwrap_or(false) {
             env.exception_describe().ok();
             env.exception_clear().ok();
-            bail!(
-                "Java exception while loading class: {}",
-                meta.main_class
-            );
+            bail!("Java exception while loading class: {}", meta.main_class);
         }
 
         let instance = env
             .new_object(plugin_class, "()V", &[])
-            .with_context(|| {
-                format!(
-                    "Failed to instantiate plugin class: {}",
-                    meta.main_class
-                )
-            })?;
+            .with_context(|| format!("Failed to instantiate plugin class: {}", meta.main_class))?;
 
         if env.exception_check().unwrap_or(false) {
             env.exception_describe().ok();
@@ -115,8 +107,8 @@ impl JavaPlugin {
             .unwrap_or_else(|| "UnknownPlugin".to_string());
         let version =
             Self::extract_yml_value(&contents, "version").unwrap_or_else(|| "0.0.0".to_string());
-        let description = Self::extract_yml_value(&contents, "description")
-            .unwrap_or_else(|| String::new());
+        let description =
+            Self::extract_yml_value(&contents, "description").unwrap_or_else(|| String::new());
         let main_class = Self::extract_yml_value(&contents, "main")
             .context("plugin.yml is missing required 'main' field")?;
 
@@ -167,11 +159,7 @@ impl JavaPlugin {
         if env.exception_check().unwrap_or(false) {
             env.exception_describe().ok();
             env.exception_clear().ok();
-            bail!(
-                "Java exception in {}.{}()",
-                self.meta.name,
-                method_name
-            );
+            bail!("Java exception in {}.{}()", self.meta.name, method_name);
         }
 
         Ok(())
@@ -197,10 +185,7 @@ impl Plugin for JavaPlugin {
         match self.call_java_method("onDisable") {
             Ok(()) => {}
             Err(e) => {
-                warn!(
-                    "Error calling onDisable for plugin {}: {e}",
-                    self.meta.name
-                );
+                warn!("Error calling onDisable for plugin {}: {e}", self.meta.name);
             }
         }
         Ok(())
@@ -210,10 +195,7 @@ impl Plugin for JavaPlugin {
 impl Drop for JavaPlugin {
     fn drop(&mut self) {
         if let Some(global_ref) = self.plugin_instance.take() {
-            debug!(
-                "Dropping global reference for plugin: {}",
-                self.meta.name
-            );
+            debug!("Dropping global reference for plugin: {}", self.meta.name);
             drop(global_ref);
         }
     }
