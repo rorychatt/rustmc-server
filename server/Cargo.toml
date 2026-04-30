@@ -5,6 +5,10 @@ edition = "2021"
 description = "A multi-threaded Rust Minecraft server with Paper plugin compatibility"
 license = "MIT"
 
+[lib]
+name = "rustmc_server"
+path = "src/lib.rs"
+
 [[bin]]
 name = "rustmc-server"
 path = "src/main.rs"
@@ -21,3 +25,13 @@ uuid = { workspace = true }
 bytes = { workspace = true }
 rand = { workspace = true }
 plugin-bridge = { path = "../plugin-bridge" }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+proptest = { workspace = true }
+criterion = { workspace = true }
+rustmc-test-utils = { path = "../test-utils" }
+
+[[bench]]
+name = "protocol_bench"
+harness = false

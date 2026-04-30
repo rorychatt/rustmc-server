@@ -1,9 +1,8 @@
+use anyhow::Result;
+use jni::JavaVM;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
-
-use anyhow::Result;
-use jni::JavaVM;
 use tracing::{error, info, warn};
 
 use super::events::EventBus;

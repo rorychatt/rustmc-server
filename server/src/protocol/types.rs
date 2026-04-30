@@ -17,7 +17,10 @@ impl VarInt {
             }
             shift += 7;
             if shift >= 32 {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "VarInt too long"));
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "VarInt too long",
+                ));
             }
         }
         Ok(VarInt(result))
@@ -56,7 +59,10 @@ impl VarInt {
 pub fn read_string(reader: &mut impl Read) -> io::Result<String> {
     let len = VarInt::read(reader)?.0 as usize;
     if len > 32767 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "String too long"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "String too long",
+        ));
     }
     let mut buf = vec![0u8; len];
     reader.read_exact(&mut buf)?;
@@ -100,5 +106,55 @@ mod tests {
         write_string(&mut buf, s).unwrap();
         let read_back = read_string(&mut Cursor::new(&buf)).unwrap();
         assert_eq!(s, read_back);
+    }
+
+    #[test]
+    fn test_string_empty() {
+        let s = "";
+        let mut buf = Vec::new();
+        write_string(&mut buf, s).unwrap();
+        let read_back = read_string(&mut Cursor::new(&buf)).unwrap();
+        assert_eq!(s, read_back);
+    }
+
+    #[test]
+    fn test_string_utf8() {
+        let s = "Hello, 世界! 🎮";
+        let mut buf = Vec::new();
+        write_string(&mut buf, s).unwrap();
+        let read_back = read_string(&mut Cursor::new(&buf)).unwrap();
+        assert_eq!(s, read_back);
+    }
+
+    #[test]
+    fn test_varint_too_long() {
+        let bad_data = vec![0x80, 0x80, 0x80, 0x80, 0x80, 0x01];
+        let result = VarInt::read(&mut &bad_data[..]);
+        assert!(result.is_err());
+    }
+
+    #[cfg(test)]
+    mod proptest_tests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #[test]
+            fn test_varint_roundtrip_proptest(n in any::<i32>()) {
+                let vi = VarInt(n);
+                let mut buf = Vec::new();
+                vi.write(&mut buf).unwrap();
+                let decoded = VarInt::read(&mut Cursor::new(&buf)).unwrap();
+                prop_assert_eq!(vi, decoded);
+            }
+
+            #[test]
+            fn test_string_roundtrip_proptest(s in "\\PC{0,100}") {
+                let mut buf = Vec::new();
+                write_string(&mut buf, &s).unwrap();
+                let decoded = read_string(&mut Cursor::new(&buf)).unwrap();
+                prop_assert_eq!(s, decoded);
+            }
+        }
     }
 }

@@ -1,5 +1,5 @@
 [workspace]
-members = ["server", "plugin-bridge"]
+members = ["server", "plugin-bridge", "test-utils"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -13,3 +13,5 @@ crossbeam = "0.8"
 uuid = { version = "1.11", features = ["v4"] }
 bytes = "1.9"
 rand = "0.8"
+proptest = "1.6"
+criterion = "0.5"
