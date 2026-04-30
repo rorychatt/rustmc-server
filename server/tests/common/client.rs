@@ -71,6 +71,7 @@ impl TestClient {
         self.send_packet(0x14, &data).await
     }
 
+    #[allow(dead_code)]
     pub async fn send_chat_message(&mut self, message: &str) -> anyhow::Result<()> {
         let mut data = Vec::new();
         write_string(&mut data, message)?;
