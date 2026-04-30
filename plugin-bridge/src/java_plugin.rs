@@ -108,7 +108,7 @@ impl JavaPlugin {
         let version =
             Self::extract_yml_value(&contents, "version").unwrap_or_else(|| "0.0.0".to_string());
         let description =
-            Self::extract_yml_value(&contents, "description").unwrap_or_else(|| String::new());
+            Self::extract_yml_value(&contents, "description").unwrap_or_default();
         let main_class = Self::extract_yml_value(&contents, "main")
             .context("plugin.yml is missing required 'main' field")?;
 
