@@ -1,4 +1,6 @@
 pub mod events;
+pub mod java_plugin;
+pub mod jvm;
 pub mod plugin;
 pub mod scheduler;
 
@@ -6,6 +8,8 @@ use std::sync::Arc;
 use tracing::info;
 
 pub use events::{Event, EventBus, EventHandler, EventPriority};
+pub use java_plugin::JavaPlugin;
+pub use jvm::JvmManager;
 pub use plugin::{Plugin, PluginManager, PluginMeta};
 pub use scheduler::{ScheduledTask, Scheduler, TaskHandle};
 
