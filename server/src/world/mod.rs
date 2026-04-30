@@ -1,7 +1,7 @@
 pub mod chunk;
 
 use chunk::{Chunk, ChunkPos};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use tracing::debug;
 use uuid::Uuid;
 
@@ -12,10 +12,11 @@ pub struct Player {
     pub x: f64,
     pub y: f64,
     pub z: f64,
+    pub loaded_chunks: HashSet<ChunkPos>,
 }
 
 pub struct World {
-    players: HashMap<Uuid, Player>,
+    pub players: HashMap<Uuid, Player>,
     chunks: HashMap<ChunkPos, Chunk>,
     next_entity_id: i32,
     tick_count: u64,
@@ -45,6 +46,7 @@ impl World {
                 x: 0.0,
                 y: 64.0,
                 z: 0.0,
+                loaded_chunks: HashSet::new(),
             },
         );
         entity_id
@@ -56,6 +58,14 @@ impl World {
 
     pub fn player_count(&self) -> usize {
         self.players.len()
+    }
+
+    pub fn update_player_position(&mut self, uuid: &Uuid, x: f64, y: f64, z: f64) {
+        if let Some(player) = self.players.get_mut(uuid) {
+            player.x = x;
+            player.y = y;
+            player.z = z;
+        }
     }
 
     pub fn tick(&mut self) {
@@ -97,6 +107,53 @@ impl Default for World {
     }
 }
 
+pub struct ChunkUpdate {
+    pub to_load: Vec<ChunkPos>,
+    pub to_unload: Vec<ChunkPos>,
+}
+
+impl World {
+    pub fn compute_chunk_updates(
+        &mut self,
+        uuid: &Uuid,
+        view_distance: i32,
+    ) -> Option<ChunkUpdate> {
+        let player = self.players.get_mut(uuid)?;
+
+        // Calculate current chunk position
+        let player_chunk = ChunkPos::from_block(player.x as i32, player.z as i32);
+
+        // Determine visible chunk set
+        let mut visible_chunks = HashSet::new();
+        for dx in -view_distance..=view_distance {
+            for dz in -view_distance..=view_distance {
+                visible_chunks.insert(ChunkPos::new(player_chunk.x + dx, player_chunk.z + dz));
+            }
+        }
+
+        // Compute differences
+        let to_load: Vec<ChunkPos> = visible_chunks
+            .difference(&player.loaded_chunks)
+            .copied()
+            .collect();
+
+        let to_unload: Vec<ChunkPos> = player
+            .loaded_chunks
+            .difference(&visible_chunks)
+            .copied()
+            .collect();
+
+        // Update loaded set
+        player.loaded_chunks = visible_chunks;
+
+        if to_load.is_empty() && to_unload.is_empty() {
+            return None;
+        }
+
+        Some(ChunkUpdate { to_load, to_unload })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -126,5 +183,65 @@ mod tests {
         for _ in 0..100 {
             world.tick();
         }
+    }
+
+    #[test]
+    fn test_update_player_position() {
+        let mut world = World::new();
+        let uuid = Uuid::new_v4();
+        world.add_player(uuid, "Test".to_string());
+
+        world.update_player_position(&uuid, 100.0, 65.0, 200.0);
+
+        let player = world.players.get(&uuid).unwrap();
+        assert_eq!(player.x, 100.0);
+        assert_eq!(player.y, 65.0);
+        assert_eq!(player.z, 200.0);
+    }
+
+    #[test]
+    fn test_compute_chunk_updates_initial() {
+        let mut world = World::new();
+        let uuid = Uuid::new_v4();
+        world.add_player(uuid, "Test".to_string());
+
+        let update = world.compute_chunk_updates(&uuid, 2).unwrap();
+        // View distance 2 means 5x5 grid = 25 chunks
+        assert_eq!(update.to_load.len(), 25);
+        assert_eq!(update.to_unload.len(), 0);
+    }
+
+    #[test]
+    fn test_compute_chunk_updates_move_one_chunk() {
+        let mut world = World::new();
+        let uuid = Uuid::new_v4();
+        world.add_player(uuid, "Test".to_string());
+
+        // Initial load at (0, 0)
+        world.compute_chunk_updates(&uuid, 2);
+
+        // Move to chunk (1, 0) - move 16 blocks in X
+        world.update_player_position(&uuid, 16.0, 64.0, 0.0);
+
+        let update = world.compute_chunk_updates(&uuid, 2).unwrap();
+        // Moving one chunk should load 5 chunks on the right, unload 5 on the left
+        assert_eq!(update.to_load.len(), 5);
+        assert_eq!(update.to_unload.len(), 5);
+    }
+
+    #[test]
+    fn test_compute_chunk_updates_no_move() {
+        let mut world = World::new();
+        let uuid = Uuid::new_v4();
+        world.add_player(uuid, "Test".to_string());
+
+        // Initial load
+        world.compute_chunk_updates(&uuid, 2);
+
+        // Stay in same chunk
+        world.update_player_position(&uuid, 1.0, 64.0, 1.0);
+
+        let update = world.compute_chunk_updates(&uuid, 2);
+        assert!(update.is_none());
     }
 }
