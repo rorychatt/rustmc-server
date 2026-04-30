@@ -6,6 +6,7 @@ use tokio::net::TcpStream;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
+use crate::protocol::chunk_data;
 use crate::protocol::handshake::{Handshake, NextState};
 use crate::protocol::login::{LoginStart, LoginSuccess};
 use crate::protocol::packet::{Packet, PacketWriter};
@@ -14,6 +15,7 @@ use crate::protocol::status::{
     decode_ping_request, decode_status_request, encode_pong_response, StatusResponse,
 };
 use crate::protocol::types::VarInt;
+use crate::world::chunk::ChunkPos;
 use crate::world::World;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,6 +30,7 @@ pub struct Connection {
     addr: SocketAddr,
     state: ConnectionState,
     world: Arc<RwLock<World>>,
+    compression_enabled: bool,
 }
 
 impl Connection {
@@ -36,6 +39,7 @@ impl Connection {
             addr,
             state: ConnectionState::Handshake,
             world,
+            compression_enabled: false,
         }
     }
 
@@ -126,7 +130,13 @@ impl Connection {
         packet: &Packet,
     ) -> std::io::Result<()> {
         let mut packet_data = Vec::new();
-        PacketWriter::new(&mut packet_data).write_packet(packet)?;
+        let mut packet_writer = PacketWriter::new(&mut packet_data);
+
+        if self.compression_enabled {
+            packet_writer.set_compression_threshold(256);
+        }
+
+        packet_writer.write_packet(packet)?;
         writer.write_all(&packet_data).await?;
         writer.flush().await
     }
@@ -206,6 +216,11 @@ impl Connection {
         let login = LoginStart::decode(data)?;
         info!("Player login: {} ({})", login.name, login.uuid);
 
+        // Enable compression with 256 byte threshold
+        let compression_packet = crate::protocol::login::encode_set_compression(256);
+        self.write_packet(writer, &compression_packet).await?;
+        self.compression_enabled = true;
+
         let success = LoginSuccess::new(login.uuid, login.name.clone());
         let packet = success.to_packet()?;
         self.write_packet(writer, &packet).await?;
@@ -222,6 +237,26 @@ impl Connection {
 
         let pos = play::encode_player_position_and_look(0.0, 64.0, 0.0, 0.0, 0.0, 0, 0);
         self.write_packet(writer, &pos).await?;
+
+        // Send chunk data for the player's view distance
+        let view_distance: i32 = 8;
+        let player_chunk_x = 0i32; // spawn at 0,0
+        let player_chunk_z = 0i32;
+
+        {
+            let world = self.world.read().await;
+            for cx in (player_chunk_x - view_distance)..=(player_chunk_x + view_distance) {
+                for cz in (player_chunk_z - view_distance)..=(player_chunk_z + view_distance) {
+                    let chunk_pos = ChunkPos::new(cx, cz);
+                    if let Some(chunk) = world.get_chunk(&chunk_pos) {
+                        let packet = chunk_data::encode_chunk_data(chunk)?;
+                        self.write_packet(writer, &packet).await?;
+                    }
+                }
+            }
+        }
+
+        info!("Sent chunk data to player {}", login.name);
 
         Ok(true)
     }
