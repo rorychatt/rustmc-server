@@ -1,0 +1,24 @@
+# RustMC Server Configuration Example
+
+[server]
+bind = "0.0.0.0:25565"
+max_players = 20
+motd = "RustMC Server - A Rust-powered Minecraft server"
+view_distance = 8
+simulation_distance = 8
+
+[world]
+# World type: "flat" or "normal" (normal not yet implemented)
+type = "flat"
+spawn_x = 0
+spawn_y = 64
+spawn_z = 0
+
+[plugins]
+directory = "plugins"
+
+[performance]
+# Number of Tokio worker threads (0 = auto-detect based on CPU cores)
+worker_threads = 0
+# Target ticks per second
+tps = 20
