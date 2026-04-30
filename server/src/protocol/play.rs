@@ -69,6 +69,73 @@ pub fn encode_player_position_and_look(
     Packet::new(0x3E, data)
 }
 
+pub fn encode_unload_chunk(chunk_x: i32, chunk_z: i32) -> Packet {
+    let mut data = Vec::new();
+    data.extend_from_slice(&chunk_x.to_be_bytes());
+    data.extend_from_slice(&chunk_z.to_be_bytes());
+    Packet::new(0x1F, data)
+}
+
+pub fn encode_chunk_data(chunk: &crate::world::chunk::Chunk) -> io::Result<Packet> {
+    use crate::world::chunk::{CHUNK_WIDTH, SECTION_HEIGHT};
+
+    let mut data = Vec::new();
+    // Chunk X
+    data.extend_from_slice(&chunk.pos.x.to_be_bytes());
+    // Chunk Z
+    data.extend_from_slice(&chunk.pos.z.to_be_bytes());
+
+    // Heightmaps (NBT)
+    data.push(0x0A); // TAG_Compound
+    data.extend_from_slice(&[0x00, 0x00]); // Empty name
+    data.push(0x00); // TAG_End
+
+    // Data (serialized chunk sections)
+    let mut chunk_data = Vec::new();
+    for section_idx in 0..24 {
+        if let Some(section) = chunk.get_section(section_idx) {
+            // Block count
+            let block_count = if section.is_empty() {
+                0u16
+            } else {
+                (CHUNK_WIDTH * CHUNK_WIDTH * SECTION_HEIGHT) as u16
+            };
+            chunk_data.extend_from_slice(&block_count.to_be_bytes());
+
+            // Palette (single value for flat sections)
+            chunk_data.push(0); // Bits per entry (0 = single-valued)
+            VarInt(0).write(&mut chunk_data)?; // Palette entry: Air (state ID 0)
+            VarInt(0).write(&mut chunk_data)?; // Data array length (0 for single-valued)
+
+            // Biomes (single-valued)
+            chunk_data.push(0); // Bits per entry
+            VarInt(0).write(&mut chunk_data)?; // Palette entry: Plains
+            VarInt(0).write(&mut chunk_data)?; // Data array length
+        }
+    }
+
+    VarInt(chunk_data.len() as i32).write(&mut data)?;
+    data.extend_from_slice(&chunk_data);
+
+    // Block entities count
+    VarInt(0).write(&mut data)?;
+
+    // Sky Light Mask
+    VarInt(0).write(&mut data)?;
+    // Block Light Mask
+    VarInt(0).write(&mut data)?;
+    // Empty Sky Light Mask
+    VarInt(0).write(&mut data)?;
+    // Empty Block Light Mask
+    VarInt(0).write(&mut data)?;
+    // Sky Light array count
+    VarInt(0).write(&mut data)?;
+    // Block Light array count
+    VarInt(0).write(&mut data)?;
+
+    Ok(Packet::new(0x27, data))
+}
+
 pub fn encode_login_play(entity_id: i32) -> io::Result<Packet> {
     let mut data = Vec::new();
     data.extend_from_slice(&entity_id.to_be_bytes()); // Entity ID

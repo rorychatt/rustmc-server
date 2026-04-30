@@ -17,6 +17,7 @@ use crate::protocol::status::{
 use crate::protocol::types::VarInt;
 use crate::world::chunk::ChunkPos;
 use crate::world::World;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionState {
@@ -30,6 +31,7 @@ pub struct Connection {
     addr: SocketAddr,
     state: ConnectionState,
     world: Arc<RwLock<World>>,
+    player_uuid: Option<Uuid>,
     compression_enabled: bool,
 }
 
@@ -39,6 +41,7 @@ impl Connection {
             addr,
             state: ConnectionState::Handshake,
             world,
+            player_uuid: None,
             compression_enabled: false,
         }
     }
@@ -226,6 +229,7 @@ impl Connection {
         self.write_packet(writer, &packet).await?;
 
         self.state = ConnectionState::Play;
+        self.player_uuid = Some(login.uuid);
 
         let entity_id = {
             let mut world = self.world.write().await;
@@ -238,21 +242,27 @@ impl Connection {
         let pos = play::encode_player_position_and_look(0.0, 64.0, 0.0, 0.0, 0.0, 0, 0);
         self.write_packet(writer, &pos).await?;
 
-        // Send chunk data for the player's view distance
-        let view_distance: i32 = 8;
-        let player_chunk_x = 0i32; // spawn at 0,0
-        let player_chunk_z = 0i32;
+        // Send initial chunks around spawn
+        let view_distance = 8;
+        let player_chunk_x = 0;
+        let player_chunk_z = 0;
 
+        let mut initial_chunks = std::collections::HashSet::new();
         {
-            let world = self.world.read().await;
+            let mut world = self.world.write().await;
             for cx in (player_chunk_x - view_distance)..=(player_chunk_x + view_distance) {
                 for cz in (player_chunk_z - view_distance)..=(player_chunk_z + view_distance) {
-                    let chunk_pos = ChunkPos::new(cx, cz);
-                    if let Some(chunk) = world.get_chunk(&chunk_pos) {
-                        let packet = chunk_data::encode_chunk_data(chunk)?;
-                        self.write_packet(writer, &packet).await?;
-                    }
+                    let pos = ChunkPos::new(cx, cz);
+                    initial_chunks.insert(pos);
+                    let chunk = world.get_or_generate_chunk(pos);
+                    let packet = chunk_data::encode_chunk_data(chunk)?;
+                    self.write_packet(writer, &packet).await?;
                 }
+            }
+
+            // Mark chunks as loaded for the player
+            if let Some(player) = world.players.get_mut(&login.uuid) {
+                player.loaded_chunks = initial_chunks;
             }
         }
 
@@ -265,12 +275,40 @@ impl Connection {
         &mut self,
         packet_id: i32,
         data: &[u8],
-        _writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
+        writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<bool> {
         match packet_id {
             0x14 => {
                 let pos = play::PlayerPosition::decode(data)?;
                 debug!("Player position: ({}, {}, {})", pos.x, pos.y, pos.z);
+
+                // Dynamic chunk loading
+                if let Some(uuid) = self.player_uuid {
+                    let mut world = self.world.write().await;
+                    world.update_player_position(&uuid, pos.x, pos.y, pos.z);
+
+                    let view_distance = 8;
+                    if let Some(update) = world.compute_chunk_updates(&uuid, view_distance) {
+                        // Send unload packets first
+                        for chunk_pos in &update.to_unload {
+                            let unload_packet = play::encode_unload_chunk(chunk_pos.x, chunk_pos.z);
+                            self.write_packet(writer, &unload_packet).await?;
+                        }
+
+                        // Send new chunk data
+                        for chunk_pos in &update.to_load {
+                            let chunk = world.get_or_generate_chunk(*chunk_pos);
+                            let chunk_packet = chunk_data::encode_chunk_data(chunk)?;
+                            self.write_packet(writer, &chunk_packet).await?;
+                        }
+
+                        debug!(
+                            "Chunk update: loaded {}, unloaded {}",
+                            update.to_load.len(),
+                            update.to_unload.len()
+                        );
+                    }
+                }
             }
             0x05 => {
                 let chat = play::ChatMessage::decode(data)?;
