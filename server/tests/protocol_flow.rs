@@ -97,6 +97,16 @@ async fn test_login_flow() {
         .await
         .expect("Failed to send login start");
 
+    // Read set compression packet (0x03)
+    let compression = client
+        .read_packet()
+        .await
+        .expect("Failed to read compression packet");
+    assert_eq!(compression.id, 0x03, "Expected set compression packet");
+
+    // Enable compression on client side
+    client.enable_compression(256);
+
     // Read login success
     let login_success = client
         .read_packet()
@@ -294,6 +304,16 @@ async fn test_concurrent_clients() {
                 .send_login_start(&username, uuid)
                 .await
                 .expect("Failed to send login");
+
+            // Read set compression packet (0x03)
+            let compression = client
+                .read_packet()
+                .await
+                .expect("Failed to read compression packet");
+            assert_eq!(compression.id, 0x03, "Expected set compression");
+
+            // Enable compression on client side
+            client.enable_compression(256);
 
             let login_success = client
                 .read_packet()
