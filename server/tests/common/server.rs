@@ -58,6 +58,8 @@ impl Drop for TestServer {
     fn drop(&mut self) {
         let _ = self.process.kill();
         let _ = self.process.wait();
+        // Give OS time to free the port
+        std::thread::sleep(Duration::from_millis(100));
     }
 }
 
