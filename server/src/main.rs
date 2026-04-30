@@ -1,8 +1,4 @@
-#![allow(dead_code)]
-
-mod network;
-mod protocol;
-mod world;
+use rustmc_server::network;
 
 use tracing_subscriber::EnvFilter;
 

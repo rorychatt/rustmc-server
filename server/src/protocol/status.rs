@@ -57,8 +57,7 @@ impl StatusResponse {
     }
 
     pub fn to_packet(&self) -> io::Result<Packet> {
-        let json =
-            serde_json::to_string(self).map_err(io::Error::other)?;
+        let json = serde_json::to_string(self).map_err(io::Error::other)?;
         let mut data = Vec::new();
         write_string(&mut data, &json)?;
         Ok(Packet::new(0x00, data))

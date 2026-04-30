@@ -39,12 +39,18 @@ pub struct ChunkSection {
     non_air_count: u16,
 }
 
-impl ChunkSection {
-    pub fn new() -> Self {
+impl Default for ChunkSection {
+    fn default() -> Self {
         Self {
             blocks: vec![BlockState::AIR; CHUNK_WIDTH * CHUNK_WIDTH * SECTION_HEIGHT],
             non_air_count: 0,
         }
+    }
+}
+
+impl ChunkSection {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn get_block(&self, x: usize, y: usize, z: usize) -> BlockState {
