@@ -116,4 +116,82 @@ mod tests {
         assert_eq!(pong.id, 0x01);
         assert_eq!(pong.data, data);
     }
+
+    mod proptest_tests {
+        use super::*;
+        use crate::protocol::types::read_string;
+        use proptest::prelude::*;
+
+        proptest! {
+            #[test]
+            fn test_ping_pong_roundtrip(payload in any::<i64>()) {
+                let data = payload.to_be_bytes().to_vec();
+                let decoded = decode_ping_request(&data).unwrap();
+                prop_assert_eq!(decoded, payload);
+
+                let pong = encode_pong_response(decoded);
+                prop_assert_eq!(pong.id, 0x01);
+                prop_assert_eq!(pong.data, data);
+            }
+
+            #[test]
+            fn test_ping_rejects_invalid_size(size in prop::sample::select(vec![0usize, 1, 2, 4, 7, 9, 16, 32])) {
+                prop_assume!(size != 8);
+                let data = vec![0u8; size];
+                let result = decode_ping_request(&data);
+                prop_assert!(result.is_err());
+                prop_assert!(result.unwrap_err().to_string().contains("8 bytes"));
+            }
+
+            #[test]
+            fn test_status_request_rejects_non_empty(data in prop::collection::vec(any::<u8>(), 1..100)) {
+                let result = decode_status_request(&data);
+                prop_assert!(result.is_err());
+                prop_assert!(result.unwrap_err().to_string().contains("no payload"));
+            }
+
+            #[test]
+            fn test_status_response_json_roundtrip(
+                online in 0..10000i32,
+                max_players in 1..10000i32,
+                version_name in "\\PC{1,50}",
+                protocol in 0..10000i32
+            ) {
+                let response = StatusResponse {
+                    version: StatusVersion {
+                        name: version_name.clone(),
+                        protocol,
+                    },
+                    players: StatusPlayers {
+                        max: max_players,
+                        online,
+                        sample: Vec::new(),
+                    },
+                    description: StatusDescription {
+                        text: "Test server".to_string(),
+                    },
+                    enforces_secure_chat: false,
+                };
+
+                let packet = response.to_packet().unwrap();
+                prop_assert_eq!(packet.id, 0x00);
+
+                // Verify we can parse the JSON back
+                let mut data_cursor = Cursor::new(&packet.data);
+                let json_str = read_string(&mut data_cursor).unwrap();
+                let parsed: StatusResponse = serde_json::from_str(&json_str).unwrap();
+
+                prop_assert_eq!(parsed.version.name, version_name);
+                prop_assert_eq!(parsed.version.protocol, protocol);
+                prop_assert_eq!(parsed.players.online, online);
+                prop_assert_eq!(parsed.players.max, max_players);
+            }
+        }
+
+        #[test]
+        fn test_status_request_accepts_empty() {
+            let result = decode_status_request(&[]);
+            assert!(result.is_ok());
+        }
+    }
 }
