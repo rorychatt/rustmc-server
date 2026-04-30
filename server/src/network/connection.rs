@@ -30,6 +30,7 @@ pub struct Connection {
     addr: SocketAddr,
     state: ConnectionState,
     world: Arc<RwLock<World>>,
+    compression_enabled: bool,
 }
 
 impl Connection {
@@ -38,6 +39,7 @@ impl Connection {
             addr,
             state: ConnectionState::Handshake,
             world,
+            compression_enabled: false,
         }
     }
 
@@ -128,7 +130,13 @@ impl Connection {
         packet: &Packet,
     ) -> std::io::Result<()> {
         let mut packet_data = Vec::new();
-        PacketWriter::new(&mut packet_data).write_packet(packet)?;
+        let mut packet_writer = PacketWriter::new(&mut packet_data);
+
+        if self.compression_enabled {
+            packet_writer.set_compression_threshold(256);
+        }
+
+        packet_writer.write_packet(packet)?;
         writer.write_all(&packet_data).await?;
         writer.flush().await
     }
@@ -207,6 +215,11 @@ impl Connection {
 
         let login = LoginStart::decode(data)?;
         info!("Player login: {} ({})", login.name, login.uuid);
+
+        // Enable compression with 256 byte threshold
+        let compression_packet = crate::protocol::login::encode_set_compression(256);
+        self.write_packet(writer, &compression_packet).await?;
+        self.compression_enabled = true;
 
         let success = LoginSuccess::new(login.uuid, login.name.clone());
         let packet = success.to_packet()?;
