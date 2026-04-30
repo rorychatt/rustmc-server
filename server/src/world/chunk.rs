@@ -1,4 +1,3 @@
-
 pub const CHUNK_WIDTH: usize = 16;
 pub const CHUNK_HEIGHT: usize = 384; // -64 to 320
 pub const SECTION_HEIGHT: usize = 16;
@@ -40,12 +39,18 @@ pub struct ChunkSection {
     non_air_count: u16,
 }
 
-impl ChunkSection {
-    pub fn new() -> Self {
+impl Default for ChunkSection {
+    fn default() -> Self {
         Self {
             blocks: vec![BlockState::AIR; CHUNK_WIDTH * CHUNK_WIDTH * SECTION_HEIGHT],
             non_air_count: 0,
         }
+    }
+}
+
+impl ChunkSection {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn get_block(&self, x: usize, y: usize, z: usize) -> BlockState {
@@ -77,7 +82,9 @@ impl Chunk {
     pub fn new(pos: ChunkPos) -> Self {
         Self {
             pos,
-            sections: (0..SECTIONS_PER_CHUNK).map(|_| ChunkSection::new()).collect(),
+            sections: (0..SECTIONS_PER_CHUNK)
+                .map(|_| ChunkSection::new())
+                .collect(),
         }
     }
 

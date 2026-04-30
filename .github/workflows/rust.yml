@@ -35,6 +35,12 @@ jobs:
     - name: Run tests
       run: cargo test --workspace
 
+    - name: Run doc tests
+      run: cargo test --workspace --doc
+
+    - name: Build benchmarks
+      run: cargo bench --workspace --no-run
+
     - name: Clippy
       run: cargo clippy --workspace -- -D warnings
 
