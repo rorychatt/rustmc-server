@@ -1,5 +1,5 @@
-use std::collections::BinaryHeap;
 use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 use std::sync::{Arc, Mutex};
 
 type TaskFn = Arc<dyn Fn() + Send + Sync>;
@@ -51,7 +51,11 @@ impl Scheduler {
         }
     }
 
-    pub fn schedule_delayed(&self, delay_ticks: u64, task: impl Fn() + Send + Sync + 'static) -> TaskHandle {
+    pub fn schedule_delayed(
+        &self,
+        delay_ticks: u64,
+        task: impl Fn() + Send + Sync + 'static,
+    ) -> TaskHandle {
         let id = {
             let mut next = self.next_id.lock().unwrap();
             let id = *next;
@@ -112,7 +116,7 @@ impl Scheduler {
         loop {
             let task = {
                 let mut tasks = self.tasks.lock().unwrap();
-                if tasks.peek().map_or(false, |t| t.execute_at_tick <= tick) {
+                if tasks.peek().is_some_and(|t| t.execute_at_tick <= tick) {
                     tasks.pop()
                 } else {
                     None

@@ -1,6 +1,4 @@
-mod protocol;
-mod network;
-mod world;
+use rustmc_server::network;
 
 use tracing_subscriber::EnvFilter;
 

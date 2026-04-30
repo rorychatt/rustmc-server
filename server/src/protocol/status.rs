@@ -1,7 +1,7 @@
-use std::io::{self, Cursor, Read};
-use serde::{Deserialize, Serialize};
-use super::types::write_string;
 use super::packet::Packet;
+use super::types::write_string;
+use serde::{Deserialize, Serialize};
+use std::io::{self, Cursor, Read};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StatusResponse {
@@ -57,8 +57,7 @@ impl StatusResponse {
     }
 
     pub fn to_packet(&self) -> io::Result<Packet> {
-        let json = serde_json::to_string(self)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let json = serde_json::to_string(self).map_err(io::Error::other)?;
         let mut data = Vec::new();
         write_string(&mut data, &json)?;
         Ok(Packet::new(0x00, data))
@@ -69,13 +68,19 @@ pub fn decode_status_request(data: &[u8]) -> io::Result<()> {
     if data.is_empty() {
         Ok(())
     } else {
-        Err(io::Error::new(io::ErrorKind::InvalidData, "Status request should have no payload"))
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Status request should have no payload",
+        ))
     }
 }
 
 pub fn decode_ping_request(data: &[u8]) -> io::Result<i64> {
     if data.len() != 8 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "Ping payload must be 8 bytes"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Ping payload must be 8 bytes",
+        ));
     }
     let mut cursor = Cursor::new(data);
     let mut buf = [0u8; 8];

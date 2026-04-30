@@ -1,5 +1,5 @@
+use super::types::{read_string, VarInt};
 use std::io::{self, Cursor, Read};
-use super::types::{VarInt, read_string};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NextState {
@@ -27,10 +27,12 @@ impl Handshake {
         let next_state = match next_state_raw {
             1 => NextState::Status,
             2 => NextState::Login,
-            _ => return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("Invalid next_state: {next_state_raw}"),
-            )),
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Invalid next_state: {next_state_raw}"),
+                ))
+            }
         };
 
         Ok(Handshake {
@@ -45,7 +47,7 @@ impl Handshake {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::types::{VarInt, write_string};
+    use crate::protocol::types::{write_string, VarInt};
 
     #[test]
     fn test_handshake_decode() {

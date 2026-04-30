@@ -1,9 +1,9 @@
+use super::events::EventBus;
+use anyhow::Result;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
-use anyhow::Result;
 use tracing::{info, warn};
-use super::events::EventBus;
 
 #[derive(Debug, Clone)]
 pub struct PluginMeta {
