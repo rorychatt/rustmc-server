@@ -29,7 +29,10 @@ impl TestServer {
                 return Err(anyhow::anyhow!("Server failed to start within 10 seconds"));
             }
 
-            if TcpListener::bind(format!("127.0.0.1:{port}")).await.is_err() {
+            if TcpListener::bind(format!("127.0.0.1:{port}"))
+                .await
+                .is_err()
+            {
                 // Port is in use, server is likely ready
                 break;
             }
@@ -40,7 +43,10 @@ impl TestServer {
         // Give it a bit more time to fully initialize
         sleep(Duration::from_millis(500)).await;
 
-        Ok(TestServer { process: child, port })
+        Ok(TestServer {
+            process: child,
+            port,
+        })
     }
 
     pub fn port(&self) -> u16 {

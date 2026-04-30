@@ -13,7 +13,11 @@ impl TestClient {
         Ok(TestClient { stream })
     }
 
-    pub async fn send_handshake(&mut self, protocol_version: i32, next_state: u8) -> anyhow::Result<()> {
+    pub async fn send_handshake(
+        &mut self,
+        protocol_version: i32,
+        next_state: u8,
+    ) -> anyhow::Result<()> {
         let mut data = Vec::new();
         write_varint(&mut data, protocol_version)?;
         write_string(&mut data, "localhost")?;
@@ -43,7 +47,13 @@ impl TestClient {
         self.send_packet(0x03, &[]).await
     }
 
-    pub async fn send_player_position(&mut self, x: f64, y: f64, z: f64, on_ground: bool) -> anyhow::Result<()> {
+    pub async fn send_player_position(
+        &mut self,
+        x: f64,
+        y: f64,
+        z: f64,
+        on_ground: bool,
+    ) -> anyhow::Result<()> {
         let mut data = Vec::new();
         data.extend_from_slice(&x.to_be_bytes());
         data.extend_from_slice(&y.to_be_bytes());
@@ -86,7 +96,10 @@ impl TestClient {
         let data_start = cursor.position() as usize;
         let data = payload[data_start..].to_vec();
 
-        Ok(RawPacket { id: packet_id, data })
+        Ok(RawPacket {
+            id: packet_id,
+            data,
+        })
     }
 
     async fn read_varint(&mut self) -> anyhow::Result<i32> {
