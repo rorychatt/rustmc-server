@@ -71,6 +71,14 @@ impl ChunkSection {
     pub fn is_empty(&self) -> bool {
         self.non_air_count == 0
     }
+
+    pub fn non_air_count(&self) -> u16 {
+        self.non_air_count
+    }
+
+    pub fn blocks(&self) -> &[BlockState] {
+        &self.blocks
+    }
 }
 
 pub struct Chunk {
