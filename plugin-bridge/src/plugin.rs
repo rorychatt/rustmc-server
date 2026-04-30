@@ -1,9 +1,14 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
+
 use anyhow::Result;
-use tracing::{info, warn};
+use jni::JavaVM;
+use tracing::{error, info, warn};
+
 use super::events::EventBus;
+use super::java_plugin::JavaPlugin;
+use super::jvm::JvmManager;
 
 #[derive(Debug, Clone)]
 pub struct PluginMeta {
@@ -22,6 +27,7 @@ pub trait Plugin: Send + Sync {
 pub struct PluginManager {
     plugins: HashMap<String, Box<dyn Plugin>>,
     event_bus: Arc<EventBus>,
+    jvm: Option<&'static JavaVM>,
 }
 
 impl PluginManager {
@@ -29,7 +35,17 @@ impl PluginManager {
         Self {
             plugins: HashMap::new(),
             event_bus,
+            jvm: None,
         }
+    }
+
+    fn ensure_jvm(&mut self, classpath_entries: &[&str]) -> Result<&'static JavaVM> {
+        if let Some(jvm) = self.jvm {
+            return Ok(jvm);
+        }
+        let jvm = JvmManager::initialize(classpath_entries)?;
+        self.jvm = Some(jvm);
+        Ok(jvm)
     }
 
     pub fn discover_and_load(&mut self, plugin_dir: &str) -> Result<usize> {
@@ -40,23 +56,62 @@ impl PluginManager {
             return Ok(0);
         }
 
-        let mut count = 0;
+        let mut jar_paths = Vec::new();
         for entry in std::fs::read_dir(path)? {
             let entry = entry?;
             let file_path = entry.path();
             if file_path.extension().and_then(|e| e.to_str()) == Some("jar") {
                 info!("Found plugin JAR: {}", file_path.display());
-                // JNI loading would happen here in a full implementation.
-                // For now, log discovery but don't attempt JNI load without a JVM.
-                warn!(
-                    "JNI plugin loading not yet implemented - discovered: {}",
-                    file_path.display()
-                );
-                count += 1;
+                jar_paths.push(file_path);
             }
         }
 
-        info!("Discovered {count} plugin(s) in {plugin_dir}");
+        if jar_paths.is_empty() {
+            info!("No plugin JARs found in {plugin_dir}");
+            return Ok(0);
+        }
+
+        let classpath_strs: Vec<String> = jar_paths
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+        let classpath_refs: Vec<&str> = classpath_strs.iter().map(|s| s.as_str()).collect();
+
+        let jvm = match self.ensure_jvm(&classpath_refs) {
+            Ok(jvm) => jvm,
+            Err(e) => {
+                error!("Failed to initialize JVM: {e}");
+                warn!("Falling back to discovery-only mode — Java plugins will not be loaded");
+                info!("Discovered {} plugin JAR(s) in {plugin_dir} (JVM unavailable)", jar_paths.len());
+                return Ok(jar_paths.len());
+            }
+        };
+
+        let mut count = 0;
+        for jar_path in &jar_paths {
+            match JavaPlugin::new(jvm, jar_path) {
+                Ok(plugin) => {
+                    let plugin_box: Box<dyn Plugin> = Box::new(plugin);
+                    match self.register_plugin(plugin_box) {
+                        Ok(()) => count += 1,
+                        Err(e) => {
+                            error!(
+                                "Failed to enable plugin from {}: {e}",
+                                jar_path.display()
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        "Skipping malformed plugin {}: {e}",
+                        jar_path.display()
+                    );
+                }
+            }
+        }
+
+        info!("Loaded {count}/{} plugin(s) from {plugin_dir}", jar_paths.len());
         Ok(count)
     }
 
@@ -81,6 +136,10 @@ impl PluginManager {
         let names: Vec<_> = self.plugins.keys().cloned().collect();
         for name in names {
             self.disable_plugin(&name)?;
+        }
+        if self.jvm.is_some() {
+            JvmManager::shutdown();
+            self.jvm = None;
         }
         Ok(())
     }
