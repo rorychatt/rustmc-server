@@ -1,3 +1,4 @@
+use flate2::read::ZlibDecoder;
 use std::io::{Cursor, Read, Write};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -5,12 +6,20 @@ use uuid::Uuid;
 
 pub struct TestClient {
     stream: TcpStream,
+    compression_threshold: Option<i32>,
 }
 
 impl TestClient {
     pub async fn connect(port: u16) -> anyhow::Result<Self> {
         let stream = TcpStream::connect(format!("127.0.0.1:{port}")).await?;
-        Ok(TestClient { stream })
+        Ok(TestClient {
+            stream,
+            compression_threshold: None,
+        })
+    }
+
+    pub fn enable_compression(&mut self, threshold: i32) {
+        self.compression_threshold = Some(threshold);
     }
 
     pub async fn send_handshake(
@@ -62,6 +71,7 @@ impl TestClient {
         self.send_packet(0x14, &data).await
     }
 
+    #[allow(dead_code)]
     pub async fn send_chat_message(&mut self, message: &str) -> anyhow::Result<()> {
         let mut data = Vec::new();
         write_string(&mut data, message)?;
@@ -83,23 +93,57 @@ impl TestClient {
     }
 
     pub async fn read_packet(&mut self) -> anyhow::Result<RawPacket> {
-        let length = self.read_varint().await?;
-        if length == 0 {
+        let packet_length = self.read_varint().await?;
+        if packet_length == 0 {
             return Err(anyhow::anyhow!("Zero-length packet"));
         }
 
-        let mut payload = vec![0u8; length as usize];
-        self.stream.read_exact(&mut payload).await?;
+        match self.compression_threshold {
+            None => {
+                // No compression
+                let mut payload = vec![0u8; packet_length as usize];
+                self.stream.read_exact(&mut payload).await?;
 
-        let mut cursor = Cursor::new(&payload);
-        let packet_id = read_varint(&mut cursor)?;
-        let data_start = cursor.position() as usize;
-        let data = payload[data_start..].to_vec();
+                let mut cursor = Cursor::new(&payload);
+                let packet_id = read_varint(&mut cursor)?;
+                let data_start = cursor.position() as usize;
+                let data = payload[data_start..].to_vec();
 
-        Ok(RawPacket {
-            id: packet_id,
-            data,
-        })
+                Ok(RawPacket {
+                    id: packet_id,
+                    data,
+                })
+            }
+            Some(_) => {
+                // Compression enabled
+                let data_length = self.read_varint().await?;
+                let remaining_length = packet_length - varint_size(data_length);
+
+                let mut compressed_or_uncompressed = vec![0u8; remaining_length as usize];
+                self.stream.read_exact(&mut compressed_or_uncompressed).await?;
+
+                let payload = if data_length == 0 {
+                    // Below threshold - uncompressed
+                    compressed_or_uncompressed
+                } else {
+                    // Above threshold - decompress
+                    let mut decoder = ZlibDecoder::new(&compressed_or_uncompressed[..]);
+                    let mut decompressed = Vec::new();
+                    decoder.read_to_end(&mut decompressed)?;
+                    decompressed
+                };
+
+                let mut cursor = Cursor::new(&payload);
+                let packet_id = read_varint(&mut cursor)?;
+                let data_start = cursor.position() as usize;
+                let data = payload[data_start..].to_vec();
+
+                Ok(RawPacket {
+                    id: packet_id,
+                    data,
+                })
+            }
+        }
     }
 
     async fn read_varint(&mut self) -> anyhow::Result<i32> {
@@ -175,4 +219,17 @@ pub fn read_string(reader: &mut impl Read) -> anyhow::Result<String> {
     let mut buf = vec![0u8; len];
     reader.read_exact(&mut buf)?;
     Ok(String::from_utf8(buf)?)
+}
+
+fn varint_size(value: i32) -> i32 {
+    let mut val = value as u32;
+    let mut size = 0;
+    loop {
+        val >>= 7;
+        size += 1;
+        if val == 0 {
+            break;
+        }
+    }
+    size
 }

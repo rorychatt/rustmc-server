@@ -128,7 +128,7 @@ mod tests {
 
     #[test]
     fn test_varint_too_long() {
-        let bad_data = vec![0x80, 0x80, 0x80, 0x80, 0x80, 0x01];
+        let bad_data = [0x80, 0x80, 0x80, 0x80, 0x80, 0x01];
         let result = VarInt::read(&mut &bad_data[..]);
         assert!(result.is_err());
     }

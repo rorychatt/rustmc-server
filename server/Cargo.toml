@@ -25,6 +25,7 @@ uuid = { workspace = true }
 bytes = { workspace = true }
 rand = { workspace = true }
 plugin-bridge = { path = "../plugin-bridge" }
+flate2 = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
