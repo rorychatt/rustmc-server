@@ -6,6 +6,7 @@ use tokio::net::TcpStream;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
+use crate::protocol::chunk_data;
 use crate::protocol::handshake::{Handshake, NextState};
 use crate::protocol::login::{LoginStart, LoginSuccess};
 use crate::protocol::packet::{Packet, PacketWriter};
@@ -31,6 +32,7 @@ pub struct Connection {
     state: ConnectionState,
     world: Arc<RwLock<World>>,
     player_uuid: Option<Uuid>,
+    compression_enabled: bool,
 }
 
 impl Connection {
@@ -40,6 +42,7 @@ impl Connection {
             state: ConnectionState::Handshake,
             world,
             player_uuid: None,
+            compression_enabled: false,
         }
     }
 
@@ -130,7 +133,13 @@ impl Connection {
         packet: &Packet,
     ) -> std::io::Result<()> {
         let mut packet_data = Vec::new();
-        PacketWriter::new(&mut packet_data).write_packet(packet)?;
+        let mut packet_writer = PacketWriter::new(&mut packet_data);
+
+        if self.compression_enabled {
+            packet_writer.set_compression_threshold(256);
+        }
+
+        packet_writer.write_packet(packet)?;
         writer.write_all(&packet_data).await?;
         writer.flush().await
     }
@@ -210,6 +219,11 @@ impl Connection {
         let login = LoginStart::decode(data)?;
         info!("Player login: {} ({})", login.name, login.uuid);
 
+        // Enable compression with 256 byte threshold
+        let compression_packet = crate::protocol::login::encode_set_compression(256);
+        self.write_packet(writer, &compression_packet).await?;
+        self.compression_enabled = true;
+
         let success = LoginSuccess::new(login.uuid, login.name.clone());
         let packet = success.to_packet()?;
         self.write_packet(writer, &packet).await?;
@@ -241,7 +255,7 @@ impl Connection {
                     let pos = ChunkPos::new(cx, cz);
                     initial_chunks.insert(pos);
                     let chunk = world.get_or_generate_chunk(pos);
-                    let packet = play::encode_chunk_data(chunk)?;
+                    let packet = chunk_data::encode_chunk_data(chunk)?;
                     self.write_packet(writer, &packet).await?;
                 }
             }
@@ -251,6 +265,8 @@ impl Connection {
                 player.loaded_chunks = initial_chunks;
             }
         }
+
+        info!("Sent chunk data to player {}", login.name);
 
         Ok(true)
     }
@@ -282,7 +298,7 @@ impl Connection {
                         // Send new chunk data
                         for chunk_pos in &update.to_load {
                             let chunk = world.get_or_generate_chunk(*chunk_pos);
-                            let chunk_packet = play::encode_chunk_data(chunk)?;
+                            let chunk_packet = chunk_data::encode_chunk_data(chunk)?;
                             self.write_packet(writer, &chunk_packet).await?;
                         }
 

@@ -13,3 +13,9 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 crossbeam = { workspace = true }
 uuid = { workspace = true }
+jni = { version = "0.21", features = ["invocation"] }
+java-locator = "0.1"
+zip = "2.2"
+
+[dev-dependencies]
+tempfile = "3.14"
