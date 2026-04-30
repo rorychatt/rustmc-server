@@ -116,7 +116,7 @@ impl Scheduler {
         loop {
             let task = {
                 let mut tasks = self.tasks.lock().unwrap();
-                if tasks.peek().map_or(false, |t| t.execute_at_tick <= tick) {
+                if tasks.peek().is_some_and(|t| t.execute_at_tick <= tick) {
                     tasks.pop()
                 } else {
                     None
