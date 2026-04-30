@@ -18,8 +18,8 @@ impl PalettedContainer {
         let mut palette: Vec<i32> = Vec::new();
 
         for block in blocks {
-            if !palette_map.contains_key(&block.0) {
-                palette_map.insert(block.0, palette.len());
+            if let std::collections::hash_map::Entry::Vacant(e) = palette_map.entry(block.0) {
+                e.insert(palette.len());
                 palette.push(block.0 as i32);
             }
         }
@@ -44,7 +44,7 @@ impl PalettedContainer {
         let use_direct = palette.len() > 256;
         let values_per_long = 64 / bits_per_entry as usize;
         let total_blocks = blocks.len();
-        let num_longs = (total_blocks + values_per_long - 1) / values_per_long;
+        let num_longs = total_blocks.div_ceil(values_per_long);
         let mut data = vec![0i64; num_longs];
 
         for (i, block) in blocks.iter().enumerate() {
@@ -97,7 +97,7 @@ impl PalettedContainer {
 fn pack_heightmap(heights: &[u16; 256]) -> Vec<i64> {
     let bits_per_value = 9;
     let values_per_long = 64 / bits_per_value;
-    let num_longs = (256 + values_per_long - 1) / values_per_long;
+    let num_longs = 256_usize.div_ceil(values_per_long);
     let mut data = vec![0i64; num_longs];
 
     for (i, &height) in heights.iter().enumerate() {
@@ -180,7 +180,7 @@ fn write_light_data(writer: &mut impl Write) -> io::Result<()> {
     writer.write_all(&[1])?;
 
     // Sky light mask: all sections present
-    let mask_longs = (section_count + 63) / 64;
+    let mask_longs = section_count.div_ceil(64);
     VarInt(mask_longs as i32).write(writer)?;
     let mut mask = 0i64;
     for i in 0..section_count {
