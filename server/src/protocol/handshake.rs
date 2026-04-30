@@ -63,4 +63,65 @@ mod tests {
         assert_eq!(handshake.server_port, 25565);
         assert_eq!(handshake.next_state, NextState::Status);
     }
+
+    mod proptest_tests {
+        use super::*;
+        use crate::protocol::types::{write_string, VarInt};
+        use proptest::prelude::*;
+
+        proptest! {
+            #[test]
+            fn test_handshake_roundtrip_valid(
+                protocol_version in 0..10000i32,
+                server_address in "\\PC{0,255}",
+                server_port in any::<u16>(),
+                next_state_val in prop::sample::select(vec![1i32, 2i32])
+            ) {
+                let mut data = Vec::new();
+                VarInt(protocol_version).write(&mut data).unwrap();
+                write_string(&mut data, &server_address).unwrap();
+                data.extend_from_slice(&server_port.to_be_bytes());
+                VarInt(next_state_val).write(&mut data).unwrap();
+
+                let handshake = Handshake::decode(&data).unwrap();
+                prop_assert_eq!(handshake.protocol_version, protocol_version);
+                prop_assert_eq!(handshake.server_address, server_address);
+                prop_assert_eq!(handshake.server_port, server_port);
+
+                let expected_state = if next_state_val == 1 {
+                    NextState::Status
+                } else {
+                    NextState::Login
+                };
+                prop_assert_eq!(handshake.next_state, expected_state);
+            }
+
+            #[test]
+            fn test_handshake_rejects_invalid_next_state(
+                protocol_version in 0..10000i32,
+                server_address in "\\PC{0,100}",
+                server_port in any::<u16>(),
+                invalid_next_state in prop::sample::select(vec![0i32, 3i32, -1i32, 100i32])
+            ) {
+                let mut data = Vec::new();
+                VarInt(protocol_version).write(&mut data).unwrap();
+                write_string(&mut data, &server_address).unwrap();
+                data.extend_from_slice(&server_port.to_be_bytes());
+                VarInt(invalid_next_state).write(&mut data).unwrap();
+
+                let result = Handshake::decode(&data);
+                prop_assert!(result.is_err());
+                prop_assert!(result.unwrap_err().to_string().contains("Invalid next_state"));
+            }
+
+            #[test]
+            fn test_handshake_rejects_truncated(protocol_version in 0..10000i32) {
+                let mut data = Vec::new();
+                VarInt(protocol_version).write(&mut data).unwrap();
+
+                let result = Handshake::decode(&data);
+                prop_assert!(result.is_err());
+            }
+        }
+    }
 }

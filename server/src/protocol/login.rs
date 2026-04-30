@@ -70,4 +70,51 @@ mod tests {
         assert_eq!(packet.id, 0x02);
         assert!(packet.data.len() > 16); // UUID + string
     }
+
+    mod proptest_tests {
+        use super::*;
+        use proptest::prelude::*;
+
+        // Valid Minecraft username pattern: 3-16 chars, alphanumeric + underscore
+        fn minecraft_username_strategy() -> impl Strategy<Value = String> {
+            "[a-zA-Z0-9_]{3,16}"
+        }
+
+        proptest! {
+            #[test]
+            fn test_login_start_roundtrip(username in minecraft_username_strategy(), uuid_bytes in prop::array::uniform16(any::<u8>())) {
+                let uuid = Uuid::from_bytes(uuid_bytes);
+                let mut data = Vec::new();
+                write_string(&mut data, &username).unwrap();
+                data.extend_from_slice(uuid.as_bytes());
+
+                let login = LoginStart::decode(&data).unwrap();
+                prop_assert_eq!(login.name, username);
+                prop_assert_eq!(login.uuid, uuid);
+            }
+
+            #[test]
+            fn test_login_success_roundtrip(username in minecraft_username_strategy(), uuid_bytes in prop::array::uniform16(any::<u8>())) {
+                let uuid = Uuid::from_bytes(uuid_bytes);
+                let success = LoginSuccess::new(uuid, username.clone());
+                let packet = success.to_packet().unwrap();
+
+                prop_assert_eq!(packet.id, 0x02);
+
+                // Verify packet contains UUID at the start
+                let uuid_from_packet = Uuid::from_bytes(packet.data[0..16].try_into().unwrap());
+                prop_assert_eq!(uuid_from_packet, uuid);
+            }
+
+            #[test]
+            fn test_set_compression_encoding(threshold in any::<i32>()) {
+                let packet = encode_set_compression(threshold);
+                prop_assert_eq!(packet.id, 0x03);
+
+                // Decode the threshold from packet data
+                let decoded_threshold = VarInt::read(&mut Cursor::new(&packet.data)).unwrap().0;
+                prop_assert_eq!(decoded_threshold, threshold);
+            }
+        }
+    }
 }

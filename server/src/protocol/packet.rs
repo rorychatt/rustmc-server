@@ -292,4 +292,58 @@ mod tests {
         assert_eq!(packet.id, read_back.id);
         assert_eq!(packet.data, read_back.data);
     }
+
+    mod proptest_tests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #[test]
+            fn test_packet_roundtrip(id in any::<i32>(), data in prop::collection::vec(any::<u8>(), 0..32768)) {
+                let packet = Packet::new(id, data.clone());
+                let mut buf = Vec::new();
+                PacketWriter::new(&mut buf).write_packet(&packet).unwrap();
+
+                let read_back = PacketReader::new(Cursor::new(&buf)).read_packet().unwrap();
+                prop_assert_eq!(packet.id, read_back.id);
+                prop_assert_eq!(packet.data, read_back.data);
+            }
+
+            #[test]
+            fn test_packet_valid_sizes(id in any::<i32>(), size in 0..32768usize) {
+                let data = vec![0u8; size];
+                let packet = Packet::new(id, data);
+                let mut buf = Vec::new();
+                let result = PacketWriter::new(&mut buf).write_packet(&packet);
+                prop_assert!(result.is_ok());
+            }
+
+            #[test]
+            fn test_packet_reader_rejects_oversized(size in 2_097_153i32..3_000_000i32) {
+                let mut buf = Vec::new();
+                VarInt(size).write(&mut buf).unwrap();
+                let result = PacketReader::new(Cursor::new(&buf)).read_packet();
+                prop_assert!(result.is_err());
+                prop_assert!(result.unwrap_err().to_string().contains("too large"));
+            }
+
+            #[test]
+            fn test_packet_reader_rejects_truncated(claimed_size in 10..100usize, actual_size in 1..9usize) {
+                let mut buf = Vec::new();
+                VarInt(claimed_size as i32).write(&mut buf).unwrap();
+                buf.extend_from_slice(&vec![0u8; actual_size]);
+                let result = PacketReader::new(Cursor::new(&buf)).read_packet();
+                prop_assert!(result.is_err());
+            }
+        }
+
+        #[test]
+        fn test_packet_reader_rejects_zero_length() {
+            let mut buf = Vec::new();
+            VarInt(0).write(&mut buf).unwrap();
+            let result = PacketReader::new(Cursor::new(&buf)).read_packet();
+            assert!(result.is_err());
+            assert!(result.unwrap_err().to_string().contains("Zero-length"));
+        }
+    }
 }
