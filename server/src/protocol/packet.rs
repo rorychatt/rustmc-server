@@ -60,7 +60,10 @@ impl<R: Read> PacketReader<R> {
                 let data_start = cursor.position() as usize;
                 let data = payload[data_start..].to_vec();
 
-                Ok(Packet { id: packet_id, data })
+                Ok(Packet {
+                    id: packet_id,
+                    data,
+                })
             }
             Some(_) => {
                 // Read data length
@@ -86,7 +89,10 @@ impl<R: Read> PacketReader<R> {
                 let data_start = cursor.position() as usize;
                 let data = payload[data_start..].to_vec();
 
-                Ok(Packet { id: packet_id, data })
+                Ok(Packet {
+                    id: packet_id,
+                    data,
+                })
             }
         }
     }
@@ -182,7 +188,10 @@ mod tests {
         let data_length = VarInt::read(&mut cursor).unwrap().0;
 
         assert!(packet_length > 0, "Packet length must be positive");
-        assert!(data_length > 0, "Data length must be positive for compressed packet");
+        assert!(
+            data_length > 0,
+            "Data length must be positive for compressed packet"
+        );
         assert!(
             data_length > 256,
             "Data length should be above threshold (256)"
@@ -241,7 +250,11 @@ mod tests {
             reader.set_compression_threshold(256);
             let read_back = reader.read_packet().unwrap();
 
-            assert_eq!(packet.id, read_back.id, "Packet ID mismatch for size {}", size);
+            assert_eq!(
+                packet.id, read_back.id,
+                "Packet ID mismatch for size {}",
+                size
+            );
             assert_eq!(
                 packet.data, read_back.data,
                 "Packet data mismatch for size {}",
