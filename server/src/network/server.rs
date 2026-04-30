@@ -3,8 +3,8 @@ use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use tracing::{error, info};
 
-use crate::world::World;
 use super::connection::Connection;
+use crate::world::World;
 
 pub struct Server {
     addr: String,

@@ -1,9 +1,9 @@
 pub mod chunk;
 
-use std::collections::HashMap;
-use uuid::Uuid;
-use tracing::debug;
 use chunk::{Chunk, ChunkPos};
+use std::collections::HashMap;
+use tracing::debug;
+use uuid::Uuid;
 
 pub struct Player {
     pub uuid: Uuid,
@@ -36,14 +36,17 @@ impl World {
     pub fn add_player(&mut self, uuid: Uuid, name: String) -> i32 {
         let entity_id = self.next_entity_id;
         self.next_entity_id += 1;
-        self.players.insert(uuid, Player {
+        self.players.insert(
             uuid,
-            name,
-            entity_id,
-            x: 0.0,
-            y: 64.0,
-            z: 0.0,
-        });
+            Player {
+                uuid,
+                name,
+                entity_id,
+                x: 0.0,
+                y: 64.0,
+                z: 0.0,
+            },
+        );
         entity_id
     }
 
@@ -58,8 +61,12 @@ impl World {
     pub fn tick(&mut self) {
         self.tick_count += 1;
         if self.tick_count % 600 == 0 {
-            debug!("World tick {}, {} players, {} chunks loaded",
-                self.tick_count, self.players.len(), self.chunks.len());
+            debug!(
+                "World tick {}, {} players, {} chunks loaded",
+                self.tick_count,
+                self.players.len(),
+                self.chunks.len()
+            );
         }
     }
 
@@ -78,7 +85,9 @@ impl World {
     }
 
     pub fn get_or_generate_chunk(&mut self, pos: ChunkPos) -> &Chunk {
-        self.chunks.entry(pos).or_insert_with(|| Chunk::new_flat(pos))
+        self.chunks
+            .entry(pos)
+            .or_insert_with(|| Chunk::new_flat(pos))
     }
 }
 

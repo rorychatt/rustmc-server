@@ -6,17 +6,17 @@ use tokio::net::TcpStream;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
+use crate::protocol::chunk_data;
 use crate::protocol::handshake::{Handshake, NextState};
 use crate::protocol::login::{LoginStart, LoginSuccess};
 use crate::protocol::packet::{Packet, PacketWriter};
-use crate::protocol::chunk_data;
 use crate::protocol::play;
 use crate::protocol::status::{
-    StatusResponse, decode_ping_request, decode_status_request, encode_pong_response,
+    decode_ping_request, decode_status_request, encode_pong_response, StatusResponse,
 };
 use crate::protocol::types::VarInt;
-use crate::world::World;
 use crate::world::chunk::ChunkPos;
+use crate::world::World;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionState {
@@ -149,8 +149,11 @@ impl Connection {
         let handshake = Handshake::decode(data)?;
         debug!(
             "Handshake from {}: protocol={}, address={}:{}, next_state={:?}",
-            self.addr, handshake.protocol_version, handshake.server_address,
-            handshake.server_port, handshake.next_state
+            self.addr,
+            handshake.protocol_version,
+            handshake.server_address,
+            handshake.server_port,
+            handshake.next_state
         );
 
         self.state = match handshake.next_state {
@@ -171,10 +174,7 @@ impl Connection {
             0x00 => {
                 decode_status_request(data)?;
                 let world = self.world.read().await;
-                let response = StatusResponse::default_response(
-                    world.player_count() as i32,
-                    20,
-                );
+                let response = StatusResponse::default_response(world.player_count() as i32, 20);
                 let packet = response.to_packet()?;
                 self.write_packet(writer, &packet).await?;
                 Ok(true)
@@ -222,11 +222,7 @@ impl Connection {
         let login_play = play::encode_login_play(entity_id)?;
         self.write_packet(writer, &login_play).await?;
 
-        let pos = play::encode_player_position_and_look(
-            0.0, 64.0, 0.0,
-            0.0, 0.0,
-            0, 0,
-        );
+        let pos = play::encode_player_position_and_look(0.0, 64.0, 0.0, 0.0, 0.0, 0, 0);
         self.write_packet(writer, &pos).await?;
 
         // Send chunk data for the player's view distance
@@ -271,7 +267,10 @@ impl Connection {
                 // Keep alive response - acknowledged
             }
             _ => {
-                debug!("Unhandled play packet: {packet_id:#04x} ({} bytes)", data.len());
+                debug!(
+                    "Unhandled play packet: {packet_id:#04x} ({} bytes)",
+                    data.len()
+                );
             }
         }
         Ok(true)

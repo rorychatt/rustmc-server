@@ -1,5 +1,5 @@
-mod protocol;
 mod network;
+mod protocol;
 mod world;
 
 use tracing_subscriber::EnvFilter;

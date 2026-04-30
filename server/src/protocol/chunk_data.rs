@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::io::{self, Write};
 
 use crate::protocol::nbt;
-use crate::protocol::types::VarInt;
 use crate::protocol::packet::Packet;
+use crate::protocol::types::VarInt;
 use crate::world::chunk::{BlockState, Chunk, CHUNK_WIDTH, SECTIONS_PER_CHUNK, SECTION_HEIGHT};
 
 pub struct PalettedContainer {
@@ -247,7 +247,7 @@ mod tests {
         container.write(&mut buf).unwrap();
 
         assert_eq!(buf[0], 0); // bits_per_entry = 0
-        // Next bytes: VarInt for stone ID (1), then VarInt(0) for data length
+                               // Next bytes: VarInt for stone ID (1), then VarInt(0) for data length
     }
 
     #[test]

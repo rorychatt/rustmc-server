@@ -1,7 +1,7 @@
+use super::packet::Packet;
+use super::types::{read_string, write_string, VarInt};
 use std::io::{self, Cursor, Read};
 use uuid::Uuid;
-use super::types::{VarInt, read_string, write_string};
-use super::packet::Packet;
 
 #[derive(Debug, Clone)]
 pub struct LoginStart {
