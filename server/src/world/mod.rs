@@ -57,7 +57,7 @@ impl World {
 
     pub fn tick(&mut self) {
         self.tick_count += 1;
-        if self.tick_count % 600 == 0 {
+        if self.tick_count.is_multiple_of(600) {
             debug!("World tick {}, {} players, {} chunks loaded",
                 self.tick_count, self.players.len(), self.chunks.len());
         }
