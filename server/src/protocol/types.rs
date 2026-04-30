@@ -17,7 +17,10 @@ impl VarInt {
             }
             shift += 7;
             if shift >= 32 {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "VarInt too long"));
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "VarInt too long",
+                ));
             }
         }
         Ok(VarInt(result))
@@ -56,7 +59,10 @@ impl VarInt {
 pub fn read_string(reader: &mut impl Read) -> io::Result<String> {
     let len = VarInt::read(reader)?.0 as usize;
     if len > 32767 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "String too long"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "String too long",
+        ));
     }
     let mut buf = vec![0u8; len];
     reader.read_exact(&mut buf)?;

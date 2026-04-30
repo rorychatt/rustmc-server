@@ -1,5 +1,5 @@
-use std::io::{self, Cursor, Read, Write};
 use super::types::VarInt;
+use std::io::{self, Cursor, Read, Write};
 
 #[derive(Debug, Clone)]
 pub struct Packet {
@@ -25,10 +25,16 @@ impl<R: Read> PacketReader<R> {
     pub fn read_packet(&mut self) -> io::Result<Packet> {
         let length = VarInt::read(&mut self.reader)?.0 as usize;
         if length == 0 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "Zero-length packet"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Zero-length packet",
+            ));
         }
         if length > 2_097_152 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "Packet too large"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Packet too large",
+            ));
         }
 
         let mut payload = vec![0u8; length];
@@ -39,7 +45,10 @@ impl<R: Read> PacketReader<R> {
         let data_start = cursor.position() as usize;
         let data = payload[data_start..].to_vec();
 
-        Ok(Packet { id: packet_id, data })
+        Ok(Packet {
+            id: packet_id,
+            data,
+        })
     }
 }
 

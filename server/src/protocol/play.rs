@@ -1,6 +1,6 @@
-use std::io::{self, Cursor, Read};
-use super::types::{VarInt, write_string};
 use super::packet::Packet;
+use super::types::{write_string, VarInt};
+use std::io::{self, Cursor, Read};
 
 #[derive(Debug, Clone)]
 pub struct PlayerPosition {
@@ -50,8 +50,11 @@ pub fn encode_keep_alive(id: i64) -> Packet {
 }
 
 pub fn encode_player_position_and_look(
-    x: f64, y: f64, z: f64,
-    yaw: f32, pitch: f32,
+    x: f64,
+    y: f64,
+    z: f64,
+    yaw: f32,
+    pitch: f32,
     flags: u8,
     teleport_id: i32,
 ) -> Packet {

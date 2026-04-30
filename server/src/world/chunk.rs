@@ -1,4 +1,3 @@
-
 pub const CHUNK_WIDTH: usize = 16;
 pub const CHUNK_HEIGHT: usize = 384; // -64 to 320
 pub const SECTION_HEIGHT: usize = 16;
@@ -77,7 +76,9 @@ impl Chunk {
     pub fn new(pos: ChunkPos) -> Self {
         Self {
             pos,
-            sections: (0..SECTIONS_PER_CHUNK).map(|_| ChunkSection::new()).collect(),
+            sections: (0..SECTIONS_PER_CHUNK)
+                .map(|_| ChunkSection::new())
+                .collect(),
         }
     }
 

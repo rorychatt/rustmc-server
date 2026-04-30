@@ -1,7 +1,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use rustmc_server::protocol::types::{VarInt, write_string, read_string};
 use rustmc_server::protocol::handshake::Handshake;
-use rustmc_server::protocol::packet::{Packet, PacketWriter, PacketReader};
+use rustmc_server::protocol::packet::{Packet, PacketReader, PacketWriter};
+use rustmc_server::protocol::types::{read_string, write_string, VarInt};
 use std::io::Cursor;
 
 fn bench_varint_encode(c: &mut Criterion) {

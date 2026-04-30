@@ -1,4 +1,4 @@
-use rustmc_test_utils::{TestServer, TestClient};
+use rustmc_test_utils::{TestClient, TestServer};
 
 #[tokio::test]
 async fn test_server_connection() {
