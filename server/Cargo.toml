@@ -1,0 +1,23 @@
+[package]
+name = "rustmc-server"
+version = "0.1.0"
+edition = "2021"
+description = "A multi-threaded Rust Minecraft server with Paper plugin compatibility"
+license = "MIT"
+
+[[bin]]
+name = "rustmc-server"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+crossbeam = { workspace = true }
+uuid = { workspace = true }
+bytes = { workspace = true }
+rand = { workspace = true }
+plugin-bridge = { path = "../plugin-bridge" }
