@@ -19,6 +19,6 @@ pub const ALL_REGISTRY_IDS: &[&str] = &[
     "minecraft:instrument",
 ];
 
-pub fn load(registry_id: &str) -> io::Result<Vec<RegistryEntry>> {
+pub fn load(registry_id: &str) -> io::Result<&'static [RegistryEntry]> {
     loader::load_registry(registry_id)
 }

@@ -388,7 +388,7 @@ impl Connection {
     ) -> std::io::Result<()> {
         for reg_id in registry::ALL_REGISTRY_IDS {
             let entries = registry::load(reg_id)?;
-            let packet = configuration::encode_registry_data(reg_id, &entries)?;
+            let packet = configuration::encode_registry_data(reg_id, entries)?;
             self.write_packet(writer, &packet).await?;
         }
 
