@@ -78,7 +78,7 @@ pub fn encode_finish_configuration() -> Packet {
     Packet::new(ids::FINISH_CONFIGURATION, Vec::new())
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RegistryEntry {
     pub id: String,
     pub nbt_data: Vec<u8>,

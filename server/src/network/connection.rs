@@ -507,11 +507,9 @@ impl Connection {
         &mut self,
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<()> {
-        let reg_set = registry::registry_set_for(self.protocol_version);
-        for reg_id in reg_set.registry_ids {
-            let entries = registry::load(reg_id, self.protocol_version)?;
-            let packet = configuration::encode_registry_data(reg_id, &entries)?;
-            self.write_packet(writer, &packet).await?;
+        let packets = registry::cached_registry_packets(self.protocol_version)?;
+        for packet in packets {
+            self.write_packet(writer, packet).await?;
         }
 
         let tags = configuration::encode_update_tags()?;

@@ -37,10 +37,7 @@ fn test_registry_field_completeness() {
     for registry_id in reg_set.registry_ids {
         let entries = registry::load(registry_id, PROTOCOL_VERSION).unwrap();
         for entry in &entries {
-            assert!(
-                !entry.id.is_empty(),
-                "{registry_id}: entry has empty id"
-            );
+            assert!(!entry.id.is_empty(), "{registry_id}: entry has empty id");
             assert!(
                 entry.id.starts_with("minecraft:"),
                 "{registry_id}: entry id '{}' missing minecraft: namespace",
