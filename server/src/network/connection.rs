@@ -885,7 +885,10 @@ impl Connection {
                 if let Some(uuid) = self.player_uuid {
                     let player_info = {
                         let world = self.world.read().await;
-                        world.players.get(&uuid).map(|p| (p.entity_id, p.x as i32 >> 4, p.z as i32 >> 4))
+                        world
+                            .players
+                            .get(&uuid)
+                            .map(|p| (p.entity_id, p.x as i32 >> 4, p.z as i32 >> 4))
                     };
                     if let Some((eid, source_chunk_x, source_chunk_z)) = player_info {
                         let _ = self.broadcast_tx.send(BroadcastEvent::EntityAnimation {
