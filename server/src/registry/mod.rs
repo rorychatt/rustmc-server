@@ -10,6 +10,6 @@ pub fn registry_set_for(protocol_version: i32) -> io::Result<&'static RegistrySe
     loader::registry_set_for(protocol_version)
 }
 
-pub fn load(registry_id: &str, protocol_version: i32) -> io::Result<Vec<RegistryEntry>> {
+pub fn load(registry_id: &str, protocol_version: i32) -> io::Result<&'static [RegistryEntry]> {
     loader::load_registry(registry_id, protocol_version)
 }

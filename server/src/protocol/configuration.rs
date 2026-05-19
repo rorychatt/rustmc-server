@@ -106,7 +106,7 @@ mod tests {
     #[test]
     fn test_encode_registry_data() {
         let entries = registry::load("minecraft:dimension_type", PROTOCOL_VERSION).unwrap();
-        let packet = encode_registry_data("minecraft:dimension_type", &entries).unwrap();
+        let packet = encode_registry_data("minecraft:dimension_type", entries).unwrap();
         assert_eq!(packet.id, 0x07);
         assert!(!packet.data.is_empty());
     }

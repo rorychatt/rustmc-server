@@ -454,7 +454,7 @@ impl Connection {
         let reg_set = registry::registry_set_for(self.protocol_version)?;
         for reg_id in reg_set.registry_ids {
             let entries = registry::load(reg_id, self.protocol_version)?;
-            let packet = configuration::encode_registry_data(reg_id, &entries)?;
+            let packet = configuration::encode_registry_data(reg_id, entries)?;
             self.write_packet(writer, &packet).await?;
         }
 

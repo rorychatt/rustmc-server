@@ -1,7 +1,11 @@
 use super::nbt_encoder::json_to_nbt;
 use crate::protocol::configuration::RegistryEntry;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::io;
+use std::sync::OnceLock;
+
+static V775_CACHE: OnceLock<HashMap<&'static str, Vec<RegistryEntry>>> = OnceLock::new();
 
 mod v775 {
     pub const DIMENSION_TYPE_JSON: &str =
@@ -47,9 +51,35 @@ pub struct RegistrySet {
 }
 
 impl RegistrySet {
-    pub fn load(&self, registry_id: &str) -> io::Result<Vec<RegistryEntry>> {
-        let json_str = self.get_json(registry_id)?;
-        parse_registry_json(json_str)
+    pub fn load(&self, registry_id: &str) -> io::Result<&'static [RegistryEntry]> {
+        let cache = match self.version {
+            775 => V775_CACHE.get_or_init(|| self.init_cache()),
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("unsupported protocol version: {}", self.version),
+                ))
+            }
+        };
+        cache.get(registry_id).map(|v| v.as_slice()).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("unknown registry: {registry_id}"),
+            )
+        })
+    }
+
+    fn init_cache(&self) -> HashMap<&'static str, Vec<RegistryEntry>> {
+        let mut map = HashMap::new();
+        for &id in self.registry_ids {
+            let json_str = self
+                .get_json(id)
+                .unwrap_or_else(|e| panic!("failed to get JSON for {id}: {e}"));
+            let entries = parse_registry_json(json_str)
+                .unwrap_or_else(|e| panic!("failed to parse registry {id}: {e}"));
+            map.insert(id, entries);
+        }
+        map
     }
 
     fn get_json(&self, registry_id: &str) -> io::Result<&'static str> {
@@ -95,7 +125,7 @@ pub fn registry_set_for(protocol_version: i32) -> io::Result<&'static RegistrySe
     }
 }
 
-pub fn load_registry(registry_id: &str, protocol_version: i32) -> io::Result<Vec<RegistryEntry>> {
+pub fn load_registry(registry_id: &str, protocol_version: i32) -> io::Result<&'static [RegistryEntry]> {
     let set = registry_set_for(protocol_version)?;
     set.load(registry_id)
 }
@@ -225,7 +255,7 @@ mod tests {
     #[test]
     fn test_entries_have_valid_nbt() {
         let entries = load_registry("minecraft:dimension_type", 775).unwrap();
-        for entry in &entries {
+        for entry in entries {
             assert_eq!(entry.nbt_data[0], 0x0A, "NBT must start with TAG_Compound");
             assert!(entry.nbt_data.len() > 3);
         }
