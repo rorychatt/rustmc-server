@@ -1,6 +1,50 @@
 use super::packet::Packet;
-use super::types::{write_string, VarInt};
-use std::io;
+use super::types::{read_string, write_string, VarInt};
+use std::io::{self, Cursor, Read, Write};
+
+pub fn encode_cookie_request(key: &str) -> io::Result<Packet> {
+    let mut data = Vec::new();
+    write_string(&mut data, key)?;
+    Ok(Packet::new(0x01, data))
+}
+
+pub fn encode_store_cookie(key: &str, payload: &[u8]) -> io::Result<Packet> {
+    let mut data = Vec::new();
+    write_string(&mut data, key)?;
+    data.write_all(payload)?;
+    Ok(Packet::new(0x0B, data))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CookieResponse {
+    pub key: String,
+    pub payload: Option<Vec<u8>>,
+}
+
+impl CookieResponse {
+    pub fn decode(data: &[u8]) -> io::Result<Self> {
+        let mut cursor = Cursor::new(data);
+        let key = read_string(&mut cursor)?;
+        let mut has_payload_buf = [0u8; 1];
+        cursor.read_exact(&mut has_payload_buf)?;
+        let has_payload = has_payload_buf[0] != 0;
+        let payload = if has_payload {
+            let length = VarInt::read(&mut cursor)?.0 as usize;
+            if length > 5120 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Cookie payload too large",
+                ));
+            }
+            let mut buf = vec![0u8; length];
+            cursor.read_exact(&mut buf)?;
+            Some(buf)
+        } else {
+            None
+        };
+        Ok(Self { key, payload })
+    }
+}
 
 pub fn encode_known_packs() -> io::Result<Packet> {
     let mut data = Vec::new();
@@ -103,5 +147,106 @@ mod tests {
         let entries = registry::load("minecraft:wolf_variant").unwrap();
         assert_eq!(entries.len(), 9);
         assert!(entries.iter().any(|e| e.id == "minecraft:pale"));
+    }
+
+    #[test]
+    fn test_encode_cookie_request() {
+        let packet = encode_cookie_request("minecraft:test_cookie").unwrap();
+        assert_eq!(packet.id, 0x01);
+        assert!(!packet.data.is_empty());
+    }
+
+    #[test]
+    fn test_encode_store_cookie() {
+        let payload = b"hello world";
+        let packet = encode_store_cookie("minecraft:session", payload).unwrap();
+        assert_eq!(packet.id, 0x0B);
+        assert!(!packet.data.is_empty());
+    }
+
+    #[test]
+    fn test_cookie_response_decode_with_payload() {
+        let mut data = Vec::new();
+        write_string(&mut data, "minecraft:my_cookie").unwrap();
+        data.push(1); // has_payload = true
+        let payload = b"test_data";
+        VarInt(payload.len() as i32).write(&mut data).unwrap();
+        data.extend_from_slice(payload);
+
+        let response = CookieResponse::decode(&data).unwrap();
+        assert_eq!(response.key, "minecraft:my_cookie");
+        assert_eq!(response.payload, Some(b"test_data".to_vec()));
+    }
+
+    #[test]
+    fn test_cookie_response_decode_without_payload() {
+        let mut data = Vec::new();
+        write_string(&mut data, "minecraft:empty").unwrap();
+        data.push(0); // has_payload = false
+
+        let response = CookieResponse::decode(&data).unwrap();
+        assert_eq!(response.key, "minecraft:empty");
+        assert_eq!(response.payload, None);
+    }
+
+    #[test]
+    fn test_cookie_response_max_payload() {
+        let mut data = Vec::new();
+        write_string(&mut data, "minecraft:big").unwrap();
+        data.push(1);
+        let payload = vec![0xAB; 5120];
+        VarInt(5120).write(&mut data).unwrap();
+        data.extend_from_slice(&payload);
+
+        let response = CookieResponse::decode(&data).unwrap();
+        assert_eq!(response.payload.unwrap().len(), 5120);
+    }
+
+    #[test]
+    fn test_cookie_response_payload_too_large() {
+        let mut data = Vec::new();
+        write_string(&mut data, "minecraft:toobig").unwrap();
+        data.push(1);
+        VarInt(5121).write(&mut data).unwrap();
+        data.extend(vec![0u8; 5121]);
+
+        let result = CookieResponse::decode(&data);
+        assert!(result.is_err());
+    }
+
+    mod proptest_tests {
+        use super::*;
+        use proptest::prelude::*;
+
+        fn identifier_strategy() -> impl Strategy<Value = String> {
+            "[a-z][a-z0-9_]{0,15}:[a-z][a-z0-9_/]{0,30}"
+        }
+
+        proptest! {
+            #[test]
+            fn test_cookie_response_roundtrip(
+                key in identifier_strategy(),
+                has_payload in any::<bool>(),
+                payload_data in proptest::collection::vec(any::<u8>(), 0..512)
+            ) {
+                let mut data = Vec::new();
+                write_string(&mut data, &key).unwrap();
+                if has_payload {
+                    data.push(1);
+                    VarInt(payload_data.len() as i32).write(&mut data).unwrap();
+                    data.extend_from_slice(&payload_data);
+                } else {
+                    data.push(0);
+                }
+
+                let response = CookieResponse::decode(&data).unwrap();
+                prop_assert_eq!(&response.key, &key);
+                if has_payload {
+                    prop_assert_eq!(response.payload, Some(payload_data));
+                } else {
+                    prop_assert_eq!(response.payload, None);
+                }
+            }
+        }
     }
 }

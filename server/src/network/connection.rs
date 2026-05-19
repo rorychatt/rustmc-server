@@ -9,7 +9,7 @@ use tracing::{debug, error, info, warn};
 use crate::protocol::chunk_data;
 use crate::protocol::configuration;
 use crate::protocol::handshake::{Handshake, NextState};
-use crate::protocol::login::{LoginStart, LoginSuccess};
+use crate::protocol::login::{LoginCookieResponse, LoginStart, LoginSuccess};
 use crate::protocol::packet::{Packet, PacketWriter};
 use crate::protocol::play;
 use crate::protocol::status::{
@@ -37,6 +37,7 @@ pub struct Connection {
     player_uuid: Option<Uuid>,
     player_name: Option<String>,
     compression_enabled: bool,
+    pending_chunks: Vec<ChunkPos>,
 }
 
 impl Connection {
@@ -48,6 +49,7 @@ impl Connection {
             player_uuid: None,
             player_name: None,
             compression_enabled: false,
+            pending_chunks: Vec::new(),
         }
     }
 
@@ -217,33 +219,39 @@ impl Connection {
         data: &[u8],
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<bool> {
-        if packet_id != 0x00 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Expected login start 0x00, got {packet_id:#04x}"),
-            ));
+        match packet_id {
+            0x00 => {
+                let login = LoginStart::decode(data)?;
+                info!("Player login: {} ({})", login.name, login.uuid);
+
+                // Enable compression with 256 byte threshold
+                let compression_packet = crate::protocol::login::encode_set_compression(256);
+                self.write_packet(writer, &compression_packet).await?;
+                self.compression_enabled = true;
+
+                let success = LoginSuccess::new(login.uuid, login.name.clone());
+                let packet = success.to_packet()?;
+                self.write_packet(writer, &packet).await?;
+
+                // Store player info for later use
+                self.player_uuid = Some(login.uuid);
+                self.player_name = Some(login.name);
+
+                // Transition to Configuration state (wait for Login Acknowledged from client)
+                self.state = ConnectionState::Configuration;
+
+                Ok(true)
+            }
+            0x04 => {
+                let response = LoginCookieResponse::decode(data)?;
+                debug!("Received login cookie response: key={}", response.key);
+                Ok(true)
+            }
+            _ => {
+                warn!("Unknown login packet: {packet_id:#04x}");
+                Ok(true)
+            }
         }
-
-        let login = LoginStart::decode(data)?;
-        info!("Player login: {} ({})", login.name, login.uuid);
-
-        // Enable compression with 256 byte threshold
-        let compression_packet = crate::protocol::login::encode_set_compression(256);
-        self.write_packet(writer, &compression_packet).await?;
-        self.compression_enabled = true;
-
-        let success = LoginSuccess::new(login.uuid, login.name.clone());
-        let packet = success.to_packet()?;
-        self.write_packet(writer, &packet).await?;
-
-        // Store player info for later use
-        self.player_uuid = Some(login.uuid);
-        self.player_name = Some(login.name);
-
-        // Transition to Configuration state (wait for Login Acknowledged from client)
-        self.state = ConnectionState::Configuration;
-
-        Ok(true)
     }
 
     async fn handle_configuration(
@@ -253,6 +261,12 @@ impl Connection {
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<bool> {
         match packet_id {
+            // Cookie Response (0x02)
+            0x02 => {
+                let response = configuration::CookieResponse::decode(_data)?;
+                debug!("Received cookie response: key={}", response.key);
+                Ok(true)
+            }
             // Login Acknowledged (0x03) - client confirms transition from Login to Configuration
             0x03 => {
                 debug!("Client acknowledged login, sending configuration data");
@@ -393,6 +407,38 @@ impl Connection {
         Ok(())
     }
 
+    async fn drain_pending_chunks(
+        &mut self,
+        writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
+        limit: f32,
+    ) -> std::io::Result<()> {
+        if self.pending_chunks.is_empty() {
+            return Ok(());
+        }
+
+        let send_count = (limit.ceil() as usize).min(self.pending_chunks.len());
+        let to_send: Vec<ChunkPos> = self.pending_chunks.drain(..send_count).collect();
+
+        let batch_start = play::encode_chunk_batch_start();
+        self.write_packet(writer, &batch_start).await?;
+
+        let mut count = 0;
+        {
+            let mut world = self.world.write().await;
+            for chunk_pos in &to_send {
+                let chunk = world.get_or_generate_chunk(*chunk_pos);
+                let chunk_packet = chunk_data::encode_chunk_data(chunk)?;
+                self.write_packet(writer, &chunk_packet).await?;
+                count += 1;
+            }
+        }
+
+        let batch_finished = play::encode_chunk_batch_finished(count)?;
+        self.write_packet(writer, &batch_finished).await?;
+
+        Ok(())
+    }
+
     async fn handle_play(
         &mut self,
         packet_id: i32,
@@ -405,71 +451,81 @@ impl Connection {
                 debug!("Received teleport confirmation");
             }
             // Chat Command
-            0x06 => {
+            0x07 => {
                 debug!("Received chat command ({} bytes)", data.len());
             }
             // Chat Message
-            0x08 => {
+            0x09 => {
                 let chat = play::ChatMessage::decode(data)?;
                 info!("Chat from {}: {}", self.addr, chat.message);
             }
             // Chunk Batch Received
             0x0B => {
-                debug!("Received chunk batch acknowledgement");
+                if data.len() >= 4 {
+                    let chunks_per_tick = f32::from_be_bytes([data[0], data[1], data[2], data[3]]);
+                    let clamped = chunks_per_tick.clamp(1.0, 100.0);
+                    if let Some(uuid) = self.player_uuid {
+                        let mut world = self.world.write().await;
+                        if let Some(player) = world.players.get_mut(&uuid) {
+                            player.chunks_per_tick = clamped;
+                        }
+                    }
+                    debug!("Chunk batch received: chunks_per_tick={:.1}", clamped);
+                    self.drain_pending_chunks(writer, clamped).await?;
+                }
+            }
+            // Play Cookie Response
+            0x12 => {
+                let response = play::PlayCookieResponse::decode(data)?;
+                debug!("Received play cookie response: key={}", response.key);
             }
             // Client Tick End
             0x0D => {
                 // Empty packet, just acknowledge
             }
             // Keep Alive (serverbound)
-            0x1B => {
+            0x1C => {
                 // Keep alive response - acknowledged
             }
             // Set Player Position
-            0x1D => {
+            0x1E => {
                 let pos = play::PlayerPosition::decode(data)?;
                 debug!("Player position: ({}, {}, {})", pos.x, pos.y, pos.z);
 
-                // Dynamic chunk loading
                 if let Some(uuid) = self.player_uuid {
                     let mut world = self.world.write().await;
                     world.update_player_position(&uuid, pos.x, pos.y, pos.z);
 
                     let view_distance = 8;
                     if let Some(update) = world.compute_chunk_updates(&uuid, view_distance) {
-                        // Send unload packets first
                         for chunk_pos in &update.to_unload {
                             let unload_packet = play::encode_unload_chunk(chunk_pos.x, chunk_pos.z);
                             self.write_packet(writer, &unload_packet).await?;
                         }
 
-                        // Send new chunk data with batching
                         if !update.to_load.is_empty() {
-                            let batch_start = play::encode_chunk_batch_start();
-                            self.write_packet(writer, &batch_start).await?;
-
-                            let mut count = 0;
-                            for chunk_pos in &update.to_load {
-                                let chunk = world.get_or_generate_chunk(*chunk_pos);
-                                let chunk_packet = chunk_data::encode_chunk_data(chunk)?;
-                                self.write_packet(writer, &chunk_packet).await?;
-                                count += 1;
-                            }
-
-                            let batch_finished = play::encode_chunk_batch_finished(count)?;
-                            self.write_packet(writer, &batch_finished).await?;
+                            self.pending_chunks.extend(update.to_load.iter());
                         }
 
                         debug!(
-                            "Chunk update: loaded {}, unloaded {}",
+                            "Chunk update: queued {}, unloaded {}",
                             update.to_load.len(),
                             update.to_unload.len()
                         );
                     }
+
+                    let limit = world
+                        .players
+                        .get(&uuid)
+                        .map(|p| p.chunks_per_tick)
+                        .unwrap_or(25.0);
+                    drop(world);
+
+                    self.drain_pending_chunks(writer, limit).await?;
                 }
             }
             // Set Player Position and Rotation
-            0x1E => {
+            0x1F => {
                 debug!("Player position and rotation ({} bytes)", data.len());
             }
             // Player Loaded
