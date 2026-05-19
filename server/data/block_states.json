@@ -1,0 +1,10 @@
+{
+  "protocol_version": 775,
+  "blocks": {
+    "minecraft:air": { "default_state_id": 0 },
+    "minecraft:stone": { "default_state_id": 1 },
+    "minecraft:grass_block": { "default_state_id": 9 },
+    "minecraft:dirt": { "default_state_id": 10 },
+    "minecraft:bedrock": { "default_state_id": 33 }
+  }
+}
