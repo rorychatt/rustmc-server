@@ -38,13 +38,13 @@ pub struct Connection {
     player_uuid: Option<Uuid>,
     player_name: Option<String>,
     compression_enabled: bool,
+    protocol_version: i32,
 
     configuration_finish_sent: bool,
     last_keep_alive_sent: Option<Instant>,
     last_keep_alive_id: i64,
     last_keep_alive_response: Option<Instant>,
     pending_chunks: Vec<ChunkPos>,
-
 }
 
 impl Connection {
@@ -56,13 +56,13 @@ impl Connection {
             player_uuid: None,
             player_name: None,
             compression_enabled: false,
+            protocol_version: 0,
 
             configuration_finish_sent: false,
             last_keep_alive_sent: None,
             last_keep_alive_id: 0,
             last_keep_alive_response: None,
             pending_chunks: Vec::new(),
-
         }
     }
 
@@ -253,6 +253,7 @@ impl Connection {
             handshake.next_state
         );
 
+        self.protocol_version = handshake.protocol_version;
         self.state = match handshake.next_state {
             NextState::Status => ConnectionState::Status,
             NextState::Login => ConnectionState::Login,
@@ -376,8 +377,9 @@ impl Connection {
         &mut self,
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<()> {
-        // Send Known Packs
-        let known_packs = configuration::encode_known_packs()?;
+        let data_pack_version =
+            crate::protocol::version::data_pack_version_for(self.protocol_version)?;
+        let known_packs = configuration::encode_known_packs(data_pack_version)?;
         self.write_packet(writer, &known_packs).await?;
         Ok(())
     }
@@ -386,8 +388,9 @@ impl Connection {
         &mut self,
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<()> {
-        for reg_id in registry::ALL_REGISTRY_IDS {
-            let entries = registry::load(reg_id)?;
+        let reg_set = registry::registry_set_for(self.protocol_version)?;
+        for reg_id in reg_set.registry_ids {
+            let entries = registry::load(reg_id, self.protocol_version)?;
             let packet = configuration::encode_registry_data(reg_id, &entries)?;
             self.write_packet(writer, &packet).await?;
         }
@@ -395,13 +398,9 @@ impl Connection {
         let tags = configuration::encode_update_tags()?;
         self.write_packet(writer, &tags).await?;
 
-
-        // Send Finish Configuration — remain in Configuration state
-        // and wait for client to send Acknowledge Finish Configuration (0x03)
         let finish = configuration::encode_finish_configuration();
         self.write_packet(writer, &finish).await?;
         self.configuration_finish_sent = true;
-
 
         Ok(())
     }
@@ -560,7 +559,6 @@ impl Connection {
             0x1C => {
                 debug!("Received keep-alive response from {}", self.addr);
                 self.last_keep_alive_response = Some(Instant::now());
-
             }
             // Set Player Position
             0x1E => {

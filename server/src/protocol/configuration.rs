@@ -46,12 +46,12 @@ impl CookieResponse {
     }
 }
 
-pub fn encode_known_packs() -> io::Result<Packet> {
+pub fn encode_known_packs(data_pack_version: &str) -> io::Result<Packet> {
     let mut data = Vec::new();
     VarInt(1).write(&mut data)?;
     write_string(&mut data, "minecraft")?;
     write_string(&mut data, "core")?;
-    write_string(&mut data, "1.21")?;
+    write_string(&mut data, data_pack_version)?;
     Ok(Packet::new(0x0E, data))
 }
 
@@ -77,6 +77,7 @@ pub fn encode_finish_configuration() -> Packet {
     Packet::new(0x03, Vec::new())
 }
 
+#[derive(Debug)]
 pub struct RegistryEntry {
     pub id: String,
     pub nbt_data: Vec<u8>,
@@ -85,11 +86,12 @@ pub struct RegistryEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::version::{DATA_PACK_VERSION, PROTOCOL_VERSION};
     use crate::registry;
 
     #[test]
     fn test_encode_known_packs() {
-        let packet = encode_known_packs().unwrap();
+        let packet = encode_known_packs(DATA_PACK_VERSION).unwrap();
         assert_eq!(packet.id, 0x0E);
         assert!(!packet.data.is_empty());
     }
@@ -103,7 +105,7 @@ mod tests {
 
     #[test]
     fn test_encode_registry_data() {
-        let entries = registry::load("minecraft:dimension_type").unwrap();
+        let entries = registry::load("minecraft:dimension_type", PROTOCOL_VERSION).unwrap();
         let packet = encode_registry_data("minecraft:dimension_type", &entries).unwrap();
         assert_eq!(packet.id, 0x07);
         assert!(!packet.data.is_empty());
@@ -117,34 +119,34 @@ mod tests {
 
     #[test]
     fn test_dimension_type_registry() {
-        let entries = registry::load("minecraft:dimension_type").unwrap();
+        let entries = registry::load("minecraft:dimension_type", PROTOCOL_VERSION).unwrap();
         assert_eq!(entries.len(), 4);
         assert_eq!(entries[0].id, "minecraft:overworld");
     }
 
     #[test]
     fn test_biome_registry() {
-        let entries = registry::load("minecraft:worldgen/biome").unwrap();
+        let entries = registry::load("minecraft:worldgen/biome", PROTOCOL_VERSION).unwrap();
         assert!(entries.len() >= 50);
         assert!(entries.iter().any(|e| e.id == "minecraft:plains"));
     }
 
     #[test]
     fn test_damage_type_registry() {
-        let entries = registry::load("minecraft:damage_type").unwrap();
+        let entries = registry::load("minecraft:damage_type", PROTOCOL_VERSION).unwrap();
         assert!(entries.len() >= 40);
     }
 
     #[test]
     fn test_painting_variant_registry() {
-        let entries = registry::load("minecraft:painting_variant").unwrap();
+        let entries = registry::load("minecraft:painting_variant", PROTOCOL_VERSION).unwrap();
         assert!(entries.len() >= 26);
         assert!(entries.iter().any(|e| e.id == "minecraft:kebab"));
     }
 
     #[test]
     fn test_wolf_variant_registry() {
-        let entries = registry::load("minecraft:wolf_variant").unwrap();
+        let entries = registry::load("minecraft:wolf_variant", PROTOCOL_VERSION).unwrap();
         assert_eq!(entries.len(), 9);
         assert!(entries.iter().any(|e| e.id == "minecraft:pale"));
     }

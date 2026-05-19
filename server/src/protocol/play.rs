@@ -425,6 +425,5 @@ mod tests {
                 prop_assert_eq!(decoded_port, port);
             }
         }
-
     }
 }

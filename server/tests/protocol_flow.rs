@@ -172,7 +172,6 @@ async fn test_login_flow() {
     }
     assert!(got_finish, "Should receive Finish Configuration");
 
-
     // Send Acknowledge Finish Configuration to transition to Play
     client
         .send_acknowledge_finish_configuration()
@@ -187,7 +186,6 @@ async fn test_login_flow() {
         .expect("Failed to read join game");
     assert_eq!(join_game.id, 0x31, "Expected join game packet (0x31)");
     assert!(!join_game.data.is_empty(), "Join game should have data");
-
 
     // Read Player Info Update (0x40)
     let player_info = client
@@ -423,7 +421,6 @@ async fn test_chunk_batching() {
 
     complete_login_flow(&mut client).await;
 
-
     // After login, we should have received Game Event, Set Center Chunk, Chunk Batch Start,
     // chunks, and Chunk Batch Finished.
     // The login flow helper already consumes join_game, player_info, and sync_pos.
@@ -536,7 +533,6 @@ async fn complete_login_flow_with_client(client: &mut TestClient, username: &str
         }
     }
 
-
     // Send Acknowledge Finish Configuration to transition to Play
     client
         .send_acknowledge_finish_configuration()
@@ -549,7 +545,6 @@ async fn complete_login_flow_with_client(client: &mut TestClient, username: &str
         .read_packet()
         .await
         .expect("Failed to read join game");
-
 
     // Read Player Info Update (0x40)
     let _player_info = client
