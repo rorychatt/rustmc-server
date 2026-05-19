@@ -390,9 +390,9 @@ async fn test_configuration_phase() {
         }
     }
 
-    assert!(
-        registry_count >= 3,
-        "Should receive at least 3 registry data packets (got {registry_count})"
+    assert_eq!(
+        registry_count, 12,
+        "Should receive 12 registry data packets (got {registry_count})"
     );
     assert!(got_tags, "Should receive Update Tags packet");
 }

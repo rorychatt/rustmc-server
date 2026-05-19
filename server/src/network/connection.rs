@@ -16,6 +16,7 @@ use crate::protocol::status::{
     decode_ping_request, decode_status_request, encode_pong_response, StatusResponse,
 };
 use crate::protocol::types::VarInt;
+use crate::registry;
 use crate::world::chunk::ChunkPos;
 use crate::world::World;
 use uuid::Uuid;
@@ -310,45 +311,20 @@ impl Connection {
         &mut self,
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<()> {
-        // Send registry data for each required registry
-        let dim_entries = configuration::dimension_type_registry()?;
-        let dim_packet =
-            configuration::encode_registry_data("minecraft:dimension_type", &dim_entries)?;
-        self.write_packet(writer, &dim_packet).await?;
+        for reg_id in registry::ALL_REGISTRY_IDS {
+            let entries = registry::load(reg_id)?;
+            let packet = configuration::encode_registry_data(reg_id, &entries)?;
+            self.write_packet(writer, &packet).await?;
+        }
 
-        let biome_entries = configuration::biome_registry()?;
-        let biome_packet =
-            configuration::encode_registry_data("minecraft:worldgen/biome", &biome_entries)?;
-        self.write_packet(writer, &biome_packet).await?;
-
-        let damage_entries = configuration::damage_type_registry()?;
-        let damage_packet =
-            configuration::encode_registry_data("minecraft:damage_type", &damage_entries)?;
-        self.write_packet(writer, &damage_packet).await?;
-
-        let painting_entries = configuration::painting_variant_registry()?;
-        let painting_packet =
-            configuration::encode_registry_data("minecraft:painting_variant", &painting_entries)?;
-        self.write_packet(writer, &painting_packet).await?;
-
-        let wolf_entries = configuration::wolf_variant_registry()?;
-        let wolf_packet =
-            configuration::encode_registry_data("minecraft:wolf_variant", &wolf_entries)?;
-        self.write_packet(writer, &wolf_packet).await?;
-
-        // Send Update Tags
         let tags = configuration::encode_update_tags()?;
         self.write_packet(writer, &tags).await?;
 
-        // Send Finish Configuration
         let finish = configuration::encode_finish_configuration();
         self.write_packet(writer, &finish).await?;
 
-        // Transition to Play state - next packet from client will be
-        // Acknowledge Finish Configuration (0x03), which we handle below
         self.state = ConnectionState::Play;
 
-        // Now enter Play: send login play sequence
         self.send_play_login_sequence(writer).await?;
 
         Ok(())
