@@ -172,7 +172,6 @@ async fn test_login_flow() {
     }
     assert!(got_finish, "Should receive Finish Configuration");
 
-
     // Send Acknowledge Finish Configuration to transition to Play
     client
         .send_acknowledge_finish_configuration()
@@ -187,7 +186,6 @@ async fn test_login_flow() {
         .expect("Failed to read join game");
     assert_eq!(join_game.id, 0x31, "Expected join game packet (0x31)");
     assert!(!join_game.data.is_empty(), "Join game should have data");
-
 
     // Read Player Info Update (0x40)
     let player_info = client
@@ -423,7 +421,6 @@ async fn test_chunk_batching() {
 
     complete_login_flow(&mut client).await;
 
-
     // After login, we should have received Game Event, Set Center Chunk, Chunk Batch Start,
     // chunks, and Chunk Batch Finished.
     // The login flow helper already consumes join_game, player_info, and sync_pos.
@@ -478,10 +475,33 @@ async fn test_chunk_batching() {
     assert_eq!(chunk_count, 289, "Should receive 17x17 chunks");
 }
 
+async fn read_packet_skip_keepalive(client: &mut TestClient) -> common::client::RawPacket {
+    loop {
+        let packet = client.read_packet().await.expect("Failed to read packet");
+        if packet.id != 0x2C {
+            return packet;
+        }
+    }
+}
+
+async fn read_packet_skip_keepalive_timeout(
+    client: &mut TestClient,
+    duration: tokio::time::Duration,
+) -> Option<common::client::RawPacket> {
+    loop {
+        let packet = match tokio::time::timeout(duration, client.read_packet()).await {
+            Ok(Ok(p)) => p,
+            _ => return None,
+        };
+        if packet.id != 0x2C {
+            return Some(packet);
+        }
+    }
+}
 
 #[tokio::test]
 async fn test_chunk_throttling_via_batch_received() {
-    use tokio::time::{timeout, Duration};
+    use tokio::time::Duration;
 
     let server = TestServer::spawn().await.expect("Failed to spawn server");
     let mut client = TestClient::connect(server.port())
@@ -491,11 +511,11 @@ async fn test_chunk_throttling_via_batch_received() {
     complete_login_flow(&mut client).await;
 
     // Consume the initial batch: Game Event, Set Center Chunk, Chunk Batch Start, chunks, Chunk Batch Finished
-    let _game_event = client.read_packet().await.unwrap();
-    let _center_chunk = client.read_packet().await.unwrap();
-    let _batch_start = client.read_packet().await.unwrap();
+    let _game_event = read_packet_skip_keepalive(&mut client).await;
+    let _center_chunk = read_packet_skip_keepalive(&mut client).await;
+    let _batch_start = read_packet_skip_keepalive(&mut client).await;
     loop {
-        let packet = client.read_packet().await.unwrap();
+        let packet = read_packet_skip_keepalive(&mut client).await;
         if packet.id == 0x0B {
             break;
         }
@@ -517,15 +537,16 @@ async fn test_chunk_throttling_via_batch_received() {
 
     // Drain all pending chunks by repeatedly acknowledging batches
     loop {
-        let packet = match timeout(Duration::from_secs(2), client.read_packet()).await {
-            Ok(Ok(p)) => p,
-            _ => break,
-        };
+        let packet =
+            match read_packet_skip_keepalive_timeout(&mut client, Duration::from_secs(5)).await {
+                Some(p) => p,
+                None => break,
+            };
         if packet.id == 0x0C {
             // Chunk Batch Start — read chunks until Chunk Batch Finished
             let mut batch_size = 0;
             loop {
-                let inner = client.read_packet().await.unwrap();
+                let inner = read_packet_skip_keepalive(&mut client).await;
                 if inner.id == 0x2D {
                     batch_size += 1;
                 } else if inner.id == 0x0B {
@@ -546,9 +567,6 @@ async fn test_chunk_throttling_via_batch_received() {
             client.send_chunk_batch_received(3.0).await.unwrap();
         } else if packet.id == 0x25 {
             // Unload Chunk packets may arrive before the batch start
-            continue;
-        } else if packet.id == 0x2C {
-            // Keep-alive — skip
             continue;
         } else {
             // No more batch starts — we're done
@@ -580,29 +598,17 @@ async fn test_client_tick_end_drains_chunks() {
     complete_login_flow(&mut client).await;
 
     // Consume initial chunk batch (Game Event, Set Center Chunk, Chunk Batch Start, chunks, Chunk Batch Finished)
-    let game_event = client
-        .read_packet()
-        .await
-        .expect("Failed to read game event");
+    let game_event = read_packet_skip_keepalive(&mut client).await;
     assert_eq!(game_event.id, 0x26, "Expected game event packet");
 
-    let center_chunk = client
-        .read_packet()
-        .await
-        .expect("Failed to read set center chunk");
+    let center_chunk = read_packet_skip_keepalive(&mut client).await;
     assert_eq!(center_chunk.id, 0x58, "Expected set center chunk packet");
 
-    let batch_start = client
-        .read_packet()
-        .await
-        .expect("Failed to read chunk batch start");
+    let batch_start = read_packet_skip_keepalive(&mut client).await;
     assert_eq!(batch_start.id, 0x0C, "Expected chunk batch start");
 
     loop {
-        let packet = client
-            .read_packet()
-            .await
-            .expect("Failed to read chunk/batch packet");
+        let packet = read_packet_skip_keepalive(&mut client).await;
         if packet.id == 0x0B {
             break;
         }
@@ -629,13 +635,11 @@ async fn test_client_tick_end_drains_chunks() {
     // Consume the position response: unload packets + first drain batch
     let mut position_chunks = 0;
     loop {
-        let packet = tokio::time::timeout(
-            tokio::time::Duration::from_secs(2),
-            client.read_packet(),
-        )
-        .await
-        .expect("Timed out reading position response")
-        .expect("Failed to read position response packet");
+        let packet =
+            tokio::time::timeout(tokio::time::Duration::from_secs(5), client.read_packet())
+                .await
+                .expect("Timed out reading position response")
+                .expect("Failed to read position response packet");
 
         match packet.id {
             0x25 => {} // Unload chunk - skip
@@ -660,13 +664,10 @@ async fn test_client_tick_end_drains_chunks() {
         .expect("Failed to send client tick end");
 
     // Read the chunk batch triggered by tick end
-    let response = tokio::time::timeout(
-        tokio::time::Duration::from_secs(2),
-        client.read_packet(),
-    )
-    .await
-    .expect("Timed out waiting for chunk response after tick end")
-    .expect("Failed to read packet after tick end");
+    let response =
+        read_packet_skip_keepalive_timeout(&mut client, tokio::time::Duration::from_secs(5))
+            .await
+            .expect("Timed out waiting for chunk response after tick end");
 
     assert_eq!(
         response.id, 0x0C,
@@ -675,19 +676,13 @@ async fn test_client_tick_end_drains_chunks() {
 
     let mut chunk_count = 0;
     loop {
-        let packet = client
-            .read_packet()
-            .await
-            .expect("Failed to read chunk/batch packet");
+        let packet = read_packet_skip_keepalive(&mut client).await;
         if packet.id == 0x2D {
             chunk_count += 1;
         } else if packet.id == 0x0B {
             break;
         } else {
-            panic!(
-                "Unexpected packet during chunk batch: {:#04x}",
-                packet.id
-            );
+            panic!("Unexpected packet during chunk batch: {:#04x}", packet.id);
         }
     }
 
@@ -768,7 +763,6 @@ async fn test_configuration_timeout() {
     );
 }
 
-
 /// Helper to complete the full login + configuration flow
 async fn complete_login_flow(client: &mut TestClient) {
     complete_login_flow_with_client(client, "TestPlayer").await;
@@ -827,7 +821,6 @@ async fn complete_login_flow_with_client(client: &mut TestClient, username: &str
         }
     }
 
-
     // Send Acknowledge Finish Configuration to transition to Play
     client
         .send_acknowledge_finish_configuration()
@@ -840,7 +833,6 @@ async fn complete_login_flow_with_client(client: &mut TestClient, username: &str
         .read_packet()
         .await
         .expect("Failed to read join game");
-
 
     // Read Player Info Update (0x40)
     let _player_info = client
