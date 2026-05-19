@@ -327,6 +327,25 @@ pub fn encode_transfer(host: &str, port: i32) -> io::Result<Packet> {
     Ok(Packet::new(0x73, data))
 }
 
+pub fn encode_entity_animation(entity_id: i32, animation: u8) -> Packet {
+    let mut data = Vec::new();
+    VarInt(entity_id).write(&mut data).unwrap();
+    data.push(animation);
+    Packet::new(0x03, data)
+}
+
+pub fn encode_set_entity_metadata(entity_id: i32, metadata: &[u8]) -> Packet {
+    let mut data = Vec::new();
+    VarInt(entity_id).write(&mut data).unwrap();
+    data.extend_from_slice(metadata);
+    data.push(0xFF);
+    Packet::new(0x60, data)
+}
+
+pub fn encode_entity_base_flags_metadata(flags: u8) -> Vec<u8> {
+    vec![0x00, 0x00, flags]
+}
+
 fn read_f64(reader: &mut impl Read) -> io::Result<f64> {
     let mut buf = [0u8; 8];
     reader.read_exact(&mut buf)?;
@@ -593,6 +612,59 @@ mod tests {
         let data = 0i16.to_be_bytes().to_vec();
         let item = SetCarriedItem::decode(&data).unwrap();
         assert_eq!(item.slot, 0);
+    }
+
+    #[test]
+    fn test_encode_entity_animation_main_hand() {
+        let packet = encode_entity_animation(42, 0);
+        assert_eq!(packet.id, 0x03);
+        let mut cursor = Cursor::new(&packet.data);
+        let eid = VarInt::read(&mut cursor).unwrap().0;
+        assert_eq!(eid, 42);
+        let pos = cursor.position() as usize;
+        assert_eq!(packet.data[pos], 0);
+    }
+
+    #[test]
+    fn test_encode_entity_animation_offhand() {
+        let packet = encode_entity_animation(7, 3);
+        assert_eq!(packet.id, 0x03);
+        let mut cursor = Cursor::new(&packet.data);
+        let eid = VarInt::read(&mut cursor).unwrap().0;
+        assert_eq!(eid, 7);
+        let pos = cursor.position() as usize;
+        assert_eq!(packet.data[pos], 3);
+    }
+
+    #[test]
+    fn test_encode_set_entity_metadata() {
+        let metadata = vec![0x00, 0x00, 0x02];
+        let packet = encode_set_entity_metadata(99, &metadata);
+        assert_eq!(packet.id, 0x60);
+        let mut cursor = Cursor::new(&packet.data);
+        let eid = VarInt::read(&mut cursor).unwrap().0;
+        assert_eq!(eid, 99);
+        let pos = cursor.position() as usize;
+        assert_eq!(&packet.data[pos..pos + 3], &[0x00, 0x00, 0x02]);
+        assert_eq!(packet.data[pos + 3], 0xFF);
+    }
+
+    #[test]
+    fn test_encode_entity_base_flags_metadata_sneaking() {
+        let result = encode_entity_base_flags_metadata(0x02);
+        assert_eq!(result, vec![0x00, 0x00, 0x02]);
+    }
+
+    #[test]
+    fn test_encode_entity_base_flags_metadata_sprinting() {
+        let result = encode_entity_base_flags_metadata(0x08);
+        assert_eq!(result, vec![0x00, 0x00, 0x08]);
+    }
+
+    #[test]
+    fn test_encode_entity_base_flags_metadata_both() {
+        let result = encode_entity_base_flags_metadata(0x02 | 0x08);
+        assert_eq!(result, vec![0x00, 0x00, 0x0A]);
     }
 
     mod proptest_tests {

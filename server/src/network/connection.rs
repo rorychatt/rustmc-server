@@ -5,9 +5,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::TcpStream;
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
 use tracing::{debug, error, info, warn};
 
+use super::broadcast::BroadcastEvent;
 use crate::protocol::chunk_data;
 use crate::protocol::configuration;
 use crate::protocol::handshake::{Handshake, NextState};
@@ -48,10 +49,15 @@ pub struct Connection {
     pending_chunks: Vec<ChunkPos>,
     cookies: HashMap<String, Vec<u8>>,
 
+    broadcast_tx: broadcast::Sender<BroadcastEvent>,
 }
 
 impl Connection {
-    pub fn new(addr: SocketAddr, world: Arc<RwLock<World>>) -> Self {
+    pub fn new(
+        addr: SocketAddr,
+        world: Arc<RwLock<World>>,
+        broadcast_tx: broadcast::Sender<BroadcastEvent>,
+    ) -> Self {
         Self {
             addr,
             state: ConnectionState::Handshake,
@@ -68,6 +74,7 @@ impl Connection {
             pending_chunks: Vec::new(),
             cookies: HashMap::new(),
 
+            broadcast_tx,
         }
     }
 
@@ -83,7 +90,11 @@ impl Connection {
         self.cookies.remove(key)
     }
 
-    pub async fn handle(mut self, stream: TcpStream) {
+    pub async fn handle(
+        mut self,
+        stream: TcpStream,
+        mut broadcast_rx: broadcast::Receiver<BroadcastEvent>,
+    ) {
         info!("New connection from {}", self.addr);
 
         let (reader, writer) = stream.into_split();
@@ -122,6 +133,29 @@ impl Connection {
                                 }
                                 break;
                             }
+                        }
+                    }
+                    event = broadcast_rx.recv() => {
+                        match event {
+                            Ok(BroadcastEvent::EntityAnimation { exclude_uuid, entity_id, animation }) => {
+                                if self.player_uuid != Some(exclude_uuid) {
+                                    let packet = play::encode_entity_animation(entity_id, animation);
+                                    if let Err(e) = self.write_packet(&mut writer, &packet).await {
+                                        error!("Failed to send entity animation to {}: {}", self.addr, e);
+                                        break;
+                                    }
+                                }
+                            }
+                            Ok(BroadcastEvent::EntityMetadata { exclude_uuid, entity_id, metadata_bytes }) => {
+                                if self.player_uuid != Some(exclude_uuid) {
+                                    let packet = play::encode_set_entity_metadata(entity_id, &metadata_bytes);
+                                    if let Err(e) = self.write_packet(&mut writer, &packet).await {
+                                        error!("Failed to send entity metadata to {}: {}", self.addr, e);
+                                        break;
+                                    }
+                                }
+                            }
+                            Err(_) => {}
                         }
                     }
                     _ = tokio::time::sleep(timeout) => {
@@ -771,6 +805,14 @@ impl Connection {
                             4 => player.is_sprinting = false,
                             _ => {}
                         }
+                        let flags: u8 = (if player.is_sneaking { 0x02 } else { 0 })
+                            | (if player.is_sprinting { 0x08 } else { 0 });
+                        let metadata_bytes = play::encode_entity_base_flags_metadata(flags);
+                        let _ = self.broadcast_tx.send(BroadcastEvent::EntityMetadata {
+                            exclude_uuid: uuid,
+                            entity_id: player.entity_id,
+                            metadata_bytes,
+                        });
                     }
                 }
             }
@@ -789,10 +831,24 @@ impl Connection {
             // Swing
             0x38 => {
                 let swing = play::Swing::decode(data)?;
+                let animation = if swing.hand == 0 { 0u8 } else { 3u8 };
                 debug!(
                     "Player swing: hand={}",
                     if swing.hand == 0 { "main" } else { "off" }
                 );
+                if let Some(uuid) = self.player_uuid {
+                    let entity_id = {
+                        let world = self.world.read().await;
+                        world.players.get(&uuid).map(|p| p.entity_id)
+                    };
+                    if let Some(eid) = entity_id {
+                        let _ = self.broadcast_tx.send(BroadcastEvent::EntityAnimation {
+                            exclude_uuid: uuid,
+                            entity_id: eid,
+                            animation,
+                        });
+                    }
+                }
             }
             // Player Loaded
             0x2C => {
@@ -816,7 +872,8 @@ mod tests {
     fn make_connection() -> Connection {
         let world = Arc::new(RwLock::new(World::new()));
         let addr: SocketAddr = "127.0.0.1:25565".parse().unwrap();
-        Connection::new(addr, world)
+        let (broadcast_tx, _broadcast_rx) = broadcast::channel(16);
+        Connection::new(addr, world, broadcast_tx)
     }
 
     #[test]
