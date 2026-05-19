@@ -156,11 +156,15 @@ mod block_state_tests {
 
         assert_eq!(
             BlockState::AIR.0 as i64,
-            blocks["minecraft:air"]["default_state_id"].as_i64().unwrap()
+            blocks["minecraft:air"]["default_state_id"]
+                .as_i64()
+                .unwrap()
         );
         assert_eq!(
             BlockState::STONE.0 as i64,
-            blocks["minecraft:stone"]["default_state_id"].as_i64().unwrap()
+            blocks["minecraft:stone"]["default_state_id"]
+                .as_i64()
+                .unwrap()
         );
         assert_eq!(
             BlockState::GRASS_BLOCK.0 as i64,
@@ -170,7 +174,9 @@ mod block_state_tests {
         );
         assert_eq!(
             BlockState::DIRT.0 as i64,
-            blocks["minecraft:dirt"]["default_state_id"].as_i64().unwrap()
+            blocks["minecraft:dirt"]["default_state_id"]
+                .as_i64()
+                .unwrap()
         );
         assert_eq!(
             BlockState::BEDROCK.0 as i64,

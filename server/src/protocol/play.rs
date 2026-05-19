@@ -367,8 +367,8 @@ fn read_i16(reader: &mut impl Read) -> io::Result<i16> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::ids;
+    use super::*;
 
     #[test]
     fn test_player_position_decode() {
