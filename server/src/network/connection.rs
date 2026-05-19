@@ -574,6 +574,41 @@ impl Connection {
         Ok(())
     }
 
+    async fn process_chunk_updates(
+        &mut self,
+        writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
+        uuid: &Uuid,
+    ) -> std::io::Result<()> {
+        let mut world = self.world.write().await;
+        let view_distance = 8;
+        if let Some(update) = world.compute_chunk_updates(uuid, view_distance) {
+            for chunk_pos in &update.to_unload {
+                let unload_packet = play::encode_unload_chunk(chunk_pos.x, chunk_pos.z);
+                self.write_packet(writer, &unload_packet).await?;
+            }
+
+            if !update.to_load.is_empty() {
+                self.pending_chunks.extend(update.to_load.iter());
+            }
+
+            debug!(
+                "Chunk update: queued {}, unloaded {}",
+                update.to_load.len(),
+                update.to_unload.len()
+            );
+        }
+
+        let limit = world
+            .players
+            .get(uuid)
+            .map(|p| p.chunks_per_tick)
+            .unwrap_or(25.0);
+        drop(world);
+
+        self.drain_pending_chunks(writer, limit).await?;
+        Ok(())
+    }
+
     async fn handle_play(
         &mut self,
         packet_id: i32,
@@ -654,35 +689,11 @@ impl Connection {
                 debug!("Player position: ({}, {}, {})", pos.x, pos.y, pos.z);
 
                 if let Some(uuid) = self.player_uuid {
-                    let mut world = self.world.write().await;
-                    world.update_player_position(&uuid, pos.x, pos.y, pos.z);
-
-                    let view_distance = 8;
-                    if let Some(update) = world.compute_chunk_updates(&uuid, view_distance) {
-                        for chunk_pos in &update.to_unload {
-                            let unload_packet = play::encode_unload_chunk(chunk_pos.x, chunk_pos.z);
-                            self.write_packet(writer, &unload_packet).await?;
-                        }
-
-                        if !update.to_load.is_empty() {
-                            self.pending_chunks.extend(update.to_load.iter());
-                        }
-
-                        debug!(
-                            "Chunk update: queued {}, unloaded {}",
-                            update.to_load.len(),
-                            update.to_unload.len()
-                        );
+                    {
+                        let mut world = self.world.write().await;
+                        world.update_player_position(&uuid, pos.x, pos.y, pos.z);
                     }
-
-                    let limit = world
-                        .players
-                        .get(&uuid)
-                        .map(|p| p.chunks_per_tick)
-                        .unwrap_or(25.0);
-                    drop(world);
-
-                    self.drain_pending_chunks(writer, limit).await?;
+                    self.process_chunk_updates(writer, &uuid).await?;
                 }
             }
             // Set Player Position and Rotation
@@ -694,39 +705,15 @@ impl Connection {
                 );
 
                 if let Some(uuid) = self.player_uuid {
-                    let mut world = self.world.write().await;
-                    world.update_player_position(&uuid, pos_rot.x, pos_rot.y, pos_rot.z);
-                    world.update_player_rotation(&uuid, pos_rot.yaw, pos_rot.pitch);
-                    if let Some(player) = world.players.get_mut(&uuid) {
-                        player.on_ground = pos_rot.on_ground;
-                    }
-
-                    let view_distance = 8;
-                    if let Some(update) = world.compute_chunk_updates(&uuid, view_distance) {
-                        for chunk_pos in &update.to_unload {
-                            let unload_packet = play::encode_unload_chunk(chunk_pos.x, chunk_pos.z);
-                            self.write_packet(writer, &unload_packet).await?;
+                    {
+                        let mut world = self.world.write().await;
+                        world.update_player_position(&uuid, pos_rot.x, pos_rot.y, pos_rot.z);
+                        world.update_player_rotation(&uuid, pos_rot.yaw, pos_rot.pitch);
+                        if let Some(player) = world.players.get_mut(&uuid) {
+                            player.on_ground = pos_rot.on_ground;
                         }
-
-                        if !update.to_load.is_empty() {
-                            self.pending_chunks.extend(update.to_load.iter());
-                        }
-
-                        debug!(
-                            "Chunk update: queued {}, unloaded {}",
-                            update.to_load.len(),
-                            update.to_unload.len()
-                        );
                     }
-
-                    let limit = world
-                        .players
-                        .get(&uuid)
-                        .map(|p| p.chunks_per_tick)
-                        .unwrap_or(25.0);
-                    drop(world);
-
-                    self.drain_pending_chunks(writer, limit).await?;
+                    self.process_chunk_updates(writer, &uuid).await?;
                 }
             }
             // Move Player Rot
