@@ -1,0 +1,20 @@
+[
+  {"id": "minecraft:sentry", "data": {"asset_id": "minecraft:sentry", "template_item": "minecraft:sentry_armor_trim_smithing_template", "description": {"translate": "trim_pattern.minecraft.sentry"}, "decal": false}},
+  {"id": "minecraft:dune", "data": {"asset_id": "minecraft:dune", "template_item": "minecraft:dune_armor_trim_smithing_template", "description": {"translate": "trim_pattern.minecraft.dune"}, "decal": false}},
+  {"id": "minecraft:coast", "data": {"asset_id": "minecraft:coast", "template_item": "minecraft:coast_armor_trim_smithing_template", "description": {"translate": "trim_pattern.minecraft.coast"}, "decal": false}},
+  {"id": "minecraft:wild", "data": {"asset_id": "minecraft:wild", "template_item": "minecraft:wild_armor_trim_smithing_template", "description": {"translate": "trim_pattern.minecraft.wild"}, "decal": false}},
+  {"id": "minecraft:ward", "data": {"asset_id": "minecraft:ward", "template_item": "minecraft:ward_armor_trim_smithing_template", "description": {"translate": "trim_pattern.minecraft.ward"}, "decal": false}},
+  {"id": "minecraft:eye", "data": {"asset_id": "minecraft:eye", "template_item": "minecraft:eye_armor_trim_smithing_template", "description": {"translate": "trim_pattern.minecraft.eye"}, "decal": false}},
+  {"id": "minecraft:vex", "data": {"asset_id": "minecraft:vex", "template_item": "minecraft:vex_armor_trim_smithing_template", "description": {"translate": "trim_pattern.minecraft.vex"}, "decal": false}},
+  {"id": "minecraft:tide", "data": {"asset_id": "minecraft:tide", "template_item": "minecraft:tide_armor_trim_smithing_template", "description": {"translate": "trim_pattern.minecraft.tide"}, "decal": false}},
+  {"id": "minecraft:snout", "data": {"asset_id": "minecraft:snout", "template_item": "minecraft:snout_armor_trim_smithing_template", "description": {"translate": "trim_pattern.minecraft.snout"}, "decal": false}},
+  {"id": "minecraft:rib", "data": {"asset_id": "minecraft:rib", "template_item": "minecraft:rib_armor_trim_smithing_template", "description": {"translate": "trim_pattern.minecraft.rib"}, "decal": false}},
+  {"id": "minecraft:spire", "data": {"asset_id": "minecraft:spire", "template_item": "minecraft:spire_armor_trim_smithing_template", "description": {"translate": "trim_pattern.minecraft.spire"}, "decal": false}},
+  {"id": "minecraft:wayfinder", "data": {"asset_id": "minecraft:wayfinder", "template_item": "minecraft:wayfinder_armor_trim_smithing_template", "description": {"translate": "trim_pattern.minecraft.wayfinder"}, "decal": false}},
+  {"id": "minecraft:shaper", "data": {"asset_id": "minecraft:shaper", "template_item": "minecraft:shaper_armor_trim_smithing_template", "description": {"translate": "trim_pattern.minecraft.shaper"}, "decal": false}},
+  {"id": "minecraft:silence", "data": {"asset_id": "minecraft:silence", "template_item": "minecraft:silence_armor_trim_smithing_template", "description": {"translate": "trim_pattern.minecraft.silence"}, "decal": false}},
+  {"id": "minecraft:raiser", "data": {"asset_id": "minecraft:raiser", "template_item": "minecraft:raiser_armor_trim_smithing_template", "description": {"translate": "trim_pattern.minecraft.raiser"}, "decal": false}},
+  {"id": "minecraft:host", "data": {"asset_id": "minecraft:host", "template_item": "minecraft:host_armor_trim_smithing_template", "description": {"translate": "trim_pattern.minecraft.host"}, "decal": false}},
+  {"id": "minecraft:flow", "data": {"asset_id": "minecraft:flow", "template_item": "minecraft:flow_armor_trim_smithing_template", "description": {"translate": "trim_pattern.minecraft.flow"}, "decal": false}},
+  {"id": "minecraft:bolt", "data": {"asset_id": "minecraft:bolt", "template_item": "minecraft:bolt_armor_trim_smithing_template", "description": {"translate": "trim_pattern.minecraft.bolt"}, "decal": false}}
+]
