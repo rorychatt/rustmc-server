@@ -777,12 +777,16 @@ impl Connection {
             // Set Carried Item
             0x31 => {
                 let item = play::SetCarriedItem::decode(data)?;
+                if !item.is_valid_slot() {
+                    warn!("Invalid carried item slot {} from client", item.slot);
+                    return Ok(true);
+                }
                 debug!("Set carried item: slot={}", item.slot);
 
                 if let Some(uuid) = self.player_uuid {
                     let mut world = self.world.write().await;
                     if let Some(player) = world.players.get_mut(&uuid) {
-                        player.selected_slot = item.slot;
+                        player.selected_slot = item.slot as u8;
                     }
                 }
             }

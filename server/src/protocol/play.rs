@@ -301,10 +301,17 @@ pub struct SetCarriedItem {
 }
 
 impl SetCarriedItem {
+    pub const HOTBAR_SLOT_MIN: i16 = 0;
+    pub const HOTBAR_SLOT_MAX: i16 = 8;
+
     pub fn decode(data: &[u8]) -> io::Result<Self> {
         let mut cursor = Cursor::new(data);
         let slot = read_i16(&mut cursor)?;
         Ok(Self { slot })
+    }
+
+    pub fn is_valid_slot(&self) -> bool {
+        self.slot >= Self::HOTBAR_SLOT_MIN && self.slot <= Self::HOTBAR_SLOT_MAX
     }
 }
 
@@ -593,6 +600,23 @@ mod tests {
         let data = 0i16.to_be_bytes().to_vec();
         let item = SetCarriedItem::decode(&data).unwrap();
         assert_eq!(item.slot, 0);
+    }
+
+    #[test]
+    fn test_set_carried_item_valid_slots() {
+        for slot in 0..=8i16 {
+            let item = SetCarriedItem { slot };
+            assert!(item.is_valid_slot(), "slot {} should be valid", slot);
+        }
+    }
+
+    #[test]
+    fn test_set_carried_item_invalid_slots() {
+        let invalid_slots: &[i16] = &[-1, -100, 9, 10, 255, i16::MAX, i16::MIN];
+        for &slot in invalid_slots {
+            let item = SetCarriedItem { slot };
+            assert!(!item.is_valid_slot(), "slot {} should be invalid", slot);
+        }
     }
 
     mod proptest_tests {
