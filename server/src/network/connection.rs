@@ -408,7 +408,7 @@ impl Connection {
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<()> {
         let data_pack_version =
-            crate::protocol::version::data_pack_version_for(self.protocol_version)?;
+            crate::protocol::version::data_pack_version_for(self.protocol_version);
         let known_packs = configuration::encode_known_packs(data_pack_version)?;
         self.write_packet(writer, &known_packs).await?;
         Ok(())
@@ -451,7 +451,7 @@ impl Connection {
         &mut self,
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<()> {
-        let reg_set = registry::registry_set_for(self.protocol_version)?;
+        let reg_set = registry::registry_set_for(self.protocol_version);
         for reg_id in reg_set.registry_ids {
             let entries = registry::load(reg_id, self.protocol_version)?;
             let packet = configuration::encode_registry_data(reg_id, &entries)?;
