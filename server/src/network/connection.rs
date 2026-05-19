@@ -754,6 +754,13 @@ impl Connection {
             }
             SET_PLAYER_POSITION => {
                 let pos = play::PlayerPosition::decode(data)?;
+                if !pos.is_valid() {
+                    warn!(
+                        "Invalid player position from client: ({}, {}, {})",
+                        pos.x, pos.y, pos.z
+                    );
+                    return Ok(true);
+                }
                 debug!("Player position: ({}, {}, {})", pos.x, pos.y, pos.z);
 
                 if let Some(uuid) = self.player_uuid {
@@ -766,6 +773,13 @@ impl Connection {
             }
             SET_PLAYER_POSITION_AND_ROTATION => {
                 let pos_rot = play::PlayerPositionAndRotation::decode(data)?;
+                if !pos_rot.is_valid() {
+                    warn!(
+                        "Invalid player position+rotation from client: ({}, {}, {}) pitch={}",
+                        pos_rot.x, pos_rot.y, pos_rot.z, pos_rot.pitch
+                    );
+                    return Ok(true);
+                }
                 debug!(
                     "Player pos+rot: ({}, {}, {}) yaw={} pitch={}",
                     pos_rot.x, pos_rot.y, pos_rot.z, pos_rot.yaw, pos_rot.pitch
@@ -784,6 +798,13 @@ impl Connection {
             }
             SET_PLAYER_ROTATION => {
                 let rot = play::PlayerRotation::decode(data)?;
+                if !rot.is_valid() {
+                    warn!(
+                        "Invalid player rotation from client: yaw={} pitch={}",
+                        rot.yaw, rot.pitch
+                    );
+                    return Ok(true);
+                }
                 debug!("Player rotation: yaw={} pitch={}", rot.yaw, rot.pitch);
                 if let Some(uuid) = self.player_uuid {
                     let mut world = self.world.write().await;
@@ -804,6 +825,13 @@ impl Connection {
             }
             PLAYER_COMMAND => {
                 let cmd = play::PlayerCommand::decode(data)?;
+                if !cmd.is_valid() {
+                    warn!(
+                        "Invalid player command from client: action={} jump_boost={}",
+                        cmd.action_id, cmd.jump_boost
+                    );
+                    return Ok(true);
+                }
                 debug!(
                     "Player command: action={} jump_boost={}",
                     cmd.action_id, cmd.jump_boost
@@ -845,6 +873,10 @@ impl Connection {
             }
             SWING => {
                 let swing = play::Swing::decode(data)?;
+                if !swing.is_valid() {
+                    warn!("Invalid swing hand from client: {}", swing.hand);
+                    return Ok(true);
+                }
                 let animation = if swing.hand == 0 { 0u8 } else { 3u8 };
                 debug!(
                     "Player swing: hand={}",

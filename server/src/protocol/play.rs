@@ -12,6 +12,10 @@ pub struct PlayerPosition {
 }
 
 impl PlayerPosition {
+    const MAX_HORIZONTAL: f64 = 30_000_000.0;
+    const MIN_Y: f64 = -64.0;
+    const MAX_Y: f64 = 320.0;
+
     pub fn decode(data: &[u8]) -> io::Result<Self> {
         let mut cursor = Cursor::new(data);
         let x = read_f64(&mut cursor)?;
@@ -21,6 +25,16 @@ impl PlayerPosition {
         cursor.read_exact(&mut buf)?;
         let on_ground = buf[0] != 0;
         Ok(Self { x, y, z, on_ground })
+    }
+
+    pub fn is_valid(&self) -> bool {
+        self.x.is_finite()
+            && self.y.is_finite()
+            && self.z.is_finite()
+            && self.x.abs() <= Self::MAX_HORIZONTAL
+            && self.z.abs() <= Self::MAX_HORIZONTAL
+            && self.y >= Self::MIN_Y
+            && self.y <= Self::MAX_Y
     }
 }
 
@@ -203,6 +217,11 @@ pub struct PlayerPositionAndRotation {
 }
 
 impl PlayerPositionAndRotation {
+    const MAX_HORIZONTAL: f64 = 30_000_000.0;
+    const MIN_Y: f64 = -64.0;
+    const MAX_Y: f64 = 320.0;
+    const MAX_PITCH: f32 = 90.0;
+
     pub fn decode(data: &[u8]) -> io::Result<Self> {
         let mut cursor = Cursor::new(data);
         let x = read_f64(&mut cursor)?;
@@ -222,6 +241,20 @@ impl PlayerPositionAndRotation {
             on_ground,
         })
     }
+
+    pub fn is_valid(&self) -> bool {
+        self.x.is_finite()
+            && self.y.is_finite()
+            && self.z.is_finite()
+            && self.yaw.is_finite()
+            && self.pitch.is_finite()
+            && self.x.abs() <= Self::MAX_HORIZONTAL
+            && self.z.abs() <= Self::MAX_HORIZONTAL
+            && self.y >= Self::MIN_Y
+            && self.y <= Self::MAX_Y
+            && self.pitch >= -Self::MAX_PITCH
+            && self.pitch <= Self::MAX_PITCH
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -232,6 +265,8 @@ pub struct PlayerRotation {
 }
 
 impl PlayerRotation {
+    const MAX_PITCH: f32 = 90.0;
+
     pub fn decode(data: &[u8]) -> io::Result<Self> {
         let mut cursor = Cursor::new(data);
         let yaw = read_f32(&mut cursor)?;
@@ -244,6 +279,13 @@ impl PlayerRotation {
             pitch,
             on_ground,
         })
+    }
+
+    pub fn is_valid(&self) -> bool {
+        self.yaw.is_finite()
+            && self.pitch.is_finite()
+            && self.pitch >= -Self::MAX_PITCH
+            && self.pitch <= Self::MAX_PITCH
     }
 }
 
@@ -281,6 +323,10 @@ impl PlayerCommand {
             jump_boost,
         })
     }
+
+    pub fn is_valid(&self) -> bool {
+        (0..=6).contains(&self.action_id) && (0..=100).contains(&self.jump_boost)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -293,6 +339,10 @@ impl Swing {
         let mut cursor = Cursor::new(data);
         let hand = VarInt::read(&mut cursor)?.0;
         Ok(Self { hand })
+    }
+
+    pub fn is_valid(&self) -> bool {
+        self.hand == 0 || self.hand == 1
     }
 }
 
@@ -374,8 +424,8 @@ fn read_i16(reader: &mut impl Read) -> io::Result<i16> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::ids;
+    use super::*;
 
     #[test]
     fn test_player_position_decode() {
@@ -638,7 +688,6 @@ mod tests {
             let item = SetCarriedItem { slot };
             assert!(!item.is_valid_slot(), "slot {} should be invalid", slot);
         }
-
     }
     #[test]
     fn test_encode_entity_animation_main_hand() {
@@ -691,6 +740,215 @@ mod tests {
     fn test_encode_entity_base_flags_metadata_both() {
         let result = encode_entity_base_flags_metadata(0x02 | 0x08);
         assert_eq!(result, vec![0x00, 0x00, 0x0A]);
+    }
+
+    #[test]
+    fn test_player_position_valid() {
+        let pos = PlayerPosition {
+            x: 100.0,
+            y: 64.0,
+            z: -200.0,
+            on_ground: true,
+        };
+        assert!(pos.is_valid());
+    }
+
+    #[test]
+    fn test_player_position_invalid_nan() {
+        let pos = PlayerPosition {
+            x: f64::NAN,
+            y: 64.0,
+            z: 0.0,
+            on_ground: false,
+        };
+        assert!(!pos.is_valid());
+    }
+
+    #[test]
+    fn test_player_position_invalid_infinity() {
+        let pos = PlayerPosition {
+            x: 0.0,
+            y: f64::INFINITY,
+            z: 0.0,
+            on_ground: false,
+        };
+        assert!(!pos.is_valid());
+    }
+
+    #[test]
+    fn test_player_position_invalid_overflow() {
+        let pos = PlayerPosition {
+            x: 30_000_001.0,
+            y: 64.0,
+            z: 0.0,
+            on_ground: false,
+        };
+        assert!(!pos.is_valid());
+
+        let pos_z = PlayerPosition {
+            x: 0.0,
+            y: 64.0,
+            z: -30_000_001.0,
+            on_ground: false,
+        };
+        assert!(!pos_z.is_valid());
+    }
+
+    #[test]
+    fn test_player_position_invalid_y() {
+        let below = PlayerPosition {
+            x: 0.0,
+            y: -65.0,
+            z: 0.0,
+            on_ground: false,
+        };
+        assert!(!below.is_valid());
+
+        let above = PlayerPosition {
+            x: 0.0,
+            y: 321.0,
+            z: 0.0,
+            on_ground: false,
+        };
+        assert!(!above.is_valid());
+    }
+
+    #[test]
+    fn test_player_position_and_rotation_valid() {
+        let pr = PlayerPositionAndRotation {
+            x: 0.0,
+            y: 64.0,
+            z: 0.0,
+            yaw: 180.0,
+            pitch: 45.0,
+            on_ground: true,
+        };
+        assert!(pr.is_valid());
+    }
+
+    #[test]
+    fn test_player_position_and_rotation_invalid_pitch() {
+        let pr = PlayerPositionAndRotation {
+            x: 0.0,
+            y: 64.0,
+            z: 0.0,
+            yaw: 0.0,
+            pitch: 91.0,
+            on_ground: false,
+        };
+        assert!(!pr.is_valid());
+
+        let pr_neg = PlayerPositionAndRotation {
+            x: 0.0,
+            y: 64.0,
+            z: 0.0,
+            yaw: 0.0,
+            pitch: -91.0,
+            on_ground: false,
+        };
+        assert!(!pr_neg.is_valid());
+    }
+
+    #[test]
+    fn test_player_rotation_valid() {
+        let rot = PlayerRotation {
+            yaw: 359.0,
+            pitch: -90.0,
+            on_ground: true,
+        };
+        assert!(rot.is_valid());
+    }
+
+    #[test]
+    fn test_player_rotation_invalid_pitch() {
+        let rot = PlayerRotation {
+            yaw: 0.0,
+            pitch: 90.1,
+            on_ground: false,
+        };
+        assert!(!rot.is_valid());
+
+        let rot_neg = PlayerRotation {
+            yaw: 0.0,
+            pitch: -90.1,
+            on_ground: false,
+        };
+        assert!(!rot_neg.is_valid());
+    }
+
+    #[test]
+    fn test_player_rotation_invalid_nan() {
+        let rot = PlayerRotation {
+            yaw: f32::NAN,
+            pitch: 0.0,
+            on_ground: false,
+        };
+        assert!(!rot.is_valid());
+    }
+
+    #[test]
+    fn test_player_command_valid() {
+        for action in 0..=6 {
+            let cmd = PlayerCommand {
+                entity_id: 1,
+                action_id: action,
+                jump_boost: 50,
+            };
+            assert!(cmd.is_valid(), "action_id {} should be valid", action);
+        }
+        let cmd = PlayerCommand {
+            entity_id: 1,
+            action_id: 0,
+            jump_boost: 100,
+        };
+        assert!(cmd.is_valid());
+    }
+
+    #[test]
+    fn test_player_command_invalid_action() {
+        let cmd = PlayerCommand {
+            entity_id: 1,
+            action_id: 7,
+            jump_boost: 0,
+        };
+        assert!(!cmd.is_valid());
+
+        let cmd_neg = PlayerCommand {
+            entity_id: 1,
+            action_id: -1,
+            jump_boost: 0,
+        };
+        assert!(!cmd_neg.is_valid());
+    }
+
+    #[test]
+    fn test_player_command_invalid_jump_boost() {
+        let cmd = PlayerCommand {
+            entity_id: 1,
+            action_id: 0,
+            jump_boost: 101,
+        };
+        assert!(!cmd.is_valid());
+
+        let cmd_neg = PlayerCommand {
+            entity_id: 1,
+            action_id: 0,
+            jump_boost: -1,
+        };
+        assert!(!cmd_neg.is_valid());
+    }
+
+    #[test]
+    fn test_swing_valid() {
+        assert!(Swing { hand: 0 }.is_valid());
+        assert!(Swing { hand: 1 }.is_valid());
+    }
+
+    #[test]
+    fn test_swing_invalid() {
+        assert!(!Swing { hand: 2 }.is_valid());
+        assert!(!Swing { hand: -1 }.is_valid());
+        assert!(!Swing { hand: 100 }.is_valid());
     }
 
     mod proptest_tests {
