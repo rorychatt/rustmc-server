@@ -7,3 +7,4 @@ pub mod packet;
 pub mod play;
 pub mod status;
 pub mod types;
+pub mod version;
