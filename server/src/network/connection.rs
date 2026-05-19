@@ -8,7 +8,7 @@ use tokio::net::TcpStream;
 use tokio::sync::{broadcast, RwLock};
 use tracing::{debug, error, info, warn};
 
-use super::broadcast::BroadcastEvent;
+use super::broadcast::{is_within_render_distance, BroadcastEvent};
 use crate::config::Operators;
 use crate::protocol::chunk_data;
 use crate::protocol::configuration;
@@ -148,21 +148,49 @@ impl Connection {
                     }
                     event = broadcast_rx.recv() => {
                         match event {
-                            Ok(BroadcastEvent::EntityAnimation { exclude_uuid, entity_id, animation }) => {
+                            Ok(BroadcastEvent::EntityAnimation { exclude_uuid, entity_id, animation, source_chunk_x, source_chunk_z }) => {
                                 if self.player_uuid != Some(exclude_uuid) {
-                                    let packet = play::encode_entity_animation(entity_id, animation);
-                                    if let Err(e) = self.write_packet(&mut writer, &packet).await {
-                                        error!("Failed to send entity animation to {}: {}", self.addr, e);
-                                        break;
+                                    let in_range = if let Some(ref my_uuid) = self.player_uuid {
+                                        let world = self.world.read().await;
+                                        if let Some(me) = world.players.get(my_uuid) {
+                                            let my_chunk_x = me.x as i32 >> 4;
+                                            let my_chunk_z = me.z as i32 >> 4;
+                                            is_within_render_distance(source_chunk_x, source_chunk_z, my_chunk_x, my_chunk_z)
+                                        } else {
+                                            false
+                                        }
+                                    } else {
+                                        false
+                                    };
+                                    if in_range {
+                                        let packet = play::encode_entity_animation(entity_id, animation);
+                                        if let Err(e) = self.write_packet(&mut writer, &packet).await {
+                                            error!("Failed to send entity animation to {}: {}", self.addr, e);
+                                            break;
+                                        }
                                     }
                                 }
                             }
-                            Ok(BroadcastEvent::EntityMetadata { exclude_uuid, entity_id, metadata_bytes }) => {
+                            Ok(BroadcastEvent::EntityMetadata { exclude_uuid, entity_id, metadata_bytes, source_chunk_x, source_chunk_z }) => {
                                 if self.player_uuid != Some(exclude_uuid) {
-                                    let packet = play::encode_set_entity_metadata(entity_id, &metadata_bytes);
-                                    if let Err(e) = self.write_packet(&mut writer, &packet).await {
-                                        error!("Failed to send entity metadata to {}: {}", self.addr, e);
-                                        break;
+                                    let in_range = if let Some(ref my_uuid) = self.player_uuid {
+                                        let world = self.world.read().await;
+                                        if let Some(me) = world.players.get(my_uuid) {
+                                            let my_chunk_x = me.x as i32 >> 4;
+                                            let my_chunk_z = me.z as i32 >> 4;
+                                            is_within_render_distance(source_chunk_x, source_chunk_z, my_chunk_x, my_chunk_z)
+                                        } else {
+                                            false
+                                        }
+                                    } else {
+                                        false
+                                    };
+                                    if in_range {
+                                        let packet = play::encode_set_entity_metadata(entity_id, &metadata_bytes);
+                                        if let Err(e) = self.write_packet(&mut writer, &packet).await {
+                                            error!("Failed to send entity metadata to {}: {}", self.addr, e);
+                                            break;
+                                        }
                                     }
                                 }
                             }
@@ -821,10 +849,14 @@ impl Connection {
                         let flags: u8 = (if player.is_sneaking { 0x02 } else { 0 })
                             | (if player.is_sprinting { 0x08 } else { 0 });
                         let metadata_bytes = play::encode_entity_base_flags_metadata(flags);
+                        let source_chunk_x = player.x as i32 >> 4;
+                        let source_chunk_z = player.z as i32 >> 4;
                         let _ = self.broadcast_tx.send(BroadcastEvent::EntityMetadata {
                             exclude_uuid: uuid,
                             entity_id: player.entity_id,
                             metadata_bytes,
+                            source_chunk_x,
+                            source_chunk_z,
                         });
                     }
                 }
@@ -851,15 +883,17 @@ impl Connection {
                     if swing.hand == 0 { "main" } else { "off" }
                 );
                 if let Some(uuid) = self.player_uuid {
-                    let entity_id = {
+                    let player_info = {
                         let world = self.world.read().await;
-                        world.players.get(&uuid).map(|p| p.entity_id)
+                        world.players.get(&uuid).map(|p| (p.entity_id, p.x as i32 >> 4, p.z as i32 >> 4))
                     };
-                    if let Some(eid) = entity_id {
+                    if let Some((eid, source_chunk_x, source_chunk_z)) = player_info {
                         let _ = self.broadcast_tx.send(BroadcastEvent::EntityAnimation {
                             exclude_uuid: uuid,
                             entity_id: eid,
                             animation,
+                            source_chunk_x,
+                            source_chunk_z,
                         });
                     }
                 }
