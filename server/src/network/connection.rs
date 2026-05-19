@@ -598,7 +598,16 @@ impl Connection {
             }
             // Client Tick End
             0x0D => {
-                // Empty packet, just acknowledge
+                if let Some(uuid) = self.player_uuid {
+                    let world = self.world.read().await;
+                    let limit = world
+                        .players
+                        .get(&uuid)
+                        .map(|p| p.chunks_per_tick)
+                        .unwrap_or(25.0);
+                    drop(world);
+                    self.drain_pending_chunks(writer, limit).await?;
+                }
             }
             // Keep Alive (serverbound)
             0x1C => {

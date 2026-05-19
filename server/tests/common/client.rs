@@ -112,6 +112,11 @@ impl TestClient {
         self.send_packet(0x0B, &data).await
     }
 
+    #[allow(dead_code)]
+    pub async fn send_client_tick_end(&mut self) -> anyhow::Result<()> {
+        self.send_packet(0x0D, &[]).await
+    }
+
     async fn send_packet(&mut self, packet_id: i32, data: &[u8]) -> anyhow::Result<()> {
         let mut packet_buf = Vec::new();
         write_varint(&mut packet_buf, packet_id)?;
