@@ -592,6 +592,7 @@ impl Connection {
 
         // Initialize keep-alive tracking
         self.last_keep_alive_response = Some(Instant::now());
+        self.last_keep_alive_sent = Some(Instant::now());
 
         info!("Sent play login sequence to player {}", name);
 
