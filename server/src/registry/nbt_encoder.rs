@@ -1,13 +1,19 @@
 use serde_json::Value;
 use std::io::{self, Write};
 
-const FLOAT_FIELDS: &[&str] = &[
-    "temperature",
-    "downfall",
-    "music_volume",
-    "offset",
-    "creature_spawn_probability",
+/// Float fields scoped by (parent_key, field_name) to avoid false positives
+/// when field names like "offset" appear in non-registry contexts.
+const FLOAT_FIELDS: &[(&str, &str)] = &[
+    ("", "temperature"),
+    ("", "downfall"),
+    ("", "creature_spawn_probability"),
+    ("effects", "music_volume"),
+    ("mood_sound", "offset"),
 ];
+
+fn is_float_field(parent: &str, name: &str) -> bool {
+    FLOAT_FIELDS.contains(&(parent, name))
+}
 
 pub fn json_to_nbt(value: &Value) -> io::Result<Vec<u8>> {
     let mut data = Vec::new();
@@ -15,7 +21,7 @@ pub fn json_to_nbt(value: &Value) -> io::Result<Vec<u8>> {
         Value::Object(_) => {
             data.push(0x0A); // TAG_Compound
             data.extend_from_slice(&0u16.to_be_bytes()); // empty root name
-            write_compound_payload(&mut data, value)?;
+            write_compound_payload(&mut data, "", value)?;
         }
         _ => {
             return Err(io::Error::new(
@@ -27,46 +33,56 @@ pub fn json_to_nbt(value: &Value) -> io::Result<Vec<u8>> {
     Ok(data)
 }
 
-fn write_compound_payload(writer: &mut Vec<u8>, value: &Value) -> io::Result<()> {
+fn write_compound_payload(writer: &mut Vec<u8>, parent: &str, value: &Value) -> io::Result<()> {
     if let Value::Object(map) = value {
         for (key, val) in map {
-            write_named_tag(writer, key, val)?;
+            write_named_tag(writer, parent, key, val)?;
         }
         writer.push(0x00); // TAG_End
     }
     Ok(())
 }
 
-fn write_named_tag(writer: &mut Vec<u8>, name: &str, value: &Value) -> io::Result<()> {
-    let tag_type = get_tag_type_for_field(name, value);
+fn write_named_tag(
+    writer: &mut Vec<u8>,
+    parent: &str,
+    name: &str,
+    value: &Value,
+) -> io::Result<()> {
+    let tag_type = get_tag_type_for_field(parent, name, value);
     writer.push(tag_type);
     writer.write_all(&(name.len() as u16).to_be_bytes())?;
     writer.write_all(name.as_bytes())?;
-    write_tag_payload_for_field(writer, name, value)?;
+    write_tag_payload_for_field(writer, parent, name, value)?;
     Ok(())
 }
 
-fn get_tag_type_for_field(name: &str, value: &Value) -> u8 {
+fn get_tag_type_for_field(parent: &str, name: &str, value: &Value) -> u8 {
     if let Value::Number(n) = value {
-        if n.is_i64() && FLOAT_FIELDS.contains(&name) {
+        if n.is_i64() && is_float_field(parent, name) {
             return 0x05; // TAG_Float
         }
     }
     get_tag_type(value)
 }
 
-fn write_tag_payload_for_field(writer: &mut Vec<u8>, name: &str, value: &Value) -> io::Result<()> {
+fn write_tag_payload_for_field(
+    writer: &mut Vec<u8>,
+    parent: &str,
+    name: &str,
+    value: &Value,
+) -> io::Result<()> {
     if let Value::Number(n) = value {
-        if n.is_i64() && FLOAT_FIELDS.contains(&name) {
+        if n.is_i64() && is_float_field(parent, name) {
             let f = n.as_i64().unwrap() as f32;
             writer.write_all(&f.to_be_bytes())?;
             return Ok(());
         }
     }
-    write_tag_payload(writer, value)
+    write_tag_payload(writer, name, value)
 }
 
-fn write_tag_payload(writer: &mut Vec<u8>, value: &Value) -> io::Result<()> {
+fn write_tag_payload(writer: &mut Vec<u8>, parent: &str, value: &Value) -> io::Result<()> {
     match value {
         Value::Bool(b) => {
             writer.push(if *b { 1 } else { 0 });
@@ -99,12 +115,12 @@ fn write_tag_payload(writer: &mut Vec<u8>, value: &Value) -> io::Result<()> {
                 writer.push(elem_type);
                 writer.write_all(&(arr.len() as i32).to_be_bytes())?;
                 for item in arr {
-                    write_tag_payload(writer, item)?;
+                    write_tag_payload(writer, parent, item)?;
                 }
             }
         }
         Value::Object(_) => {
-            write_compound_payload(writer, value)?;
+            write_compound_payload(writer, parent, value)?;
         }
         Value::Null => {
             writer.push(0x00); // TAG_End for null
@@ -209,7 +225,6 @@ mod tests {
             .windows(temp_name.len())
             .position(|w| w == temp_name)
             .unwrap();
-        // tag type byte is before the 2-byte name length prefix
         assert_eq!(nbt[temp_pos - 2 - 1], 0x05); // TAG_Float
 
         let downfall_name = b"downfall";
@@ -218,6 +233,42 @@ mod tests {
             .position(|w| w == downfall_name)
             .unwrap();
         assert_eq!(nbt[downfall_pos - 2 - 1], 0x05); // TAG_Float
+    }
+
+    #[test]
+    fn test_nested_float_field_encoded_as_float() {
+        let value = json!({"effects": {"music_volume": 1}});
+        let nbt = json_to_nbt(&value).unwrap();
+        let name = b"music_volume";
+        let pos = nbt.windows(name.len()).position(|w| w == name).unwrap();
+        assert_eq!(nbt[pos - 2 - 1], 0x05); // TAG_Float
+    }
+
+    #[test]
+    fn test_offset_in_mood_sound_is_float() {
+        let value = json!({"mood_sound": {"offset": 2}});
+        let nbt = json_to_nbt(&value).unwrap();
+        let name = b"offset";
+        let pos = nbt.windows(name.len()).position(|w| w == name).unwrap();
+        assert_eq!(nbt[pos - 2 - 1], 0x05); // TAG_Float
+    }
+
+    #[test]
+    fn test_offset_at_root_stays_int() {
+        let value = json!({"offset": 1});
+        let nbt = json_to_nbt(&value).unwrap();
+        let name = b"offset";
+        let pos = nbt.windows(name.len()).position(|w| w == name).unwrap();
+        assert_eq!(nbt[pos - 2 - 1], 0x03); // TAG_Int — not coerced at root
+    }
+
+    #[test]
+    fn test_offset_in_wrong_parent_stays_int() {
+        let value = json!({"particles": {"offset": 5}});
+        let nbt = json_to_nbt(&value).unwrap();
+        let name = b"offset";
+        let pos = nbt.windows(name.len()).position(|w| w == name).unwrap();
+        assert_eq!(nbt[pos - 2 - 1], 0x03); // TAG_Int — wrong parent
     }
 
     #[test]
