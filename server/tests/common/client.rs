@@ -56,6 +56,16 @@ impl TestClient {
         self.send_packet(0x03, &[]).await
     }
 
+    pub async fn send_known_packs_response(&mut self) -> anyhow::Result<()> {
+        let mut data = Vec::new();
+        write_varint(&mut data, 0)?; // Zero known packs
+        self.send_packet(0x07, &data).await
+    }
+
+    pub async fn send_acknowledge_finish_configuration(&mut self) -> anyhow::Result<()> {
+        self.send_packet(0x03, &[]).await
+    }
+
     pub async fn send_player_position(
         &mut self,
         x: f64,
@@ -68,14 +78,32 @@ impl TestClient {
         data.extend_from_slice(&y.to_be_bytes());
         data.extend_from_slice(&z.to_be_bytes());
         data.push(if on_ground { 1 } else { 0 });
-        self.send_packet(0x14, &data).await
+        self.send_packet(0x1D, &data).await
     }
 
     #[allow(dead_code)]
     pub async fn send_chat_message(&mut self, message: &str) -> anyhow::Result<()> {
         let mut data = Vec::new();
         write_string(&mut data, message)?;
-        self.send_packet(0x05, &data).await
+        self.send_packet(0x08, &data).await
+    }
+
+    #[allow(dead_code)]
+    pub async fn send_confirm_teleportation(&mut self, teleport_id: i32) -> anyhow::Result<()> {
+        let mut data = Vec::new();
+        write_varint(&mut data, teleport_id)?;
+        self.send_packet(0x00, &data).await
+    }
+
+    #[allow(dead_code)]
+    pub async fn send_player_loaded(&mut self) -> anyhow::Result<()> {
+        self.send_packet(0x2C, &[]).await
+    }
+
+    #[allow(dead_code)]
+    pub async fn send_chunk_batch_received(&mut self, chunks_per_tick: f32) -> anyhow::Result<()> {
+        let data = chunks_per_tick.to_be_bytes().to_vec();
+        self.send_packet(0x0B, &data).await
     }
 
     async fn send_packet(&mut self, packet_id: i32, data: &[u8]) -> anyhow::Result<()> {
@@ -120,7 +148,9 @@ impl TestClient {
                 let remaining_length = packet_length - varint_size(data_length);
 
                 let mut compressed_or_uncompressed = vec![0u8; remaining_length as usize];
-                self.stream.read_exact(&mut compressed_or_uncompressed).await?;
+                self.stream
+                    .read_exact(&mut compressed_or_uncompressed)
+                    .await?;
 
                 let payload = if data_length == 0 {
                     // Below threshold - uncompressed
