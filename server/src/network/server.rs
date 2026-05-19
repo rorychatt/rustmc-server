@@ -4,11 +4,13 @@ use tokio::sync::RwLock;
 use tracing::{error, info};
 
 use super::connection::Connection;
+use crate::config::Operators;
 use crate::world::World;
 
 pub struct Server {
     addr: String,
     world: Arc<RwLock<World>>,
+    operators: Arc<Operators>,
 }
 
 impl Server {
@@ -16,6 +18,7 @@ impl Server {
         Self {
             addr,
             world: Arc::new(RwLock::new(World::new())),
+            operators: Arc::new(Operators::load()),
         }
     }
 
@@ -32,8 +35,9 @@ impl Server {
             match listener.accept().await {
                 Ok((stream, addr)) => {
                     let world = self.world.clone();
+                    let operators = self.operators.clone();
                     tokio::spawn(async move {
-                        let connection = Connection::new(addr, world);
+                        let connection = Connection::new(addr, world, operators);
                         connection.handle(stream).await;
                     });
                 }
