@@ -9,6 +9,7 @@ use tokio::sync::{broadcast, RwLock};
 use tracing::{debug, error, info, warn};
 
 use super::broadcast::BroadcastEvent;
+use crate::config::Operators;
 use crate::protocol::chunk_data;
 use crate::protocol::configuration;
 use crate::protocol::handshake::{Handshake, NextState};
@@ -38,6 +39,7 @@ pub struct Connection {
     addr: SocketAddr,
     state: ConnectionState,
     world: Arc<RwLock<World>>,
+    operators: Arc<Operators>,
     player_uuid: Option<Uuid>,
     player_name: Option<String>,
     compression_enabled: bool,
@@ -57,12 +59,14 @@ impl Connection {
     pub fn new(
         addr: SocketAddr,
         world: Arc<RwLock<World>>,
+        operators: Arc<Operators>,
         broadcast_tx: broadcast::Sender<BroadcastEvent>,
     ) -> Self {
         Self {
             addr,
             state: ConnectionState::Handshake,
             world,
+            operators,
             player_uuid: None,
             player_name: None,
             compression_enabled: false,
@@ -528,10 +532,11 @@ impl Connection {
     ) -> std::io::Result<()> {
         let uuid = self.player_uuid.unwrap();
         let name = self.player_name.clone().unwrap();
+        let op_level = self.operators.get_op_level(&uuid);
 
         let entity_id = {
             let mut world = self.world.write().await;
-            world.add_player(uuid, name.clone())
+            world.add_player_with_op_level(uuid, name.clone(), op_level)
         };
 
         // 1. Login (Play) packet
@@ -678,12 +683,26 @@ impl Connection {
             CHAT_COMMAND => {
                 let command = play::ChatCommand::decode(data)?;
                 if command.command.starts_with("transfer ") {
-                    let parts: Vec<&str> = command.command.splitn(3, ' ').collect();
-                    if parts.len() == 3 {
-                        if let Ok(port) = parts[2].parse::<i32>() {
-                            let packet = play::encode_transfer(parts[1], port)?;
-                            self.write_packet(writer, &packet).await?;
-                            return Ok(false);
+                    let has_permission = if let Some(uuid) = self.player_uuid {
+                        let world = self.world.read().await;
+                        world.players.get(&uuid).is_some_and(|p| p.op_level >= 3)
+                    } else {
+                        false
+                    };
+
+                    if !has_permission {
+                        let msg = play::encode_system_chat_message(
+                            "You don't have permission to use this command.",
+                        )?;
+                        self.write_packet(writer, &msg).await?;
+                    } else {
+                        let parts: Vec<&str> = command.command.splitn(3, ' ').collect();
+                        if parts.len() == 3 {
+                            if let Ok(port) = parts[2].parse::<i32>() {
+                                let packet = play::encode_transfer(parts[1], port)?;
+                                self.write_packet(writer, &packet).await?;
+                                return Ok(false);
+                            }
                         }
                     }
                 }
@@ -864,9 +883,10 @@ mod tests {
 
     fn make_connection() -> Connection {
         let world = Arc::new(RwLock::new(World::new()));
+        let operators = Arc::new(Operators::empty());
         let addr: SocketAddr = "127.0.0.1:25565".parse().unwrap();
         let (broadcast_tx, _broadcast_rx) = broadcast::channel(16);
-        Connection::new(addr, world, broadcast_tx)
+        Connection::new(addr, world, operators, broadcast_tx)
     }
 
     #[test]
