@@ -97,16 +97,16 @@ mod tests {
     #[test]
     fn test_registry_entry_counts() {
         assert_eq!(load_registry("minecraft:dimension_type").unwrap().len(), 4);
-        assert!(load_registry("minecraft:worldgen/biome").unwrap().len() >= 50);
-        assert!(load_registry("minecraft:damage_type").unwrap().len() >= 40);
-        assert!(load_registry("minecraft:painting_variant").unwrap().len() >= 26);
+        assert_eq!(load_registry("minecraft:worldgen/biome").unwrap().len(), 65);
+        assert_eq!(load_registry("minecraft:damage_type").unwrap().len(), 49);
+        assert_eq!(load_registry("minecraft:painting_variant").unwrap().len(), 50);
         assert_eq!(load_registry("minecraft:wolf_variant").unwrap().len(), 9);
         assert_eq!(load_registry("minecraft:chat_type").unwrap().len(), 7);
-        assert_eq!(load_registry("minecraft:trim_material").unwrap().len(), 10);
-        assert!(load_registry("minecraft:trim_pattern").unwrap().len() >= 16);
-        assert!(load_registry("minecraft:banner_pattern").unwrap().len() >= 40);
-        assert!(load_registry("minecraft:enchantment").unwrap().len() >= 40);
-        assert!(load_registry("minecraft:jukebox_song").unwrap().len() >= 15);
+        assert_eq!(load_registry("minecraft:trim_material").unwrap().len(), 11);
+        assert_eq!(load_registry("minecraft:trim_pattern").unwrap().len(), 18);
+        assert_eq!(load_registry("minecraft:banner_pattern").unwrap().len(), 43);
+        assert_eq!(load_registry("minecraft:enchantment").unwrap().len(), 42);
+        assert_eq!(load_registry("minecraft:jukebox_song").unwrap().len(), 19);
         assert_eq!(load_registry("minecraft:instrument").unwrap().len(), 8);
     }
 
