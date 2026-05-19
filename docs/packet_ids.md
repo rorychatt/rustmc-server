@@ -47,6 +47,7 @@ Run `tools/validate_packet_ids.sh <path/to/packets.json>` to compare the source 
 
 | Direction    | Packet Name                    | ID   |
 |-------------|--------------------------------|------|
+| Clientbound | Entity Animation               | 0x03 |
 | Clientbound | Chunk Batch Finished           | 0x0B |
 | Clientbound | Chunk Batch Start              | 0x0C |
 | Clientbound | Forget Level Chunk             | 0x25 |
@@ -55,6 +56,7 @@ Run `tools/validate_packet_ids.sh <path/to/packets.json>` to compare the source 
 | Clientbound | Level Chunk With Light          | 0x2D |
 | Clientbound | Login (Play)                   | 0x31 |
 | Clientbound | Player Position                | 0x48 |
+| Clientbound | Set Entity Metadata            | 0x60 |
 | Clientbound | System Chat                    | 0x79 |
 | Serverbound | Accept Teleportation           | 0x00 |
 | Serverbound | Chat Command                   | 0x07 |
@@ -64,7 +66,9 @@ Run `tools/validate_packet_ids.sh <path/to/packets.json>` to compare the source 
 | Serverbound | Keep Alive                     | 0x1C |
 | Serverbound | Move Player Pos                | 0x1E |
 | Serverbound | Move Player Pos Rot            | 0x1F |
+| Serverbound | Player Command                 | 0x25 |
 | Serverbound | Player Loaded                  | 0x2C |
+| Serverbound | Swing                          | 0x38 |
 
 ## Intentional Deviations
 

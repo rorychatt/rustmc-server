@@ -33,11 +33,12 @@ fn test_registry_entry_counts_match_generated() {
 
 #[test]
 fn test_registry_field_completeness() {
-    let reg_set = registry::registry_set_for(PROTOCOL_VERSION).unwrap();
+    let reg_set = registry::registry_set_for(PROTOCOL_VERSION);
     for registry_id in reg_set.registry_ids {
         let entries = registry::load(registry_id, PROTOCOL_VERSION).unwrap();
         for entry in entries {
             assert!(!entry.id.is_empty(), "{registry_id}: entry has empty id");
+
             assert!(
                 entry.id.starts_with("minecraft:"),
                 "{registry_id}: entry id '{}' missing minecraft: namespace",
@@ -68,6 +69,7 @@ fn test_registry_field_completeness() {
 fn test_registry_field_types() {
     let dimension_entries = registry::load("minecraft:dimension_type", PROTOCOL_VERSION).unwrap();
     for entry in dimension_entries {
+
         assert!(
             entry.nbt_data.len() > 20,
             "dimension_type/{}: NBT data suspiciously short ({} bytes)",
@@ -78,6 +80,7 @@ fn test_registry_field_types() {
 
     let biome_entries = registry::load("minecraft:worldgen/biome", PROTOCOL_VERSION).unwrap();
     for entry in biome_entries {
+
         assert!(
             entry.nbt_data.len() > 10,
             "worldgen/biome/{}: NBT data suspiciously short ({} bytes)",
@@ -88,6 +91,7 @@ fn test_registry_field_types() {
 
     let damage_entries = registry::load("minecraft:damage_type", PROTOCOL_VERSION).unwrap();
     for entry in damage_entries {
+
         assert!(
             entry.nbt_data.len() > 10,
             "damage_type/{}: NBT data suspiciously short ({} bytes)",
@@ -98,6 +102,7 @@ fn test_registry_field_types() {
 
     let enchantment_entries = registry::load("minecraft:enchantment", PROTOCOL_VERSION).unwrap();
     for entry in enchantment_entries {
+
         assert!(
             entry.nbt_data.len() > 20,
             "enchantment/{}: NBT data suspiciously short ({} bytes)",

@@ -124,11 +124,23 @@ async fn complete_login_flow(client: &mut TestClient) {
         }
     }
 
+    // Send Acknowledge Finish Configuration to transition server to Play state
+    client
+        .send_acknowledge_finish_configuration()
+        .await
+        .expect("Failed to send acknowledge finish configuration");
+
     // Read join game (0x31)
     let _join_game = client
         .read_packet()
         .await
         .expect("Failed to read join game");
+
+    // Read player info update (0x40)
+    let _player_info = client
+        .read_packet()
+        .await
+        .expect("Failed to read player info update");
 
     // Read sync position (0x48)
     let _sync_pos = client
@@ -144,6 +156,13 @@ async fn drain_initial_play_packets(client: &mut TestClient) {
         .await
         .expect("Failed to read game event");
     assert_eq!(game_event.id, 0x26, "Expected game event packet");
+
+    // Read Set Center Chunk (0x58)
+    let center_chunk = client
+        .read_packet()
+        .await
+        .expect("Failed to read set center chunk");
+    assert_eq!(center_chunk.id, 0x58, "Expected set center chunk packet");
 
     // Read Chunk Batch Start (0x0C)
     let batch_start = client
