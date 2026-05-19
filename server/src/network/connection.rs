@@ -39,7 +39,7 @@ pub struct Connection {
     addr: SocketAddr,
     state: ConnectionState,
     world: Arc<RwLock<World>>,
-    operators: Arc<Operators>,
+    operators: Arc<RwLock<Operators>>,
     player_uuid: Option<Uuid>,
     player_name: Option<String>,
     compression_enabled: bool,
@@ -59,7 +59,7 @@ impl Connection {
     pub fn new(
         addr: SocketAddr,
         world: Arc<RwLock<World>>,
-        operators: Arc<Operators>,
+        operators: Arc<RwLock<Operators>>,
         broadcast_tx: broadcast::Sender<BroadcastEvent>,
     ) -> Self {
         Self {
@@ -532,7 +532,10 @@ impl Connection {
     ) -> std::io::Result<()> {
         let uuid = self.player_uuid.unwrap();
         let name = self.player_name.clone().unwrap();
-        let op_level = self.operators.get_op_level(&uuid);
+        let op_level = {
+            let ops = self.operators.read().await;
+            ops.get_op_level(&uuid)
+        };
 
         let entity_id = {
             let mut world = self.world.write().await;
@@ -683,14 +686,14 @@ impl Connection {
             }
             CHAT_COMMAND => {
                 let command = play::ChatCommand::decode(data)?;
-                if command.command.starts_with("transfer ") {
-                    let has_permission = if let Some(uuid) = self.player_uuid {
-                        let world = self.world.read().await;
-                        world.players.get(&uuid).is_some_and(|p| p.op_level >= 3)
-                    } else {
-                        false
-                    };
+                let has_permission = if let Some(uuid) = self.player_uuid {
+                    let world = self.world.read().await;
+                    world.players.get(&uuid).is_some_and(|p| p.op_level >= 3)
+                } else {
+                    false
+                };
 
+                if command.command.starts_with("transfer ") {
                     if !has_permission {
                         let msg = play::encode_system_chat_message(
                             "You don't have permission to use this command.",
@@ -704,6 +707,101 @@ impl Connection {
                                 self.write_packet(writer, &packet).await?;
                                 return Ok(false);
                             }
+                        }
+                    }
+                } else if command.command.starts_with("op ") {
+                    if !has_permission {
+                        let msg = play::encode_system_chat_message(
+                            "You don't have permission to use this command.",
+                        )?;
+                        self.write_packet(writer, &msg).await?;
+                    } else {
+                        let parts: Vec<&str> = command.command.splitn(3, ' ').collect();
+                        let target_name = parts[1];
+                        let level: u8 = parts
+                            .get(2)
+                            .and_then(|s| s.parse().ok())
+                            .unwrap_or(3);
+
+                        let target_uuid = {
+                            let world = self.world.read().await;
+                            world
+                                .players
+                                .iter()
+                                .find(|(_, p)| p.name == target_name)
+                                .map(|(uuid, _)| *uuid)
+                        };
+
+                        if let Some(target_uuid) = target_uuid {
+                            {
+                                let mut ops = self.operators.write().await;
+                                ops.set_op_level(
+                                    target_uuid,
+                                    target_name.to_string(),
+                                    level,
+                                );
+                                ops.save();
+                            }
+                            {
+                                let mut world = self.world.write().await;
+                                if let Some(player) = world.players.get_mut(&target_uuid) {
+                                    player.op_level = level;
+                                }
+                            }
+                            let msg = play::encode_system_chat_message(&format!(
+                                "Set {} as operator level {}",
+                                target_name, level
+                            ))?;
+                            self.write_packet(writer, &msg).await?;
+                        } else {
+                            let msg = play::encode_system_chat_message(&format!(
+                                "Player '{}' is not online",
+                                target_name
+                            ))?;
+                            self.write_packet(writer, &msg).await?;
+                        }
+                    }
+                } else if command.command.starts_with("deop ") {
+                    if !has_permission {
+                        let msg = play::encode_system_chat_message(
+                            "You don't have permission to use this command.",
+                        )?;
+                        self.write_packet(writer, &msg).await?;
+                    } else {
+                        let target_name = &command.command[5..];
+
+                        let target_uuid = {
+                            let world = self.world.read().await;
+                            world
+                                .players
+                                .iter()
+                                .find(|(_, p)| p.name == target_name)
+                                .map(|(uuid, _)| *uuid)
+                        };
+
+                        if let Some(target_uuid) = target_uuid {
+                            {
+                                let mut ops = self.operators.write().await;
+                                ops.remove_op(&target_uuid);
+                                ops.save();
+                            }
+                            {
+                                let mut world = self.world.write().await;
+                                if let Some(player) = world.players.get_mut(&target_uuid) {
+                                    player.op_level = 0;
+                                }
+                            }
+                            let msg = play::encode_system_chat_message(&format!(
+                                "Removed {} as operator",
+                                target_name
+                            ))?;
+                            self.write_packet(writer, &msg).await?;
+                        } else {
+                            let msg = play::encode_system_chat_message(&format!(
+                                "Player '{}' is not online",
+                                target_name
+                            ))?;
+                            self.write_packet(writer, &msg).await?;
                         }
                     }
                 }
@@ -884,7 +982,7 @@ mod tests {
 
     fn make_connection() -> Connection {
         let world = Arc::new(RwLock::new(World::new()));
-        let operators = Arc::new(Operators::empty());
+        let operators = Arc::new(RwLock::new(Operators::empty()));
         let addr: SocketAddr = "127.0.0.1:25565".parse().unwrap();
         let (broadcast_tx, _broadcast_rx) = broadcast::channel(16);
         Connection::new(addr, world, operators, broadcast_tx)
