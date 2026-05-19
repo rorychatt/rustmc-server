@@ -218,6 +218,12 @@ impl RawPacket {
         let port = read_varint(&mut cursor)?;
         Ok((host, port))
     }
+
+    pub fn read_system_chat(&self) -> anyhow::Result<String> {
+        let mut cursor = Cursor::new(&self.data);
+        let json = read_string(&mut cursor)?;
+        Ok(json)
+    }
 }
 
 fn write_varint(writer: &mut impl Write, value: i32) -> anyhow::Result<()> {
