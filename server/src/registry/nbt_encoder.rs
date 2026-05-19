@@ -1,6 +1,14 @@
 use serde_json::Value;
 use std::io::{self, Write};
 
+const FLOAT_FIELDS: &[&str] = &[
+    "temperature",
+    "downfall",
+    "music_volume",
+    "offset",
+    "creature_spawn_probability",
+];
+
 pub fn json_to_nbt(value: &Value) -> io::Result<Vec<u8>> {
     let mut data = Vec::new();
     match value {
@@ -30,12 +38,32 @@ fn write_compound_payload(writer: &mut Vec<u8>, value: &Value) -> io::Result<()>
 }
 
 fn write_named_tag(writer: &mut Vec<u8>, name: &str, value: &Value) -> io::Result<()> {
-    let tag_type = get_tag_type(value);
+    let tag_type = get_tag_type_for_field(name, value);
     writer.push(tag_type);
     writer.write_all(&(name.len() as u16).to_be_bytes())?;
     writer.write_all(name.as_bytes())?;
-    write_tag_payload(writer, value)?;
+    write_tag_payload_for_field(writer, name, value)?;
     Ok(())
+}
+
+fn get_tag_type_for_field(name: &str, value: &Value) -> u8 {
+    if let Value::Number(n) = value {
+        if n.is_i64() && FLOAT_FIELDS.contains(&name) {
+            return 0x05; // TAG_Float
+        }
+    }
+    get_tag_type(value)
+}
+
+fn write_tag_payload_for_field(writer: &mut Vec<u8>, name: &str, value: &Value) -> io::Result<()> {
+    if let Value::Number(n) = value {
+        if n.is_i64() && FLOAT_FIELDS.contains(&name) {
+            let f = n.as_i64().unwrap() as f32;
+            writer.write_all(&f.to_be_bytes())?;
+            return Ok(());
+        }
+    }
+    write_tag_payload(writer, value)
 }
 
 fn write_tag_payload(writer: &mut Vec<u8>, value: &Value) -> io::Result<()> {
@@ -170,5 +198,43 @@ mod tests {
         let value = json!({"message_id": "generic", "scaling": "never"});
         let nbt = json_to_nbt(&value).unwrap();
         assert!(nbt.len() > 20);
+    }
+
+    #[test]
+    fn test_float_field_integer_value_encoded_as_float() {
+        let value = json!({"temperature": 0, "downfall": 1});
+        let nbt = json_to_nbt(&value).unwrap();
+        let temp_name = b"temperature";
+        let temp_pos = nbt
+            .windows(temp_name.len())
+            .position(|w| w == temp_name)
+            .unwrap();
+        // tag type byte is before the 2-byte name length prefix
+        assert_eq!(nbt[temp_pos - 2 - 1], 0x05); // TAG_Float
+
+        let downfall_name = b"downfall";
+        let downfall_pos = nbt
+            .windows(downfall_name.len())
+            .position(|w| w == downfall_name)
+            .unwrap();
+        assert_eq!(nbt[downfall_pos - 2 - 1], 0x05); // TAG_Float
+    }
+
+    #[test]
+    fn test_non_float_field_integer_stays_int() {
+        let value = json!({"min_delay": 12000});
+        let nbt = json_to_nbt(&value).unwrap();
+        let name = b"min_delay";
+        let pos = nbt.windows(name.len()).position(|w| w == name).unwrap();
+        assert_eq!(nbt[pos - 2 - 1], 0x03); // TAG_Int
+    }
+
+    #[test]
+    fn test_float_field_with_float_value_unchanged() {
+        let value = json!({"temperature": 0.5});
+        let nbt = json_to_nbt(&value).unwrap();
+        let name = b"temperature";
+        let pos = nbt.windows(name.len()).position(|w| w == name).unwrap();
+        assert_eq!(nbt[pos - 2 - 1], 0x05); // TAG_Float (already float from value)
     }
 }

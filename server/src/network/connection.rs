@@ -9,6 +9,7 @@ use tokio::sync::{broadcast, RwLock};
 use tracing::{debug, error, info, warn};
 
 use super::broadcast::BroadcastEvent;
+use crate::config::Operators;
 use crate::protocol::chunk_data;
 use crate::protocol::configuration;
 use crate::protocol::handshake::{Handshake, NextState};
@@ -38,6 +39,7 @@ pub struct Connection {
     addr: SocketAddr,
     state: ConnectionState,
     world: Arc<RwLock<World>>,
+    operators: Arc<Operators>,
     player_uuid: Option<Uuid>,
     player_name: Option<String>,
     compression_enabled: bool,
@@ -57,12 +59,14 @@ impl Connection {
     pub fn new(
         addr: SocketAddr,
         world: Arc<RwLock<World>>,
+        operators: Arc<Operators>,
         broadcast_tx: broadcast::Sender<BroadcastEvent>,
     ) -> Self {
         Self {
             addr,
             state: ConnectionState::Handshake,
             world,
+            operators,
             player_uuid: None,
             player_name: None,
             compression_enabled: false,
@@ -464,7 +468,7 @@ impl Connection {
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<()> {
         let data_pack_version =
-            crate::protocol::version::data_pack_version_for(self.protocol_version)?;
+            crate::protocol::version::data_pack_version_for(self.protocol_version);
         let known_packs = configuration::encode_known_packs(data_pack_version)?;
         self.write_packet(writer, &known_packs).await?;
         Ok(())
@@ -507,11 +511,9 @@ impl Connection {
         &mut self,
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<()> {
-        let reg_set = registry::registry_set_for(self.protocol_version)?;
-        for reg_id in reg_set.registry_ids {
-            let entries = registry::load_versioned(reg_id, self.protocol_version)?;
-            let packet = configuration::encode_registry_data(reg_id, &entries)?;
-            self.write_packet(writer, &packet).await?;
+        let packets = registry::cached_registry_packets(self.protocol_version)?;
+        for packet in packets {
+            self.write_packet(writer, packet).await?;
         }
 
         let tags = configuration::encode_update_tags()?;
@@ -530,10 +532,11 @@ impl Connection {
     ) -> std::io::Result<()> {
         let uuid = self.player_uuid.unwrap();
         let name = self.player_name.clone().unwrap();
+        let op_level = self.operators.get_op_level(&uuid);
 
         let entity_id = {
             let mut world = self.world.write().await;
-            world.add_player(uuid, name.clone())
+            world.add_player_with_op_level(uuid, name.clone(), op_level)
         };
 
         // 1. Login (Play) packet
@@ -591,6 +594,7 @@ impl Connection {
         self.write_packet(writer, &batch_finished).await?;
 
         // Initialize keep-alive tracking
+        self.last_keep_alive_sent = Some(Instant::now());
         self.last_keep_alive_response = Some(Instant::now());
 
         info!("Sent play login sequence to player {}", name);
@@ -630,6 +634,41 @@ impl Connection {
         Ok(())
     }
 
+    async fn process_chunk_updates(
+        &mut self,
+        writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
+        uuid: &Uuid,
+    ) -> std::io::Result<()> {
+        let mut world = self.world.write().await;
+        let view_distance = 8;
+        if let Some(update) = world.compute_chunk_updates(uuid, view_distance) {
+            for chunk_pos in &update.to_unload {
+                let unload_packet = play::encode_unload_chunk(chunk_pos.x, chunk_pos.z);
+                self.write_packet(writer, &unload_packet).await?;
+            }
+
+            if !update.to_load.is_empty() {
+                self.pending_chunks.extend(update.to_load.iter());
+            }
+
+            debug!(
+                "Chunk update: queued {}, unloaded {}",
+                update.to_load.len(),
+                update.to_unload.len()
+            );
+        }
+
+        let limit = world
+            .players
+            .get(uuid)
+            .map(|p| p.chunks_per_tick)
+            .unwrap_or(25.0);
+        drop(world);
+
+        self.drain_pending_chunks(writer, limit).await?;
+        Ok(())
+    }
+
     async fn handle_play(
         &mut self,
         packet_id: i32,
@@ -645,12 +684,26 @@ impl Connection {
             CHAT_COMMAND => {
                 let command = play::ChatCommand::decode(data)?;
                 if command.command.starts_with("transfer ") {
-                    let parts: Vec<&str> = command.command.splitn(3, ' ').collect();
-                    if parts.len() == 3 {
-                        if let Ok(port) = parts[2].parse::<i32>() {
-                            let packet = play::encode_transfer(parts[1], port)?;
-                            self.write_packet(writer, &packet).await?;
-                            return Ok(false);
+                    let has_permission = if let Some(uuid) = self.player_uuid {
+                        let world = self.world.read().await;
+                        world.players.get(&uuid).is_some_and(|p| p.op_level >= 3)
+                    } else {
+                        false
+                    };
+
+                    if !has_permission {
+                        let msg = play::encode_system_chat_message(
+                            "You don't have permission to use this command.",
+                        )?;
+                        self.write_packet(writer, &msg).await?;
+                    } else {
+                        let parts: Vec<&str> = command.command.splitn(3, ' ').collect();
+                        if parts.len() == 3 {
+                            if let Ok(port) = parts[2].parse::<i32>() {
+                                let packet = play::encode_transfer(parts[1], port)?;
+                                self.write_packet(writer, &packet).await?;
+                                return Ok(false);
+                            }
                         }
                     }
                 }
@@ -704,35 +757,11 @@ impl Connection {
                 debug!("Player position: ({}, {}, {})", pos.x, pos.y, pos.z);
 
                 if let Some(uuid) = self.player_uuid {
-                    let mut world = self.world.write().await;
-                    world.update_player_position(&uuid, pos.x, pos.y, pos.z);
-
-                    let view_distance = 8;
-                    if let Some(update) = world.compute_chunk_updates(&uuid, view_distance) {
-                        for chunk_pos in &update.to_unload {
-                            let unload_packet = play::encode_unload_chunk(chunk_pos.x, chunk_pos.z);
-                            self.write_packet(writer, &unload_packet).await?;
-                        }
-
-                        if !update.to_load.is_empty() {
-                            self.pending_chunks.extend(update.to_load.iter());
-                        }
-
-                        debug!(
-                            "Chunk update: queued {}, unloaded {}",
-                            update.to_load.len(),
-                            update.to_unload.len()
-                        );
+                    {
+                        let mut world = self.world.write().await;
+                        world.update_player_position(&uuid, pos.x, pos.y, pos.z);
                     }
-
-                    let limit = world
-                        .players
-                        .get(&uuid)
-                        .map(|p| p.chunks_per_tick)
-                        .unwrap_or(25.0);
-                    drop(world);
-
-                    self.drain_pending_chunks(writer, limit).await?;
+                    self.process_chunk_updates(writer, &uuid).await?;
                 }
             }
             SET_PLAYER_POSITION_AND_ROTATION => {
@@ -742,34 +771,15 @@ impl Connection {
                     pos_rot.x, pos_rot.y, pos_rot.z, pos_rot.yaw, pos_rot.pitch
                 );
                 if let Some(uuid) = self.player_uuid {
-                    let mut world = self.world.write().await;
-                    world.update_player_position(&uuid, pos_rot.x, pos_rot.y, pos_rot.z);
-                    world.update_player_rotation(&uuid, pos_rot.yaw, pos_rot.pitch);
-                    if let Some(player) = world.players.get_mut(&uuid) {
-                        player.on_ground = pos_rot.on_ground;
-                    }
-                    let view_distance = 8;
-                    if let Some(update) = world.compute_chunk_updates(&uuid, view_distance) {
-                        for chunk_pos in &update.to_unload {
-                            let unload_packet = play::encode_unload_chunk(chunk_pos.x, chunk_pos.z);
-                            self.write_packet(writer, &unload_packet).await?;
+                    {
+                        let mut world = self.world.write().await;
+                        world.update_player_position(&uuid, pos_rot.x, pos_rot.y, pos_rot.z);
+                        world.update_player_rotation(&uuid, pos_rot.yaw, pos_rot.pitch);
+                        if let Some(player) = world.players.get_mut(&uuid) {
+                            player.on_ground = pos_rot.on_ground;
                         }
-                        if !update.to_load.is_empty() {
-                            self.pending_chunks.extend(update.to_load.iter());
-                        }
-                        debug!(
-                            "Chunk update: queued {}, unloaded {}",
-                            update.to_load.len(),
-                            update.to_unload.len()
-                        );
                     }
-                    let limit = world
-                        .players
-                        .get(&uuid)
-                        .map(|p| p.chunks_per_tick)
-                        .unwrap_or(25.0);
-                    drop(world);
-                    self.drain_pending_chunks(writer, limit).await?;
+                    self.process_chunk_updates(writer, &uuid).await?;
                 }
             }
             SET_PLAYER_ROTATION => {
@@ -821,11 +831,15 @@ impl Connection {
             }
             SET_CARRIED_ITEM => {
                 let item = play::SetCarriedItem::decode(data)?;
+                if !item.is_valid_slot() {
+                    warn!("Invalid carried item slot {} from client", item.slot);
+                    return Ok(true);
+                }
                 debug!("Set carried item: slot={}", item.slot);
                 if let Some(uuid) = self.player_uuid {
                     let mut world = self.world.write().await;
                     if let Some(player) = world.players.get_mut(&uuid) {
-                        player.selected_slot = item.slot;
+                        player.selected_slot = item.slot as u8;
                     }
                 }
             }
@@ -870,9 +884,10 @@ mod tests {
 
     fn make_connection() -> Connection {
         let world = Arc::new(RwLock::new(World::new()));
+        let operators = Arc::new(Operators::empty());
         let addr: SocketAddr = "127.0.0.1:25565".parse().unwrap();
         let (broadcast_tx, _broadcast_rx) = broadcast::channel(16);
-        Connection::new(addr, world, broadcast_tx)
+        Connection::new(addr, world, operators, broadcast_tx)
     }
 
     #[test]

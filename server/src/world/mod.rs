@@ -17,9 +17,10 @@ pub struct Player {
     pub on_ground: bool,
     pub is_sneaking: bool,
     pub is_sprinting: bool,
-    pub selected_slot: i16,
+    pub selected_slot: u8,
     pub loaded_chunks: HashSet<ChunkPos>,
     pub chunks_per_tick: f32,
+    pub op_level: u8,
 }
 
 pub struct World {
@@ -42,6 +43,10 @@ impl World {
     }
 
     pub fn add_player(&mut self, uuid: Uuid, name: String) -> i32 {
+        self.add_player_with_op_level(uuid, name, 0)
+    }
+
+    pub fn add_player_with_op_level(&mut self, uuid: Uuid, name: String, op_level: u8) -> i32 {
         let entity_id = self.next_entity_id;
         self.next_entity_id += 1;
         self.players.insert(
@@ -61,6 +66,7 @@ impl World {
                 selected_slot: 0,
                 loaded_chunks: HashSet::new(),
                 chunks_per_tick: 25.0,
+                op_level,
             },
         );
         entity_id
@@ -310,6 +316,26 @@ mod tests {
         // Valid value stays unchanged
         player.chunks_per_tick = 50.0_f32.clamp(1.0, 100.0);
         assert_eq!(player.chunks_per_tick, 50.0);
+    }
+
+    #[test]
+    fn test_player_op_level_default() {
+        let mut world = World::new();
+        let uuid = Uuid::new_v4();
+        world.add_player(uuid, "Test".to_string());
+
+        let player = world.players.get(&uuid).unwrap();
+        assert_eq!(player.op_level, 0);
+    }
+
+    #[test]
+    fn test_player_op_level_with_value() {
+        let mut world = World::new();
+        let uuid = Uuid::new_v4();
+        world.add_player_with_op_level(uuid, "OpPlayer".to_string(), 4);
+
+        let player = world.players.get(&uuid).unwrap();
+        assert_eq!(player.op_level, 4);
     }
 
     #[test]
