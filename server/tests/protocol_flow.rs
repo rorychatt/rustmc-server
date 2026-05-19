@@ -147,7 +147,7 @@ async fn test_login_flow() {
         .expect("Failed to send known packs response");
 
     // Read configuration packets: registry data, tags, finish
-    let mut got_finish = false;
+    let got_finish;
     loop {
         let packet = client
             .read_packet()
@@ -172,7 +172,15 @@ async fn test_login_flow() {
     }
     assert!(got_finish, "Should receive Finish Configuration");
 
-    // Read join game packet (0x31 in protocol 775)
+
+    // Send Acknowledge Finish Configuration to transition to Play
+    client
+        .send_acknowledge_finish_configuration()
+        .await
+        .expect("Failed to send acknowledge finish configuration");
+
+    // Read join game packet (now 0x30 in protocol 775)
+
     let join_game = client
         .read_packet()
         .await
@@ -180,7 +188,16 @@ async fn test_login_flow() {
     assert_eq!(join_game.id, 0x31, "Expected join game packet (0x31)");
     assert!(!join_game.data.is_empty(), "Join game should have data");
 
-    // Read synchronize player position (0x48 in protocol 775)
+
+    // Read Player Info Update (0x40)
+    let player_info = client
+        .read_packet()
+        .await
+        .expect("Failed to read player info update");
+    assert_eq!(player_info.id, 0x40, "Expected player info update packet");
+
+    // Read synchronize player position (0x46 in protocol 775)
+
     let sync_pos = client
         .read_packet()
         .await
@@ -390,9 +407,9 @@ async fn test_configuration_phase() {
         }
     }
 
-    assert!(
-        registry_count >= 3,
-        "Should receive at least 3 registry data packets (got {registry_count})"
+    assert_eq!(
+        registry_count, 12,
+        "Should receive 12 registry data packets (got {registry_count})"
     );
     assert!(got_tags, "Should receive Update Tags packet");
 }
@@ -406,14 +423,28 @@ async fn test_chunk_batching() {
 
     complete_login_flow(&mut client).await;
 
-    // After login, we should have received Game Event, Chunk Batch Start, chunks, and Chunk Batch Finished
-    // The login flow helper already consumes join_game and sync_pos.
-    // Read Game Event (0x26)
+
+    // After login, we should have received Game Event, Set Center Chunk, Chunk Batch Start,
+    // chunks, and Chunk Batch Finished.
+    // The login flow helper already consumes join_game, player_info, and sync_pos.
+
+    // Read Game Event (0x23)
+
     let game_event = client
         .read_packet()
         .await
         .expect("Failed to read game event");
     assert_eq!(game_event.id, 0x26, "Expected game event packet");
+
+    // Read Set Center Chunk (0x58)
+    let center_chunk = client
+        .read_packet()
+        .await
+        .expect("Failed to read set center chunk");
+    assert_eq!(
+        center_chunk.id, 0x58,
+        "Expected set center chunk packet before chunk data"
+    );
 
     // Read Chunk Batch Start (0x0C)
     let batch_start = client
@@ -445,6 +476,94 @@ async fn test_chunk_batching() {
     );
     // 17x17 = 289 chunks for view distance 8
     assert_eq!(chunk_count, 289, "Should receive 17x17 chunks");
+}
+
+
+#[tokio::test]
+async fn test_chunk_throttling_via_batch_received() {
+    use tokio::time::{timeout, Duration};
+
+    let server = TestServer::spawn().await.expect("Failed to spawn server");
+    let mut client = TestClient::connect(server.port())
+        .await
+        .expect("Failed to connect");
+
+    complete_login_flow(&mut client).await;
+
+    // Consume the initial batch: Game Event, Chunk Batch Start, chunks, Chunk Batch Finished
+    let _game_event = client.read_packet().await.unwrap();
+    let _batch_start = client.read_packet().await.unwrap();
+    loop {
+        let packet = client.read_packet().await.unwrap();
+        if packet.id == 0x0B {
+            break;
+        }
+    }
+
+    // Tell the server we can only handle 3 chunks per tick
+    client.send_chunk_batch_received(3.0).await.unwrap();
+
+    // Move far enough to require new chunks (256 blocks in X)
+    client
+        .send_player_position(256.0, 64.0, 0.0, true)
+        .await
+        .unwrap();
+
+    // Read chunk batches — each batch should have at most 3 chunks
+    let mut total_chunks = 0;
+    let mut batch_count = 0;
+    let mut max_batch_size = 0;
+
+    // Drain all pending chunks by repeatedly acknowledging batches
+    loop {
+        let packet = match timeout(Duration::from_secs(2), client.read_packet()).await {
+            Ok(Ok(p)) => p,
+            _ => break,
+        };
+        if packet.id == 0x0C {
+            // Chunk Batch Start — read chunks until Chunk Batch Finished
+            let mut batch_size = 0;
+            loop {
+                let inner = client.read_packet().await.unwrap();
+                if inner.id == 0x2D {
+                    batch_size += 1;
+                } else if inner.id == 0x0B {
+                    break;
+                } else if inner.id == 0x25 {
+                    continue;
+                } else {
+                    panic!("Unexpected packet in batch: {:#04x}", inner.id);
+                }
+            }
+            total_chunks += batch_size;
+            batch_count += 1;
+            if batch_size > max_batch_size {
+                max_batch_size = batch_size;
+            }
+
+            // Acknowledge this batch to trigger the next drain
+            client.send_chunk_batch_received(3.0).await.unwrap();
+        } else if packet.id == 0x25 {
+            // Unload Chunk packets may arrive before the batch start
+            continue;
+        } else {
+            // No more batch starts — we're done
+            break;
+        }
+    }
+
+    assert!(
+        batch_count >= 2,
+        "Expected multiple batches, got {batch_count}"
+    );
+    assert!(
+        max_batch_size <= 3,
+        "No batch should exceed 3 chunks, but got {max_batch_size}"
+    );
+    assert!(
+        total_chunks > 3,
+        "Should receive more than 3 total chunks, got {total_chunks}"
+    );
 }
 
 #[tokio::test]
@@ -629,13 +748,29 @@ async fn complete_login_flow_with_client(client: &mut TestClient, username: &str
         }
     }
 
-    // Read join game (0x31)
+
+    // Send Acknowledge Finish Configuration to transition to Play
+    client
+        .send_acknowledge_finish_configuration()
+        .await
+        .expect("Failed to send acknowledge finish configuration");
+
+    // Read join game (0x30)
+
     let _join_game = client
         .read_packet()
         .await
         .expect("Failed to read join game");
 
-    // Read sync position (0x48)
+
+    // Read Player Info Update (0x40)
+    let _player_info = client
+        .read_packet()
+        .await
+        .expect("Failed to read player info update");
+
+    // Read sync position (0x46)
+
     let _sync_pos = client
         .read_packet()
         .await

@@ -1,0 +1,21 @@
+[
+  {"id": "minecraft:13", "data": {"sound_event": "minecraft:music_disc.13", "description": {"translate": "jukebox_song.minecraft.13"}, "length_in_seconds": 178.0, "comparator_output": 1}},
+  {"id": "minecraft:cat", "data": {"sound_event": "minecraft:music_disc.cat", "description": {"translate": "jukebox_song.minecraft.cat"}, "length_in_seconds": 185.0, "comparator_output": 2}},
+  {"id": "minecraft:blocks", "data": {"sound_event": "minecraft:music_disc.blocks", "description": {"translate": "jukebox_song.minecraft.blocks"}, "length_in_seconds": 345.0, "comparator_output": 3}},
+  {"id": "minecraft:chirp", "data": {"sound_event": "minecraft:music_disc.chirp", "description": {"translate": "jukebox_song.minecraft.chirp"}, "length_in_seconds": 185.0, "comparator_output": 4}},
+  {"id": "minecraft:far", "data": {"sound_event": "minecraft:music_disc.far", "description": {"translate": "jukebox_song.minecraft.far"}, "length_in_seconds": 174.0, "comparator_output": 5}},
+  {"id": "minecraft:mall", "data": {"sound_event": "minecraft:music_disc.mall", "description": {"translate": "jukebox_song.minecraft.mall"}, "length_in_seconds": 197.0, "comparator_output": 6}},
+  {"id": "minecraft:mellohi", "data": {"sound_event": "minecraft:music_disc.mellohi", "description": {"translate": "jukebox_song.minecraft.mellohi"}, "length_in_seconds": 96.0, "comparator_output": 7}},
+  {"id": "minecraft:stal", "data": {"sound_event": "minecraft:music_disc.stal", "description": {"translate": "jukebox_song.minecraft.stal"}, "length_in_seconds": 150.0, "comparator_output": 8}},
+  {"id": "minecraft:strad", "data": {"sound_event": "minecraft:music_disc.strad", "description": {"translate": "jukebox_song.minecraft.strad"}, "length_in_seconds": 188.0, "comparator_output": 9}},
+  {"id": "minecraft:ward", "data": {"sound_event": "minecraft:music_disc.ward", "description": {"translate": "jukebox_song.minecraft.ward"}, "length_in_seconds": 251.0, "comparator_output": 10}},
+  {"id": "minecraft:11", "data": {"sound_event": "minecraft:music_disc.11", "description": {"translate": "jukebox_song.minecraft.11"}, "length_in_seconds": 71.0, "comparator_output": 11}},
+  {"id": "minecraft:wait", "data": {"sound_event": "minecraft:music_disc.wait", "description": {"translate": "jukebox_song.minecraft.wait"}, "length_in_seconds": 238.0, "comparator_output": 12}},
+  {"id": "minecraft:otherside", "data": {"sound_event": "minecraft:music_disc.otherside", "description": {"translate": "jukebox_song.minecraft.otherside"}, "length_in_seconds": 195.0, "comparator_output": 13}},
+  {"id": "minecraft:5", "data": {"sound_event": "minecraft:music_disc.5", "description": {"translate": "jukebox_song.minecraft.5"}, "length_in_seconds": 178.0, "comparator_output": 14}},
+  {"id": "minecraft:pigstep", "data": {"sound_event": "minecraft:music_disc.pigstep", "description": {"translate": "jukebox_song.minecraft.pigstep"}, "length_in_seconds": 149.0, "comparator_output": 15}},
+  {"id": "minecraft:relic", "data": {"sound_event": "minecraft:music_disc.relic", "description": {"translate": "jukebox_song.minecraft.relic"}, "length_in_seconds": 218.0, "comparator_output": 14}},
+  {"id": "minecraft:creator", "data": {"sound_event": "minecraft:music_disc.creator", "description": {"translate": "jukebox_song.minecraft.creator"}, "length_in_seconds": 176.0, "comparator_output": 12}},
+  {"id": "minecraft:creator_music_box", "data": {"sound_event": "minecraft:music_disc.creator_music_box", "description": {"translate": "jukebox_song.minecraft.creator_music_box"}, "length_in_seconds": 73.0, "comparator_output": 11}},
+  {"id": "minecraft:precipice", "data": {"sound_event": "minecraft:music_disc.precipice", "description": {"translate": "jukebox_song.minecraft.precipice"}, "length_in_seconds": 299.0, "comparator_output": 13}}
+]
