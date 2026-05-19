@@ -1,5 +1,6 @@
 use super::packet::Packet;
 use super::types::write_string;
+use super::version::{PROTOCOL_VERSION, VERSION_NAME};
 use serde::{Deserialize, Serialize};
 use std::io::{self, Cursor, Read};
 
@@ -41,8 +42,8 @@ impl StatusResponse {
     pub fn default_response(online_count: i32, max_players: i32) -> Self {
         Self {
             version: StatusVersion {
-                name: "26.1.2".to_string(),
-                protocol: 775,
+                name: VERSION_NAME.to_string(),
+                protocol: PROTOCOL_VERSION,
             },
             players: StatusPlayers {
                 max: max_players,

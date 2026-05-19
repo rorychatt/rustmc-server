@@ -1,8 +1,9 @@
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
 use tracing::{error, info};
 
+use super::broadcast::BroadcastEvent;
 use super::connection::Connection;
 use crate::config::Operators;
 use crate::world::World;
@@ -11,14 +12,17 @@ pub struct Server {
     addr: String,
     world: Arc<RwLock<World>>,
     operators: Arc<Operators>,
+    broadcast_tx: broadcast::Sender<BroadcastEvent>,
 }
 
 impl Server {
     pub fn new(addr: String) -> Self {
+        let (broadcast_tx, _) = broadcast::channel(256);
         Self {
             addr,
             world: Arc::new(RwLock::new(World::new())),
             operators: Arc::new(Operators::load()),
+            broadcast_tx,
         }
     }
 
@@ -36,9 +40,11 @@ impl Server {
                 Ok((stream, addr)) => {
                     let world = self.world.clone();
                     let operators = self.operators.clone();
+                    let broadcast_tx = self.broadcast_tx.clone();
+                    let broadcast_rx = self.broadcast_tx.subscribe();
                     tokio::spawn(async move {
-                        let connection = Connection::new(addr, world, operators);
-                        connection.handle(stream).await;
+                        let connection = Connection::new(addr, world, operators, broadcast_tx);
+                        connection.handle(stream, broadcast_rx).await;
                     });
                 }
                 Err(e) => {

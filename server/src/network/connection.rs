@@ -5,15 +5,17 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::TcpStream;
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
 use tracing::{debug, error, info, warn};
 
+use super::broadcast::BroadcastEvent;
 use crate::config::Operators;
 use crate::protocol::chunk_data;
 use crate::protocol::configuration;
 use crate::protocol::handshake::{Handshake, NextState};
 use crate::protocol::login::{LoginCookieResponse, LoginStart, LoginSuccess};
 use crate::protocol::packet::{Packet, PacketWriter};
+use crate::protocol::packet_ids;
 use crate::protocol::play;
 use crate::protocol::status::{
     decode_ping_request, decode_status_request, encode_pong_response, StatusResponse,
@@ -41,6 +43,7 @@ pub struct Connection {
     player_uuid: Option<Uuid>,
     player_name: Option<String>,
     compression_enabled: bool,
+    protocol_version: i32,
 
     configuration_finish_sent: bool,
     last_keep_alive_sent: Option<Instant>,
@@ -49,10 +52,16 @@ pub struct Connection {
     pending_chunks: Vec<ChunkPos>,
     cookies: HashMap<String, Vec<u8>>,
 
+    broadcast_tx: broadcast::Sender<BroadcastEvent>,
 }
 
 impl Connection {
-    pub fn new(addr: SocketAddr, world: Arc<RwLock<World>>, operators: Arc<Operators>) -> Self {
+    pub fn new(
+        addr: SocketAddr,
+        world: Arc<RwLock<World>>,
+        operators: Arc<Operators>,
+        broadcast_tx: broadcast::Sender<BroadcastEvent>,
+    ) -> Self {
         Self {
             addr,
             state: ConnectionState::Handshake,
@@ -61,6 +70,7 @@ impl Connection {
             player_uuid: None,
             player_name: None,
             compression_enabled: false,
+            protocol_version: 0,
 
             configuration_finish_sent: false,
             last_keep_alive_sent: None,
@@ -69,6 +79,7 @@ impl Connection {
             pending_chunks: Vec::new(),
             cookies: HashMap::new(),
 
+            broadcast_tx,
         }
     }
 
@@ -84,7 +95,11 @@ impl Connection {
         self.cookies.remove(key)
     }
 
-    pub async fn handle(mut self, stream: TcpStream) {
+    pub async fn handle(
+        mut self,
+        stream: TcpStream,
+        mut broadcast_rx: broadcast::Receiver<BroadcastEvent>,
+    ) {
         info!("New connection from {}", self.addr);
 
         let (reader, writer) = stream.into_split();
@@ -93,6 +108,12 @@ impl Connection {
 
         let keep_alive_interval = Duration::from_secs(15);
         let keep_alive_timeout = Duration::from_secs(30);
+        let non_play_timeout = Duration::from_secs(
+            std::env::var("RUSTMC_NON_PLAY_TIMEOUT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(30),
+        );
 
         loop {
             if self.state == ConnectionState::Play {
@@ -125,6 +146,29 @@ impl Connection {
                             }
                         }
                     }
+                    event = broadcast_rx.recv() => {
+                        match event {
+                            Ok(BroadcastEvent::EntityAnimation { exclude_uuid, entity_id, animation }) => {
+                                if self.player_uuid != Some(exclude_uuid) {
+                                    let packet = play::encode_entity_animation(entity_id, animation);
+                                    if let Err(e) = self.write_packet(&mut writer, &packet).await {
+                                        error!("Failed to send entity animation to {}: {}", self.addr, e);
+                                        break;
+                                    }
+                                }
+                            }
+                            Ok(BroadcastEvent::EntityMetadata { exclude_uuid, entity_id, metadata_bytes }) => {
+                                if self.player_uuid != Some(exclude_uuid) {
+                                    let packet = play::encode_set_entity_metadata(entity_id, &metadata_bytes);
+                                    if let Err(e) = self.write_packet(&mut writer, &packet).await {
+                                        error!("Failed to send entity metadata to {}: {}", self.addr, e);
+                                        break;
+                                    }
+                                }
+                            }
+                            Err(_) => {}
+                        }
+                    }
                     _ = tokio::time::sleep(timeout) => {
                         // Check for keep-alive timeout
                         if let Some(last_sent) = self.last_keep_alive_sent {
@@ -154,18 +198,26 @@ impl Connection {
                     }
                 }
             } else {
-                match self.read_and_handle_packet(&mut reader, &mut writer).await {
-                    Ok(true) => continue,
-                    Ok(false) => {
-                        debug!("Connection from {} closed normally", self.addr);
-                        break;
-                    }
-                    Err(e) => {
-                        if e.kind() == std::io::ErrorKind::UnexpectedEof {
-                            debug!("Connection from {} disconnected", self.addr);
-                        } else {
-                            error!("Error handling connection from {}: {}", self.addr, e);
+                tokio::select! {
+                    result = self.read_and_handle_packet(&mut reader, &mut writer) => {
+                        match result {
+                            Ok(true) => continue,
+                            Ok(false) => {
+                                debug!("Connection from {} closed normally", self.addr);
+                                break;
+                            }
+                            Err(e) => {
+                                if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                                    debug!("Connection from {} disconnected", self.addr);
+                                } else {
+                                    error!("Error handling connection from {}: {}", self.addr, e);
+                                }
+                                break;
+                            }
                         }
+                    }
+                    _ = tokio::time::sleep(non_play_timeout) => {
+                        warn!("Connection from {} timed out in {:?} state", self.addr, self.state);
                         break;
                     }
                 }
@@ -254,7 +306,9 @@ impl Connection {
         data: &[u8],
         _writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<bool> {
-        if packet_id != 0x00 {
+        use packet_ids::handshake::serverbound::*;
+
+        if packet_id != HANDSHAKE {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("Expected handshake packet 0x00, got {packet_id:#04x}"),
@@ -271,6 +325,7 @@ impl Connection {
             handshake.next_state
         );
 
+        self.protocol_version = handshake.protocol_version;
         self.state = match handshake.next_state {
             NextState::Status => ConnectionState::Status,
             NextState::Login => ConnectionState::Login,
@@ -285,8 +340,10 @@ impl Connection {
         data: &[u8],
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<bool> {
+        use packet_ids::status::serverbound::*;
+
         match packet_id {
-            0x00 => {
+            STATUS_REQUEST => {
                 decode_status_request(data)?;
                 let world = self.world.read().await;
                 let response = StatusResponse::default_response(world.player_count() as i32, 20);
@@ -294,7 +351,7 @@ impl Connection {
                 self.write_packet(writer, &packet).await?;
                 Ok(true)
             }
-            0x01 => {
+            PING_REQUEST => {
                 let payload = decode_ping_request(data)?;
                 let pong = encode_pong_response(payload);
                 self.write_packet(writer, &pong).await?;
@@ -313,8 +370,10 @@ impl Connection {
         data: &[u8],
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<bool> {
+        use packet_ids::login::serverbound::*;
+
         match packet_id {
-            0x00 => {
+            LOGIN_START => {
                 let login = LoginStart::decode(data)?;
                 info!("Player login: {} ({})", login.name, login.uuid);
 
@@ -336,7 +395,7 @@ impl Connection {
 
                 Ok(true)
             }
-            0x04 => {
+            COOKIE_RESPONSE => {
                 let response = LoginCookieResponse::decode(data)?;
                 debug!("Received login cookie response: key={}", response.key);
                 if let Some(payload) = response.payload {
@@ -359,9 +418,10 @@ impl Connection {
         _data: &[u8],
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<bool> {
+        use packet_ids::configuration::serverbound::*;
+
         match packet_id {
-            // Cookie Response (0x02)
-            0x02 => {
+            COOKIE_RESPONSE => {
                 let response = configuration::CookieResponse::decode(_data)?;
                 debug!(
                     "Received configuration cookie response: key={}",
@@ -375,7 +435,7 @@ impl Connection {
                 Ok(true)
             }
 
-            0x03 => {
+            ACKNOWLEDGE_FINISH => {
                 if !self.configuration_finish_sent {
                     // First 0x03: Login Acknowledged — send configuration data
                     debug!("Client acknowledged login, sending configuration data");
@@ -388,7 +448,7 @@ impl Connection {
                 }
                 Ok(true)
             }
-            0x07 => {
+            KNOWN_PACKS => {
                 debug!("Received Known Packs response from client");
                 self.send_registry_data(writer).await?;
                 Ok(true)
@@ -407,9 +467,43 @@ impl Connection {
         &mut self,
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<()> {
-        // Send Known Packs
-        let known_packs = configuration::encode_known_packs()?;
+        let data_pack_version =
+            crate::protocol::version::data_pack_version_for(self.protocol_version);
+        let known_packs = configuration::encode_known_packs(data_pack_version)?;
         self.write_packet(writer, &known_packs).await?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    async fn send_login_cookie_request(
+        &mut self,
+        writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
+        key: &str,
+    ) -> std::io::Result<()> {
+        let packet = crate::protocol::login::encode_login_cookie_request(key)?;
+        self.write_packet(writer, &packet).await?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    async fn send_cookie_request(
+        &mut self,
+        writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
+        key: &str,
+    ) -> std::io::Result<()> {
+        let packet = crate::protocol::configuration::encode_cookie_request(key)?;
+        self.write_packet(writer, &packet).await?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    async fn send_play_cookie_request(
+        &mut self,
+        writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
+        key: &str,
+    ) -> std::io::Result<()> {
+        let packet = crate::protocol::play::encode_play_cookie_request(key)?;
+        self.write_packet(writer, &packet).await?;
         Ok(())
     }
 
@@ -417,8 +511,9 @@ impl Connection {
         &mut self,
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<()> {
-        for reg_id in registry::ALL_REGISTRY_IDS {
-            let entries = registry::load(reg_id)?;
+        let reg_set = registry::registry_set_for(self.protocol_version);
+        for reg_id in reg_set.registry_ids {
+            let entries = registry::load(reg_id, self.protocol_version)?;
             let packet = configuration::encode_registry_data(reg_id, &entries)?;
             self.write_packet(writer, &packet).await?;
         }
@@ -426,13 +521,9 @@ impl Connection {
         let tags = configuration::encode_update_tags()?;
         self.write_packet(writer, &tags).await?;
 
-
-        // Send Finish Configuration — remain in Configuration state
-        // and wait for client to send Acknowledge Finish Configuration (0x03)
         let finish = configuration::encode_finish_configuration();
         self.write_packet(writer, &finish).await?;
         self.configuration_finish_sent = true;
-
 
         Ok(())
     }
@@ -544,19 +635,54 @@ impl Connection {
         Ok(())
     }
 
+    async fn process_chunk_updates(
+        &mut self,
+        writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
+        uuid: &Uuid,
+    ) -> std::io::Result<()> {
+        let mut world = self.world.write().await;
+        let view_distance = 8;
+        if let Some(update) = world.compute_chunk_updates(uuid, view_distance) {
+            for chunk_pos in &update.to_unload {
+                let unload_packet = play::encode_unload_chunk(chunk_pos.x, chunk_pos.z);
+                self.write_packet(writer, &unload_packet).await?;
+            }
+
+            if !update.to_load.is_empty() {
+                self.pending_chunks.extend(update.to_load.iter());
+            }
+
+            debug!(
+                "Chunk update: queued {}, unloaded {}",
+                update.to_load.len(),
+                update.to_unload.len()
+            );
+        }
+
+        let limit = world
+            .players
+            .get(uuid)
+            .map(|p| p.chunks_per_tick)
+            .unwrap_or(25.0);
+        drop(world);
+
+        self.drain_pending_chunks(writer, limit).await?;
+        Ok(())
+    }
+
     async fn handle_play(
         &mut self,
         packet_id: i32,
         data: &[u8],
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<bool> {
+        use packet_ids::play::serverbound::*;
+
         match packet_id {
-            // Confirm Teleportation
-            0x00 => {
+            CONFIRM_TELEPORTATION => {
                 debug!("Received teleport confirmation");
             }
-            // Chat Command
-            0x07 => {
+            CHAT_COMMAND => {
                 let command = play::ChatCommand::decode(data)?;
                 if command.command.starts_with("transfer ") {
                     let has_permission = if let Some(uuid) = self.player_uuid {
@@ -584,13 +710,11 @@ impl Connection {
                 }
                 debug!("Received chat command: {}", command.command);
             }
-            // Chat Message
-            0x09 => {
+            CHAT_MESSAGE => {
                 let chat = play::ChatMessage::decode(data)?;
                 info!("Chat from {}: {}", self.addr, chat.message);
             }
-            // Chunk Batch Received
-            0x0B => {
+            CHUNK_BATCH_RECEIVED => {
                 if data.len() >= 4 {
                     let chunks_per_tick = f32::from_be_bytes([data[0], data[1], data[2], data[3]]);
                     let clamped = chunks_per_tick.clamp(1.0, 100.0);
@@ -604,8 +728,7 @@ impl Connection {
                     self.drain_pending_chunks(writer, clamped).await?;
                 }
             }
-            // Play Cookie Response
-            0x12 => {
+            COOKIE_RESPONSE => {
                 let response = play::PlayCookieResponse::decode(data)?;
                 debug!("Received play cookie response: key={}", response.key);
                 if let Some(payload) = response.payload {
@@ -614,8 +737,7 @@ impl Connection {
                     self.cookies.remove(&response.key);
                 }
             }
-            // Client Tick End
-            0x0D => {
+            CLIENT_TICK_END => {
                 if let Some(uuid) = self.player_uuid {
                     let world = self.world.read().await;
                     let limit = world
@@ -627,55 +749,123 @@ impl Connection {
                     self.drain_pending_chunks(writer, limit).await?;
                 }
             }
-            // Keep Alive (serverbound)
-            0x1C => {
+            KEEP_ALIVE => {
                 debug!("Received keep-alive response from {}", self.addr);
                 self.last_keep_alive_response = Some(Instant::now());
-
             }
-            // Set Player Position
-            0x1E => {
+            SET_PLAYER_POSITION => {
                 let pos = play::PlayerPosition::decode(data)?;
                 debug!("Player position: ({}, {}, {})", pos.x, pos.y, pos.z);
 
                 if let Some(uuid) = self.player_uuid {
-                    let mut world = self.world.write().await;
-                    world.update_player_position(&uuid, pos.x, pos.y, pos.z);
-
-                    let view_distance = 8;
-                    if let Some(update) = world.compute_chunk_updates(&uuid, view_distance) {
-                        for chunk_pos in &update.to_unload {
-                            let unload_packet = play::encode_unload_chunk(chunk_pos.x, chunk_pos.z);
-                            self.write_packet(writer, &unload_packet).await?;
-                        }
-
-                        if !update.to_load.is_empty() {
-                            self.pending_chunks.extend(update.to_load.iter());
-                        }
-
-                        debug!(
-                            "Chunk update: queued {}, unloaded {}",
-                            update.to_load.len(),
-                            update.to_unload.len()
-                        );
+                    {
+                        let mut world = self.world.write().await;
+                        world.update_player_position(&uuid, pos.x, pos.y, pos.z);
                     }
-
-                    let limit = world
-                        .players
-                        .get(&uuid)
-                        .map(|p| p.chunks_per_tick)
-                        .unwrap_or(25.0);
-                    drop(world);
-
-                    self.drain_pending_chunks(writer, limit).await?;
+                    self.process_chunk_updates(writer, &uuid).await?;
                 }
             }
-            // Set Player Position and Rotation
-            0x1F => {
-                debug!("Player position and rotation ({} bytes)", data.len());
+            SET_PLAYER_POSITION_AND_ROTATION => {
+                let pos_rot = play::PlayerPositionAndRotation::decode(data)?;
+                debug!(
+                    "Player pos+rot: ({}, {}, {}) yaw={} pitch={}",
+                    pos_rot.x, pos_rot.y, pos_rot.z, pos_rot.yaw, pos_rot.pitch
+                );
+                if let Some(uuid) = self.player_uuid {
+                    {
+                        let mut world = self.world.write().await;
+                        world.update_player_position(&uuid, pos_rot.x, pos_rot.y, pos_rot.z);
+                        world.update_player_rotation(&uuid, pos_rot.yaw, pos_rot.pitch);
+                        if let Some(player) = world.players.get_mut(&uuid) {
+                            player.on_ground = pos_rot.on_ground;
+                        }
+                    }
+                    self.process_chunk_updates(writer, &uuid).await?;
+                }
             }
-            // Player Loaded
-            0x2C => {
+            SET_PLAYER_ROTATION => {
+                let rot = play::PlayerRotation::decode(data)?;
+                debug!("Player rotation: yaw={} pitch={}", rot.yaw, rot.pitch);
+                if let Some(uuid) = self.player_uuid {
+                    let mut world = self.world.write().await;
+                    world.update_player_rotation(&uuid, rot.yaw, rot.pitch);
+                    if let Some(player) = world.players.get_mut(&uuid) {
+                        player.on_ground = rot.on_ground;
+                    }
+                }
+            }
+            SET_PLAYER_STATUS_ONLY => {
+                let status = play::PlayerStatusOnly::decode(data)?;
+                if let Some(uuid) = self.player_uuid {
+                    let mut world = self.world.write().await;
+                    if let Some(player) = world.players.get_mut(&uuid) {
+                        player.on_ground = status.on_ground;
+                    }
+                }
+            }
+            PLAYER_COMMAND => {
+                let cmd = play::PlayerCommand::decode(data)?;
+                debug!(
+                    "Player command: action={} jump_boost={}",
+                    cmd.action_id, cmd.jump_boost
+                );
+                if let Some(uuid) = self.player_uuid {
+                    let mut world = self.world.write().await;
+                    if let Some(player) = world.players.get_mut(&uuid) {
+                        match cmd.action_id {
+                            0 => player.is_sneaking = true,
+                            1 => player.is_sneaking = false,
+                            3 => player.is_sprinting = true,
+                            4 => player.is_sprinting = false,
+                            _ => {}
+                        }
+                        let flags: u8 = (if player.is_sneaking { 0x02 } else { 0 })
+                            | (if player.is_sprinting { 0x08 } else { 0 });
+                        let metadata_bytes = play::encode_entity_base_flags_metadata(flags);
+                        let _ = self.broadcast_tx.send(BroadcastEvent::EntityMetadata {
+                            exclude_uuid: uuid,
+                            entity_id: player.entity_id,
+                            metadata_bytes,
+                        });
+                    }
+                }
+            }
+            SET_CARRIED_ITEM => {
+                let item = play::SetCarriedItem::decode(data)?;
+                if !item.is_valid_slot() {
+                    warn!("Invalid carried item slot {} from client", item.slot);
+                    return Ok(true);
+                }
+                debug!("Set carried item: slot={}", item.slot);
+                if let Some(uuid) = self.player_uuid {
+                    let mut world = self.world.write().await;
+                    if let Some(player) = world.players.get_mut(&uuid) {
+                        player.selected_slot = item.slot as u8;
+                    }
+                }
+            }
+            SWING => {
+                let swing = play::Swing::decode(data)?;
+                let animation = if swing.hand == 0 { 0u8 } else { 3u8 };
+                debug!(
+                    "Player swing: hand={}",
+                    if swing.hand == 0 { "main" } else { "off" }
+                );
+                if let Some(uuid) = self.player_uuid {
+                    let entity_id = {
+                        let world = self.world.read().await;
+                        world.players.get(&uuid).map(|p| p.entity_id)
+                    };
+                    if let Some(eid) = entity_id {
+                        let _ = self.broadcast_tx.send(BroadcastEvent::EntityAnimation {
+                            exclude_uuid: uuid,
+                            entity_id: eid,
+                            animation,
+                        });
+                    }
+                }
+            }
+            PLAYER_LOADED => {
                 debug!("Player loaded signal received");
             }
             _ => {
@@ -697,7 +887,8 @@ mod tests {
         let world = Arc::new(RwLock::new(World::new()));
         let operators = Arc::new(Operators::empty());
         let addr: SocketAddr = "127.0.0.1:25565".parse().unwrap();
-        Connection::new(addr, world, operators)
+        let (broadcast_tx, _broadcast_rx) = broadcast::channel(16);
+        Connection::new(addr, world, operators, broadcast_tx)
     }
 
     #[test]

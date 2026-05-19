@@ -1,18 +1,19 @@
 use super::packet::Packet;
+use super::packet_ids::configuration::clientbound as ids;
 use super::types::{read_string, write_string, VarInt};
 use std::io::{self, Cursor, Read, Write};
 
 pub fn encode_cookie_request(key: &str) -> io::Result<Packet> {
     let mut data = Vec::new();
     write_string(&mut data, key)?;
-    Ok(Packet::new(0x01, data))
+    Ok(Packet::new(ids::COOKIE_REQUEST, data))
 }
 
 pub fn encode_store_cookie(key: &str, payload: &[u8]) -> io::Result<Packet> {
     let mut data = Vec::new();
     write_string(&mut data, key)?;
     data.write_all(payload)?;
-    Ok(Packet::new(0x0B, data))
+    Ok(Packet::new(ids::STORE_COOKIE, data))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,13 +47,13 @@ impl CookieResponse {
     }
 }
 
-pub fn encode_known_packs() -> io::Result<Packet> {
+pub fn encode_known_packs(data_pack_version: &str) -> io::Result<Packet> {
     let mut data = Vec::new();
     VarInt(1).write(&mut data)?;
     write_string(&mut data, "minecraft")?;
     write_string(&mut data, "core")?;
-    write_string(&mut data, "1.21")?;
-    Ok(Packet::new(0x0E, data))
+    write_string(&mut data, data_pack_version)?;
+    Ok(Packet::new(ids::KNOWN_PACKS, data))
 }
 
 pub fn encode_registry_data(registry_id: &str, entries: &[RegistryEntry]) -> io::Result<Packet> {
@@ -64,19 +65,20 @@ pub fn encode_registry_data(registry_id: &str, entries: &[RegistryEntry]) -> io:
         data.push(1);
         data.extend_from_slice(&entry.nbt_data);
     }
-    Ok(Packet::new(0x07, data))
+    Ok(Packet::new(ids::REGISTRY_DATA, data))
 }
 
 pub fn encode_update_tags() -> io::Result<Packet> {
     let mut data = Vec::new();
     VarInt(0).write(&mut data)?;
-    Ok(Packet::new(0x0D, data))
+    Ok(Packet::new(ids::UPDATE_TAGS, data))
 }
 
 pub fn encode_finish_configuration() -> Packet {
-    Packet::new(0x03, Vec::new())
+    Packet::new(ids::FINISH_CONFIGURATION, Vec::new())
 }
 
+#[derive(Debug)]
 pub struct RegistryEntry {
     pub id: String,
     pub nbt_data: Vec<u8>,
@@ -85,66 +87,68 @@ pub struct RegistryEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::ids;
+    use crate::protocol::version::{DATA_PACK_VERSION, PROTOCOL_VERSION};
     use crate::registry;
 
     #[test]
     fn test_encode_known_packs() {
-        let packet = encode_known_packs().unwrap();
-        assert_eq!(packet.id, 0x0E);
+        let packet = encode_known_packs(DATA_PACK_VERSION).unwrap();
+        assert_eq!(packet.id, ids::KNOWN_PACKS);
         assert!(!packet.data.is_empty());
     }
 
     #[test]
     fn test_encode_finish_configuration() {
         let packet = encode_finish_configuration();
-        assert_eq!(packet.id, 0x03);
+        assert_eq!(packet.id, ids::FINISH_CONFIGURATION);
         assert!(packet.data.is_empty());
     }
 
     #[test]
     fn test_encode_registry_data() {
-        let entries = registry::load("minecraft:dimension_type").unwrap();
+        let entries = registry::load("minecraft:dimension_type", PROTOCOL_VERSION).unwrap();
         let packet = encode_registry_data("minecraft:dimension_type", &entries).unwrap();
-        assert_eq!(packet.id, 0x07);
+        assert_eq!(packet.id, ids::REGISTRY_DATA);
         assert!(!packet.data.is_empty());
     }
 
     #[test]
     fn test_encode_update_tags() {
         let packet = encode_update_tags().unwrap();
-        assert_eq!(packet.id, 0x0D);
+        assert_eq!(packet.id, ids::UPDATE_TAGS);
     }
 
     #[test]
     fn test_dimension_type_registry() {
-        let entries = registry::load("minecraft:dimension_type").unwrap();
+        let entries = registry::load("minecraft:dimension_type", PROTOCOL_VERSION).unwrap();
         assert_eq!(entries.len(), 4);
         assert_eq!(entries[0].id, "minecraft:overworld");
     }
 
     #[test]
     fn test_biome_registry() {
-        let entries = registry::load("minecraft:worldgen/biome").unwrap();
+        let entries = registry::load("minecraft:worldgen/biome", PROTOCOL_VERSION).unwrap();
         assert!(entries.len() >= 50);
         assert!(entries.iter().any(|e| e.id == "minecraft:plains"));
     }
 
     #[test]
     fn test_damage_type_registry() {
-        let entries = registry::load("minecraft:damage_type").unwrap();
+        let entries = registry::load("minecraft:damage_type", PROTOCOL_VERSION).unwrap();
         assert!(entries.len() >= 40);
     }
 
     #[test]
     fn test_painting_variant_registry() {
-        let entries = registry::load("minecraft:painting_variant").unwrap();
+        let entries = registry::load("minecraft:painting_variant", PROTOCOL_VERSION).unwrap();
         assert!(entries.len() >= 26);
         assert!(entries.iter().any(|e| e.id == "minecraft:kebab"));
     }
 
     #[test]
     fn test_wolf_variant_registry() {
-        let entries = registry::load("minecraft:wolf_variant").unwrap();
+        let entries = registry::load("minecraft:wolf_variant", PROTOCOL_VERSION).unwrap();
         assert_eq!(entries.len(), 9);
         assert!(entries.iter().any(|e| e.id == "minecraft:pale"));
     }
@@ -152,7 +156,7 @@ mod tests {
     #[test]
     fn test_encode_cookie_request() {
         let packet = encode_cookie_request("minecraft:test_cookie").unwrap();
-        assert_eq!(packet.id, 0x01);
+        assert_eq!(packet.id, ids::COOKIE_REQUEST);
         assert!(!packet.data.is_empty());
     }
 
@@ -160,7 +164,7 @@ mod tests {
     fn test_encode_store_cookie() {
         let payload = b"hello world";
         let packet = encode_store_cookie("minecraft:session", payload).unwrap();
-        assert_eq!(packet.id, 0x0B);
+        assert_eq!(packet.id, ids::STORE_COOKIE);
         assert!(!packet.data.is_empty());
     }
 

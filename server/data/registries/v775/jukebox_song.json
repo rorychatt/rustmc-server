@@ -1,0 +1,21 @@
+[
+  {"id":"minecraft:13","data":{"comparator_output":1,"description":{"translate":"jukebox_song.minecraft.13"},"length_in_seconds":178,"sound_event":"minecraft:music_disc.13"}},
+  {"id":"minecraft:cat","data":{"comparator_output":2,"description":{"translate":"jukebox_song.minecraft.cat"},"length_in_seconds":185,"sound_event":"minecraft:music_disc.cat"}},
+  {"id":"minecraft:blocks","data":{"comparator_output":3,"description":{"translate":"jukebox_song.minecraft.blocks"},"length_in_seconds":345,"sound_event":"minecraft:music_disc.blocks"}},
+  {"id":"minecraft:chirp","data":{"comparator_output":4,"description":{"translate":"jukebox_song.minecraft.chirp"},"length_in_seconds":185,"sound_event":"minecraft:music_disc.chirp"}},
+  {"id":"minecraft:far","data":{"comparator_output":5,"description":{"translate":"jukebox_song.minecraft.far"},"length_in_seconds":174,"sound_event":"minecraft:music_disc.far"}},
+  {"id":"minecraft:mall","data":{"comparator_output":6,"description":{"translate":"jukebox_song.minecraft.mall"},"length_in_seconds":197,"sound_event":"minecraft:music_disc.mall"}},
+  {"id":"minecraft:mellohi","data":{"comparator_output":7,"description":{"translate":"jukebox_song.minecraft.mellohi"},"length_in_seconds":96,"sound_event":"minecraft:music_disc.mellohi"}},
+  {"id":"minecraft:stal","data":{"comparator_output":8,"description":{"translate":"jukebox_song.minecraft.stal"},"length_in_seconds":150,"sound_event":"minecraft:music_disc.stal"}},
+  {"id":"minecraft:strad","data":{"comparator_output":9,"description":{"translate":"jukebox_song.minecraft.strad"},"length_in_seconds":188,"sound_event":"minecraft:music_disc.strad"}},
+  {"id":"minecraft:ward","data":{"comparator_output":10,"description":{"translate":"jukebox_song.minecraft.ward"},"length_in_seconds":251,"sound_event":"minecraft:music_disc.ward"}},
+  {"id":"minecraft:11","data":{"comparator_output":11,"description":{"translate":"jukebox_song.minecraft.11"},"length_in_seconds":71,"sound_event":"minecraft:music_disc.11"}},
+  {"id":"minecraft:wait","data":{"comparator_output":12,"description":{"translate":"jukebox_song.minecraft.wait"},"length_in_seconds":238,"sound_event":"minecraft:music_disc.wait"}},
+  {"id":"minecraft:otherside","data":{"comparator_output":14,"description":{"translate":"jukebox_song.minecraft.otherside"},"length_in_seconds":195,"sound_event":"minecraft:music_disc.otherside"}},
+  {"id":"minecraft:5","data":{"comparator_output":15,"description":{"translate":"jukebox_song.minecraft.5"},"length_in_seconds":178,"sound_event":"minecraft:music_disc.5"}},
+  {"id":"minecraft:pigstep","data":{"comparator_output":13,"description":{"translate":"jukebox_song.minecraft.pigstep"},"length_in_seconds":149,"sound_event":"minecraft:music_disc.pigstep"}},
+  {"id":"minecraft:relic","data":{"comparator_output":14,"description":{"translate":"jukebox_song.minecraft.relic"},"length_in_seconds":218,"sound_event":"minecraft:music_disc.relic"}},
+  {"id":"minecraft:creator","data":{"comparator_output":12,"description":{"translate":"jukebox_song.minecraft.creator"},"length_in_seconds":176,"sound_event":"minecraft:music_disc.creator"}},
+  {"id":"minecraft:creator_music_box","data":{"comparator_output":11,"description":{"translate":"jukebox_song.minecraft.creator_music_box"},"length_in_seconds":73,"sound_event":"minecraft:music_disc.creator_music_box"}},
+  {"id":"minecraft:precipice","data":{"comparator_output":13,"description":{"translate":"jukebox_song.minecraft.precipice"},"length_in_seconds":299,"sound_event":"minecraft:music_disc.precipice"}}
+]
