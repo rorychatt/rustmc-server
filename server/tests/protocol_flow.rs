@@ -617,7 +617,6 @@ async fn test_client_tick_end_drains_chunks() {
         .expect("Failed to send position");
 
     // Consume the position response: unload packets + first drain batch
-    let mut got_batch_finished = false;
     let mut position_chunks = 0;
     loop {
         let packet = tokio::time::timeout(
@@ -633,14 +632,11 @@ async fn test_client_tick_end_drains_chunks() {
             0x0C => {} // Chunk Batch Start
             0x2D => position_chunks += 1,
             0x0B => {
-                got_batch_finished = true;
-                break;
+                break; // Batch finished
             }
             other => panic!("Unexpected packet during position response: {other:#04x}"),
         }
     }
-
-    assert!(got_batch_finished, "Should get batch finished from position drain");
     assert!(
         position_chunks > 0 && position_chunks <= 25,
         "Position handler should drain at most 25 chunks (got {position_chunks})"
