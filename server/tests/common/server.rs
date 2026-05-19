@@ -10,23 +10,48 @@ pub struct TestServer {
 
 impl TestServer {
     pub async fn spawn() -> anyhow::Result<Self> {
+        Self::spawn_with_env(&[]).await
+    }
+
+    pub async fn spawn_with_env(extra_env: &[(&str, &str)]) -> anyhow::Result<Self> {
         let port = find_free_port().await?;
 
-        let mut child = Command::new("cargo")
-            .args(["run", "--bin", "rustmc-server"])
+        let build_status = Command::new("cargo")
+            .args(["build", "--bin", "rustmc-server"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .status()?;
+
+        if !build_status.success() {
+            return Err(anyhow::anyhow!("Failed to build rustmc-server binary"));
+        }
+
+        let timeout_secs: u64 = std::env::var("RUSTMC_TEST_TIMEOUT_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30);
+
+        let mut cmd = Command::new("cargo");
+        cmd.args(["run", "--bin", "rustmc-server"])
             .env("RUSTMC_BIND", format!("127.0.0.1:{port}"))
             .env("RUSTMC_PLUGINS", "")
             .env("RUST_LOG", "rustmc_server=warn")
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()?;
+            .stderr(std::process::Stdio::null());
 
-        // Wait for server to be ready
+        for (key, value) in extra_env {
+            cmd.env(key, value);
+        }
+
+        let mut child = cmd.spawn()?;
+
         let start = std::time::Instant::now();
         loop {
-            if start.elapsed() > Duration::from_secs(10) {
+            if start.elapsed() > Duration::from_secs(timeout_secs) {
                 let _ = child.kill();
-                return Err(anyhow::anyhow!("Server failed to start within 10 seconds"));
+                return Err(anyhow::anyhow!(
+                    "Server failed to start within {timeout_secs} seconds"
+                ));
             }
 
             if TcpListener::bind(format!("127.0.0.1:{port}"))

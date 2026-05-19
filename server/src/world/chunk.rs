@@ -25,6 +25,7 @@ impl ChunkPos {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlockState(pub u16);
 
+// IDs from protocol 775 — validated by test_block_state_ids_match_generated_data
 impl BlockState {
     pub const AIR: Self = Self(0);
     pub const STONE: Self = Self(1);
@@ -138,6 +139,45 @@ impl Chunk {
 
     pub fn get_section(&self, index: usize) -> Option<&ChunkSection> {
         self.sections.get(index)
+    }
+}
+
+#[cfg(test)]
+mod block_state_tests {
+    use super::BlockState;
+    use serde_json::Value;
+
+    const BLOCK_STATES_JSON: &str = include_str!("../../data/block_states.json");
+
+    #[test]
+    fn test_block_state_ids_match_generated_data() {
+        let data: Value = serde_json::from_str(BLOCK_STATES_JSON).unwrap();
+        let blocks = data["blocks"].as_object().unwrap();
+
+        assert_eq!(
+            BlockState::AIR.0 as i64,
+            blocks["minecraft:air"]["default_state_id"].as_i64().unwrap()
+        );
+        assert_eq!(
+            BlockState::STONE.0 as i64,
+            blocks["minecraft:stone"]["default_state_id"].as_i64().unwrap()
+        );
+        assert_eq!(
+            BlockState::GRASS_BLOCK.0 as i64,
+            blocks["minecraft:grass_block"]["default_state_id"]
+                .as_i64()
+                .unwrap()
+        );
+        assert_eq!(
+            BlockState::DIRT.0 as i64,
+            blocks["minecraft:dirt"]["default_state_id"].as_i64().unwrap()
+        );
+        assert_eq!(
+            BlockState::BEDROCK.0 as i64,
+            blocks["minecraft:bedrock"]["default_state_id"]
+                .as_i64()
+                .unwrap()
+        );
     }
 }
 
