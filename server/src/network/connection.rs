@@ -40,6 +40,7 @@ pub struct Connection {
     player_uuid: Option<Uuid>,
     player_name: Option<String>,
     compression_enabled: bool,
+    protocol_version: i32,
 
     configuration_finish_sent: bool,
     last_keep_alive_sent: Option<Instant>,
@@ -59,6 +60,7 @@ impl Connection {
             player_uuid: None,
             player_name: None,
             compression_enabled: false,
+            protocol_version: 0,
 
             configuration_finish_sent: false,
             last_keep_alive_sent: None,
@@ -271,6 +273,7 @@ impl Connection {
             handshake.next_state
         );
 
+        self.protocol_version = handshake.protocol_version;
         self.state = match handshake.next_state {
             NextState::Status => ConnectionState::Status,
             NextState::Login => ConnectionState::Login,
@@ -412,9 +415,43 @@ impl Connection {
         &mut self,
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<()> {
-        // Send Known Packs
-        let known_packs = configuration::encode_known_packs()?;
+        let data_pack_version =
+            crate::protocol::version::data_pack_version_for(self.protocol_version)?;
+        let known_packs = configuration::encode_known_packs(data_pack_version)?;
         self.write_packet(writer, &known_packs).await?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    async fn send_login_cookie_request(
+        &mut self,
+        writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
+        key: &str,
+    ) -> std::io::Result<()> {
+        let packet = crate::protocol::login::encode_login_cookie_request(key)?;
+        self.write_packet(writer, &packet).await?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    async fn send_cookie_request(
+        &mut self,
+        writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
+        key: &str,
+    ) -> std::io::Result<()> {
+        let packet = crate::protocol::configuration::encode_cookie_request(key)?;
+        self.write_packet(writer, &packet).await?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    async fn send_play_cookie_request(
+        &mut self,
+        writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
+        key: &str,
+    ) -> std::io::Result<()> {
+        let packet = crate::protocol::play::encode_play_cookie_request(key)?;
+        self.write_packet(writer, &packet).await?;
         Ok(())
     }
 
@@ -422,8 +459,9 @@ impl Connection {
         &mut self,
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<()> {
-        for reg_id in registry::ALL_REGISTRY_IDS {
-            let entries = registry::load(reg_id)?;
+        let reg_set = registry::registry_set_for(self.protocol_version)?;
+        for reg_id in reg_set.registry_ids {
+            let entries = registry::load(reg_id, self.protocol_version)?;
             let packet = configuration::encode_registry_data(reg_id, &entries)?;
             self.write_packet(writer, &packet).await?;
         }
@@ -431,13 +469,9 @@ impl Connection {
         let tags = configuration::encode_update_tags()?;
         self.write_packet(writer, &tags).await?;
 
-
-        // Send Finish Configuration — remain in Configuration state
-        // and wait for client to send Acknowledge Finish Configuration (0x03)
         let finish = configuration::encode_finish_configuration();
         self.write_packet(writer, &finish).await?;
         self.configuration_finish_sent = true;
-
 
         Ok(())
     }
@@ -602,12 +636,20 @@ impl Connection {
                 }
             }
             CLIENT_TICK_END => {
-                // Empty packet, just acknowledge
+                if let Some(uuid) = self.player_uuid {
+                    let world = self.world.read().await;
+                    let limit = world
+                        .players
+                        .get(&uuid)
+                        .map(|p| p.chunks_per_tick)
+                        .unwrap_or(25.0);
+                    drop(world);
+                    self.drain_pending_chunks(writer, limit).await?;
+                }
             }
             KEEP_ALIVE => {
                 debug!("Received keep-alive response from {}", self.addr);
                 self.last_keep_alive_response = Some(Instant::now());
-
             }
             SET_PLAYER_POSITION => {
                 let pos = play::PlayerPosition::decode(data)?;
@@ -646,7 +688,97 @@ impl Connection {
                 }
             }
             SET_PLAYER_POSITION_AND_ROTATION => {
-                debug!("Player position and rotation ({} bytes)", data.len());
+                let pos_rot = play::PlayerPositionAndRotation::decode(data)?;
+                debug!(
+                    "Player pos+rot: ({}, {}, {}) yaw={} pitch={}",
+                    pos_rot.x, pos_rot.y, pos_rot.z, pos_rot.yaw, pos_rot.pitch
+                );
+                if let Some(uuid) = self.player_uuid {
+                    let mut world = self.world.write().await;
+                    world.update_player_position(&uuid, pos_rot.x, pos_rot.y, pos_rot.z);
+                    world.update_player_rotation(&uuid, pos_rot.yaw, pos_rot.pitch);
+                    if let Some(player) = world.players.get_mut(&uuid) {
+                        player.on_ground = pos_rot.on_ground;
+                    }
+                    let view_distance = 8;
+                    if let Some(update) = world.compute_chunk_updates(&uuid, view_distance) {
+                        for chunk_pos in &update.to_unload {
+                            let unload_packet = play::encode_unload_chunk(chunk_pos.x, chunk_pos.z);
+                            self.write_packet(writer, &unload_packet).await?;
+                        }
+                        if !update.to_load.is_empty() {
+                            self.pending_chunks.extend(update.to_load.iter());
+                        }
+                        debug!(
+                            "Chunk update: queued {}, unloaded {}",
+                            update.to_load.len(),
+                            update.to_unload.len()
+                        );
+                    }
+                    let limit = world
+                        .players
+                        .get(&uuid)
+                        .map(|p| p.chunks_per_tick)
+                        .unwrap_or(25.0);
+                    drop(world);
+                    self.drain_pending_chunks(writer, limit).await?;
+                }
+            }
+            SET_PLAYER_ROTATION => {
+                let rot = play::PlayerRotation::decode(data)?;
+                debug!("Player rotation: yaw={} pitch={}", rot.yaw, rot.pitch);
+                if let Some(uuid) = self.player_uuid {
+                    let mut world = self.world.write().await;
+                    world.update_player_rotation(&uuid, rot.yaw, rot.pitch);
+                    if let Some(player) = world.players.get_mut(&uuid) {
+                        player.on_ground = rot.on_ground;
+                    }
+                }
+            }
+            SET_PLAYER_STATUS_ONLY => {
+                let status = play::PlayerStatusOnly::decode(data)?;
+                if let Some(uuid) = self.player_uuid {
+                    let mut world = self.world.write().await;
+                    if let Some(player) = world.players.get_mut(&uuid) {
+                        player.on_ground = status.on_ground;
+                    }
+                }
+            }
+            PLAYER_COMMAND => {
+                let cmd = play::PlayerCommand::decode(data)?;
+                debug!(
+                    "Player command: action={} jump_boost={}",
+                    cmd.action_id, cmd.jump_boost
+                );
+                if let Some(uuid) = self.player_uuid {
+                    let mut world = self.world.write().await;
+                    if let Some(player) = world.players.get_mut(&uuid) {
+                        match cmd.action_id {
+                            0 => player.is_sneaking = true,
+                            1 => player.is_sneaking = false,
+                            3 => player.is_sprinting = true,
+                            4 => player.is_sprinting = false,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            SET_CARRIED_ITEM => {
+                let item = play::SetCarriedItem::decode(data)?;
+                debug!("Set carried item: slot={}", item.slot);
+                if let Some(uuid) = self.player_uuid {
+                    let mut world = self.world.write().await;
+                    if let Some(player) = world.players.get_mut(&uuid) {
+                        player.selected_slot = item.slot;
+                    }
+                }
+            }
+            SWING => {
+                let swing = play::Swing::decode(data)?;
+                debug!(
+                    "Player swing: hand={}",
+                    if swing.hand == 0 { "main" } else { "off" }
+                );
             }
             PLAYER_LOADED => {
                 debug!("Player loaded signal received");

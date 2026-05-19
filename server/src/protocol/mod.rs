@@ -8,3 +8,4 @@ pub mod packet_ids;
 pub mod play;
 pub mod status;
 pub mod types;
+pub mod version;

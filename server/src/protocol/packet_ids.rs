@@ -66,6 +66,11 @@ pub mod play {
         pub const KEEP_ALIVE: i32 = 0x1C;
         pub const SET_PLAYER_POSITION: i32 = 0x1E;
         pub const SET_PLAYER_POSITION_AND_ROTATION: i32 = 0x1F;
+        pub const SET_PLAYER_ROTATION: i32 = 0x20;
+        pub const SET_PLAYER_STATUS_ONLY: i32 = 0x21;
+        pub const PLAYER_COMMAND: i32 = 0x25;
         pub const PLAYER_LOADED: i32 = 0x2C;
+        pub const SET_CARRIED_ITEM: i32 = 0x31;
+        pub const SWING: i32 = 0x38;
     }
 }
