@@ -170,7 +170,7 @@ pub fn encode_chunk_data(chunk: &Chunk) -> io::Result<Packet> {
     // Light data
     write_light_data(&mut data)?;
 
-    Ok(Packet::new(0x27, data))
+    Ok(Packet::new(0x2C, data))
 }
 
 fn write_light_data(writer: &mut impl Write) -> io::Result<()> {
@@ -278,7 +278,7 @@ mod tests {
         let chunk = Chunk::new_flat(ChunkPos::new(3, -2));
         let packet = encode_chunk_data(&chunk).unwrap();
 
-        assert_eq!(packet.id, 0x27);
+        assert_eq!(packet.id, 0x2C);
         assert!(!packet.data.is_empty());
 
         // First 8 bytes: chunk X and Z as i32 BE

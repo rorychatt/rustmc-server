@@ -41,12 +41,12 @@ pub fn encode_system_chat_message(message: &str) -> io::Result<Packet> {
     let mut data = Vec::new();
     write_string(&mut data, &json)?;
     data.push(0); // overlay = false (chat, not action bar)
-    Ok(Packet::new(0x69, data))
+    Ok(Packet::new(0x77, data))
 }
 
 pub fn encode_keep_alive(id: i64) -> Packet {
     let data = id.to_be_bytes().to_vec();
-    Packet::new(0x26, data)
+    Packet::new(0x2B, data)
 }
 
 pub fn encode_player_position_and_look(
@@ -59,81 +59,42 @@ pub fn encode_player_position_and_look(
     teleport_id: i32,
 ) -> Packet {
     let mut data = Vec::new();
+    VarInt(teleport_id).write(&mut data).unwrap();
     data.extend_from_slice(&x.to_be_bytes());
     data.extend_from_slice(&y.to_be_bytes());
     data.extend_from_slice(&z.to_be_bytes());
+    // Velocity (new in protocol 775)
+    data.extend_from_slice(&0.0f64.to_be_bytes()); // vel_x
+    data.extend_from_slice(&0.0f64.to_be_bytes()); // vel_y
+    data.extend_from_slice(&0.0f64.to_be_bytes()); // vel_z
     data.extend_from_slice(&yaw.to_be_bytes());
     data.extend_from_slice(&pitch.to_be_bytes());
-    data.push(flags);
-    VarInt(teleport_id).write(&mut data).unwrap();
-    Packet::new(0x3E, data)
+    data.extend_from_slice(&(flags as i32).to_be_bytes()); // Flags (Int in 775)
+    Packet::new(0x46, data)
 }
 
 pub fn encode_unload_chunk(chunk_x: i32, chunk_z: i32) -> Packet {
     let mut data = Vec::new();
-    data.extend_from_slice(&chunk_x.to_be_bytes());
     data.extend_from_slice(&chunk_z.to_be_bytes());
-    Packet::new(0x1F, data)
+    data.extend_from_slice(&chunk_x.to_be_bytes());
+    Packet::new(0x25, data)
 }
 
-pub fn encode_chunk_data(chunk: &crate::world::chunk::Chunk) -> io::Result<Packet> {
-    use crate::world::chunk::{CHUNK_WIDTH, SECTION_HEIGHT};
+pub fn encode_chunk_batch_start() -> Packet {
+    Packet::new(0x0C, Vec::new())
+}
 
+pub fn encode_chunk_batch_finished(batch_size: i32) -> io::Result<Packet> {
     let mut data = Vec::new();
-    // Chunk X
-    data.extend_from_slice(&chunk.pos.x.to_be_bytes());
-    // Chunk Z
-    data.extend_from_slice(&chunk.pos.z.to_be_bytes());
+    VarInt(batch_size).write(&mut data)?;
+    Ok(Packet::new(0x0B, data))
+}
 
-    // Heightmaps (NBT)
-    data.push(0x0A); // TAG_Compound
-    data.extend_from_slice(&[0x00, 0x00]); // Empty name
-    data.push(0x00); // TAG_End
-
-    // Data (serialized chunk sections)
-    let mut chunk_data = Vec::new();
-    for section_idx in 0..24 {
-        if let Some(section) = chunk.get_section(section_idx) {
-            // Block count
-            let block_count = if section.is_empty() {
-                0u16
-            } else {
-                (CHUNK_WIDTH * CHUNK_WIDTH * SECTION_HEIGHT) as u16
-            };
-            chunk_data.extend_from_slice(&block_count.to_be_bytes());
-
-            // Palette (single value for flat sections)
-            chunk_data.push(0); // Bits per entry (0 = single-valued)
-            VarInt(0).write(&mut chunk_data)?; // Palette entry: Air (state ID 0)
-            VarInt(0).write(&mut chunk_data)?; // Data array length (0 for single-valued)
-
-            // Biomes (single-valued)
-            chunk_data.push(0); // Bits per entry
-            VarInt(0).write(&mut chunk_data)?; // Palette entry: Plains
-            VarInt(0).write(&mut chunk_data)?; // Data array length
-        }
-    }
-
-    VarInt(chunk_data.len() as i32).write(&mut data)?;
-    data.extend_from_slice(&chunk_data);
-
-    // Block entities count
-    VarInt(0).write(&mut data)?;
-
-    // Sky Light Mask
-    VarInt(0).write(&mut data)?;
-    // Block Light Mask
-    VarInt(0).write(&mut data)?;
-    // Empty Sky Light Mask
-    VarInt(0).write(&mut data)?;
-    // Empty Block Light Mask
-    VarInt(0).write(&mut data)?;
-    // Sky Light array count
-    VarInt(0).write(&mut data)?;
-    // Block Light array count
-    VarInt(0).write(&mut data)?;
-
-    Ok(Packet::new(0x27, data))
+pub fn encode_game_event(event: u8, value: f32) -> Packet {
+    let mut data = Vec::new();
+    data.push(event);
+    data.extend_from_slice(&value.to_be_bytes());
+    Packet::new(0x23, data)
 }
 
 pub fn encode_login_play(entity_id: i32) -> io::Result<Packet> {
@@ -148,7 +109,7 @@ pub fn encode_login_play(entity_id: i32) -> io::Result<Packet> {
     data.push(0); // Reduced debug info
     data.push(1); // Enable respawn screen
     data.push(0); // Do limited crafting
-    write_string(&mut data, "minecraft:overworld")?; // Dimension type
+    VarInt(0).write(&mut data)?; // Dimension Type (VarInt registry ID, 0 = overworld)
     write_string(&mut data, "minecraft:overworld")?; // Dimension name
     data.extend_from_slice(&0i64.to_be_bytes()); // Hashed seed
     data.push(1); // Game mode: creative
@@ -157,7 +118,9 @@ pub fn encode_login_play(entity_id: i32) -> io::Result<Packet> {
     data.push(1); // Is flat: true
     data.push(0); // Has death location
     VarInt(0).write(&mut data)?; // Portal cooldown
-    Ok(Packet::new(0x2B, data))
+    VarInt(63).write(&mut data)?; // Sea Level
+    data.push(0); // Enforces Secure Chat: false
+    Ok(Packet::new(0x30, data))
 }
 
 fn read_f64(reader: &mut impl Read) -> io::Result<f64> {
@@ -188,7 +151,50 @@ mod tests {
     #[test]
     fn test_keep_alive_encode() {
         let packet = encode_keep_alive(42);
-        assert_eq!(packet.id, 0x26);
+        assert_eq!(packet.id, 0x2B);
         assert_eq!(packet.data.len(), 8);
+    }
+
+    #[test]
+    fn test_chunk_batch_start() {
+        let packet = encode_chunk_batch_start();
+        assert_eq!(packet.id, 0x0C);
+        assert!(packet.data.is_empty());
+    }
+
+    #[test]
+    fn test_chunk_batch_finished() {
+        let packet = encode_chunk_batch_finished(17).unwrap();
+        assert_eq!(packet.id, 0x0B);
+        assert!(!packet.data.is_empty());
+    }
+
+    #[test]
+    fn test_game_event() {
+        let packet = encode_game_event(13, 0.0);
+        assert_eq!(packet.id, 0x23);
+        assert_eq!(packet.data.len(), 5); // 1 byte event + 4 bytes float
+    }
+
+    #[test]
+    fn test_login_play_protocol_775() {
+        let packet = encode_login_play(1).unwrap();
+        assert_eq!(packet.id, 0x30);
+        assert!(!packet.data.is_empty());
+    }
+
+    #[test]
+    fn test_unload_chunk() {
+        let packet = encode_unload_chunk(5, 10);
+        assert_eq!(packet.id, 0x25);
+        assert_eq!(packet.data.len(), 8);
+    }
+
+    #[test]
+    fn test_player_position_and_look() {
+        let packet = encode_player_position_and_look(0.0, 64.0, 0.0, 0.0, 0.0, 0, 0);
+        assert_eq!(packet.id, 0x46);
+        // teleport_id(VarInt 1) + x,y,z(24) + vel_x,vel_y,vel_z(24) + yaw,pitch(8) + flags(4)
+        assert!(packet.data.len() > 50);
     }
 }
