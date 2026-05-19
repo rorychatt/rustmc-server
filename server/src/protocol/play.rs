@@ -374,8 +374,8 @@ fn read_i16(reader: &mut impl Read) -> io::Result<i16> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::ids;
+    use super::*;
 
     #[test]
     fn test_player_position_decode() {
@@ -638,7 +638,6 @@ mod tests {
             let item = SetCarriedItem { slot };
             assert!(!item.is_valid_slot(), "slot {} should be invalid", slot);
         }
-
     }
     #[test]
     fn test_encode_entity_animation_main_hand() {
