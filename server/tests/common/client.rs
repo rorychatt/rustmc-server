@@ -81,6 +81,12 @@ impl TestClient {
         self.send_packet(0x1E, &data).await
     }
 
+    pub async fn send_chat_command(&mut self, command: &str) -> anyhow::Result<()> {
+        let mut data = Vec::new();
+        write_string(&mut data, command)?;
+        self.send_packet(0x07, &data).await
+    }
+
     #[allow(dead_code)]
     pub async fn send_chat_message(&mut self, message: &str) -> anyhow::Result<()> {
         let mut data = Vec::new();
@@ -104,6 +110,11 @@ impl TestClient {
     pub async fn send_chunk_batch_received(&mut self, chunks_per_tick: f32) -> anyhow::Result<()> {
         let data = chunks_per_tick.to_be_bytes().to_vec();
         self.send_packet(0x0B, &data).await
+    }
+
+    #[allow(dead_code)]
+    pub async fn send_client_tick_end(&mut self) -> anyhow::Result<()> {
+        self.send_packet(0x0D, &[]).await
     }
 
     async fn send_packet(&mut self, packet_id: i32, data: &[u8]) -> anyhow::Result<()> {
@@ -198,6 +209,15 @@ impl TestClient {
 pub struct RawPacket {
     pub id: i32,
     pub data: Vec<u8>,
+}
+
+impl RawPacket {
+    pub fn read_transfer(&self) -> anyhow::Result<(String, i32)> {
+        let mut cursor = Cursor::new(&self.data);
+        let host = read_string(&mut cursor)?;
+        let port = read_varint(&mut cursor)?;
+        Ok((host, port))
+    }
 }
 
 fn write_varint(writer: &mut impl Write, value: i32) -> anyhow::Result<()> {

@@ -191,6 +191,135 @@ impl PlayCookieResponse {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct PlayerPositionAndRotation {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub yaw: f32,
+    pub pitch: f32,
+    pub on_ground: bool,
+}
+
+impl PlayerPositionAndRotation {
+    pub fn decode(data: &[u8]) -> io::Result<Self> {
+        let mut cursor = Cursor::new(data);
+        let x = read_f64(&mut cursor)?;
+        let y = read_f64(&mut cursor)?;
+        let z = read_f64(&mut cursor)?;
+        let yaw = read_f32(&mut cursor)?;
+        let pitch = read_f32(&mut cursor)?;
+        let mut buf = [0u8; 1];
+        cursor.read_exact(&mut buf)?;
+        let on_ground = buf[0] != 0;
+        Ok(Self {
+            x,
+            y,
+            z,
+            yaw,
+            pitch,
+            on_ground,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PlayerRotation {
+    pub yaw: f32,
+    pub pitch: f32,
+    pub on_ground: bool,
+}
+
+impl PlayerRotation {
+    pub fn decode(data: &[u8]) -> io::Result<Self> {
+        let mut cursor = Cursor::new(data);
+        let yaw = read_f32(&mut cursor)?;
+        let pitch = read_f32(&mut cursor)?;
+        let mut buf = [0u8; 1];
+        cursor.read_exact(&mut buf)?;
+        let on_ground = buf[0] != 0;
+        Ok(Self {
+            yaw,
+            pitch,
+            on_ground,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PlayerStatusOnly {
+    pub on_ground: bool,
+}
+
+impl PlayerStatusOnly {
+    pub fn decode(data: &[u8]) -> io::Result<Self> {
+        if data.is_empty() {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "empty packet"));
+        }
+        let on_ground = data[0] != 0;
+        Ok(Self { on_ground })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PlayerCommand {
+    pub entity_id: i32,
+    pub action_id: i32,
+    pub jump_boost: i32,
+}
+
+impl PlayerCommand {
+    pub fn decode(data: &[u8]) -> io::Result<Self> {
+        let mut cursor = Cursor::new(data);
+        let entity_id = VarInt::read(&mut cursor)?.0;
+        let action_id = VarInt::read(&mut cursor)?.0;
+        let jump_boost = VarInt::read(&mut cursor)?.0;
+        Ok(Self {
+            entity_id,
+            action_id,
+            jump_boost,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Swing {
+    pub hand: i32,
+}
+
+impl Swing {
+    pub fn decode(data: &[u8]) -> io::Result<Self> {
+        let mut cursor = Cursor::new(data);
+        let hand = VarInt::read(&mut cursor)?.0;
+        Ok(Self { hand })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SetCarriedItem {
+    pub slot: i16,
+}
+
+impl SetCarriedItem {
+    pub fn decode(data: &[u8]) -> io::Result<Self> {
+        let mut cursor = Cursor::new(data);
+        let slot = read_i16(&mut cursor)?;
+        Ok(Self { slot })
+    }
+}
+
+pub struct ChatCommand {
+    pub command: String,
+}
+
+impl ChatCommand {
+    pub fn decode(data: &[u8]) -> io::Result<Self> {
+        let mut cursor = Cursor::new(data);
+        let command = read_string(&mut cursor)?;
+        Ok(Self { command })
+    }
+}
+
 pub fn encode_transfer(host: &str, port: i32) -> io::Result<Packet> {
     let mut data = Vec::new();
     write_string(&mut data, host)?;
@@ -202,6 +331,18 @@ fn read_f64(reader: &mut impl Read) -> io::Result<f64> {
     let mut buf = [0u8; 8];
     reader.read_exact(&mut buf)?;
     Ok(f64::from_be_bytes(buf))
+}
+
+fn read_f32(reader: &mut impl Read) -> io::Result<f32> {
+    let mut buf = [0u8; 4];
+    reader.read_exact(&mut buf)?;
+    Ok(f32::from_be_bytes(buf))
+}
+
+fn read_i16(reader: &mut impl Read) -> io::Result<i16> {
+    let mut buf = [0u8; 2];
+    reader.read_exact(&mut buf)?;
+    Ok(i16::from_be_bytes(buf))
 }
 
 #[cfg(test)]
@@ -370,6 +511,88 @@ mod tests {
 
         let result = PlayCookieResponse::decode(&data);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_player_position_and_rotation_decode() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&100.0f64.to_be_bytes()); // x
+        data.extend_from_slice(&64.0f64.to_be_bytes()); // y
+        data.extend_from_slice(&200.0f64.to_be_bytes()); // z
+        data.extend_from_slice(&45.0f32.to_be_bytes()); // yaw
+        data.extend_from_slice(&(-30.0f32).to_be_bytes()); // pitch
+        data.push(1); // on_ground = true
+
+        let pos_rot = PlayerPositionAndRotation::decode(&data).unwrap();
+        assert_eq!(pos_rot.x, 100.0);
+        assert_eq!(pos_rot.y, 64.0);
+        assert_eq!(pos_rot.z, 200.0);
+        assert_eq!(pos_rot.yaw, 45.0);
+        assert_eq!(pos_rot.pitch, -30.0);
+        assert!(pos_rot.on_ground);
+    }
+
+    #[test]
+    fn test_player_rotation_decode() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&90.0f32.to_be_bytes()); // yaw
+        data.extend_from_slice(&(-45.0f32).to_be_bytes()); // pitch
+        data.push(0); // on_ground = false
+
+        let rot = PlayerRotation::decode(&data).unwrap();
+        assert_eq!(rot.yaw, 90.0);
+        assert_eq!(rot.pitch, -45.0);
+        assert!(!rot.on_ground);
+    }
+
+    #[test]
+    fn test_player_status_only_decode() {
+        let data = vec![1u8];
+        let status = PlayerStatusOnly::decode(&data).unwrap();
+        assert!(status.on_ground);
+
+        let data = vec![0u8];
+        let status = PlayerStatusOnly::decode(&data).unwrap();
+        assert!(!status.on_ground);
+    }
+
+    #[test]
+    fn test_player_command_decode() {
+        let mut data = Vec::new();
+        VarInt(42).write(&mut data).unwrap(); // entity_id
+        VarInt(3).write(&mut data).unwrap(); // action_id (sprint)
+        VarInt(0).write(&mut data).unwrap(); // jump_boost
+
+        let cmd = PlayerCommand::decode(&data).unwrap();
+        assert_eq!(cmd.entity_id, 42);
+        assert_eq!(cmd.action_id, 3);
+        assert_eq!(cmd.jump_boost, 0);
+    }
+
+    #[test]
+    fn test_swing_decode() {
+        let mut data = Vec::new();
+        VarInt(0).write(&mut data).unwrap(); // main hand
+
+        let swing = Swing::decode(&data).unwrap();
+        assert_eq!(swing.hand, 0);
+
+        let mut data = Vec::new();
+        VarInt(1).write(&mut data).unwrap(); // off hand
+
+        let swing = Swing::decode(&data).unwrap();
+        assert_eq!(swing.hand, 1);
+    }
+
+    #[test]
+    fn test_set_carried_item_decode() {
+        let data = 5i16.to_be_bytes().to_vec();
+        let item = SetCarriedItem::decode(&data).unwrap();
+        assert_eq!(item.slot, 5);
+
+        let data = 0i16.to_be_bytes().to_vec();
+        let item = SetCarriedItem::decode(&data).unwrap();
+        assert_eq!(item.slot, 0);
     }
 
     mod proptest_tests {

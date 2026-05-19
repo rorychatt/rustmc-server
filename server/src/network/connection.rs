@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::Cursor;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -45,6 +46,8 @@ pub struct Connection {
     last_keep_alive_id: i64,
     last_keep_alive_response: Option<Instant>,
     pending_chunks: Vec<ChunkPos>,
+    cookies: HashMap<String, Vec<u8>>,
+
 }
 
 impl Connection {
@@ -63,7 +66,21 @@ impl Connection {
             last_keep_alive_id: 0,
             last_keep_alive_response: None,
             pending_chunks: Vec::new(),
+            cookies: HashMap::new(),
+
         }
+    }
+
+    pub fn get_cookie(&self, key: &str) -> Option<&Vec<u8>> {
+        self.cookies.get(key)
+    }
+
+    pub fn set_cookie(&mut self, key: String, payload: Vec<u8>) {
+        self.cookies.insert(key, payload);
+    }
+
+    pub fn remove_cookie(&mut self, key: &str) -> Option<Vec<u8>> {
+        self.cookies.remove(key)
     }
 
     pub async fn handle(mut self, stream: TcpStream) {
@@ -322,6 +339,11 @@ impl Connection {
             0x04 => {
                 let response = LoginCookieResponse::decode(data)?;
                 debug!("Received login cookie response: key={}", response.key);
+                if let Some(payload) = response.payload {
+                    self.cookies.insert(response.key, payload);
+                } else {
+                    self.cookies.remove(&response.key);
+                }
                 Ok(true)
             }
             _ => {
@@ -341,7 +363,15 @@ impl Connection {
             // Cookie Response (0x02)
             0x02 => {
                 let response = configuration::CookieResponse::decode(_data)?;
-                debug!("Received cookie response: key={}", response.key);
+                debug!(
+                    "Received configuration cookie response: key={}",
+                    response.key
+                );
+                if let Some(payload) = response.payload {
+                    self.cookies.insert(response.key, payload);
+                } else {
+                    self.cookies.remove(&response.key);
+                }
                 Ok(true)
             }
 
@@ -524,7 +554,18 @@ impl Connection {
             }
             // Chat Command
             0x07 => {
-                debug!("Received chat command ({} bytes)", data.len());
+                let command = play::ChatCommand::decode(data)?;
+                if command.command.starts_with("transfer ") {
+                    let parts: Vec<&str> = command.command.splitn(3, ' ').collect();
+                    if parts.len() == 3 {
+                        if let Ok(port) = parts[2].parse::<i32>() {
+                            let packet = play::encode_transfer(parts[1], port)?;
+                            self.write_packet(writer, &packet).await?;
+                            return Ok(false);
+                        }
+                    }
+                }
+                debug!("Received chat command: {}", command.command);
             }
             // Chat Message
             0x09 => {
@@ -550,10 +591,24 @@ impl Connection {
             0x12 => {
                 let response = play::PlayCookieResponse::decode(data)?;
                 debug!("Received play cookie response: key={}", response.key);
+                if let Some(payload) = response.payload {
+                    self.cookies.insert(response.key, payload);
+                } else {
+                    self.cookies.remove(&response.key);
+                }
             }
             // Client Tick End
             0x0D => {
-                // Empty packet, just acknowledge
+                if let Some(uuid) = self.player_uuid {
+                    let world = self.world.read().await;
+                    let limit = world
+                        .players
+                        .get(&uuid)
+                        .map(|p| p.chunks_per_tick)
+                        .unwrap_or(25.0);
+                    drop(world);
+                    self.drain_pending_chunks(writer, limit).await?;
+                }
             }
             // Keep Alive (serverbound)
             0x1C => {
@@ -599,7 +654,112 @@ impl Connection {
             }
             // Set Player Position and Rotation
             0x1F => {
-                debug!("Player position and rotation ({} bytes)", data.len());
+                let pos_rot = play::PlayerPositionAndRotation::decode(data)?;
+                debug!(
+                    "Player pos+rot: ({}, {}, {}) yaw={} pitch={}",
+                    pos_rot.x, pos_rot.y, pos_rot.z, pos_rot.yaw, pos_rot.pitch
+                );
+
+                if let Some(uuid) = self.player_uuid {
+                    let mut world = self.world.write().await;
+                    world.update_player_position(&uuid, pos_rot.x, pos_rot.y, pos_rot.z);
+                    world.update_player_rotation(&uuid, pos_rot.yaw, pos_rot.pitch);
+                    if let Some(player) = world.players.get_mut(&uuid) {
+                        player.on_ground = pos_rot.on_ground;
+                    }
+
+                    let view_distance = 8;
+                    if let Some(update) = world.compute_chunk_updates(&uuid, view_distance) {
+                        for chunk_pos in &update.to_unload {
+                            let unload_packet = play::encode_unload_chunk(chunk_pos.x, chunk_pos.z);
+                            self.write_packet(writer, &unload_packet).await?;
+                        }
+
+                        if !update.to_load.is_empty() {
+                            self.pending_chunks.extend(update.to_load.iter());
+                        }
+
+                        debug!(
+                            "Chunk update: queued {}, unloaded {}",
+                            update.to_load.len(),
+                            update.to_unload.len()
+                        );
+                    }
+
+                    let limit = world
+                        .players
+                        .get(&uuid)
+                        .map(|p| p.chunks_per_tick)
+                        .unwrap_or(25.0);
+                    drop(world);
+
+                    self.drain_pending_chunks(writer, limit).await?;
+                }
+            }
+            // Move Player Rot
+            0x20 => {
+                let rot = play::PlayerRotation::decode(data)?;
+                debug!("Player rotation: yaw={} pitch={}", rot.yaw, rot.pitch);
+
+                if let Some(uuid) = self.player_uuid {
+                    let mut world = self.world.write().await;
+                    world.update_player_rotation(&uuid, rot.yaw, rot.pitch);
+                    if let Some(player) = world.players.get_mut(&uuid) {
+                        player.on_ground = rot.on_ground;
+                    }
+                }
+            }
+            // Move Player Status Only
+            0x21 => {
+                let status = play::PlayerStatusOnly::decode(data)?;
+
+                if let Some(uuid) = self.player_uuid {
+                    let mut world = self.world.write().await;
+                    if let Some(player) = world.players.get_mut(&uuid) {
+                        player.on_ground = status.on_ground;
+                    }
+                }
+            }
+            // Player Command
+            0x25 => {
+                let cmd = play::PlayerCommand::decode(data)?;
+                debug!(
+                    "Player command: action={} jump_boost={}",
+                    cmd.action_id, cmd.jump_boost
+                );
+
+                if let Some(uuid) = self.player_uuid {
+                    let mut world = self.world.write().await;
+                    if let Some(player) = world.players.get_mut(&uuid) {
+                        match cmd.action_id {
+                            0 => player.is_sneaking = true,
+                            1 => player.is_sneaking = false,
+                            3 => player.is_sprinting = true,
+                            4 => player.is_sprinting = false,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            // Set Carried Item
+            0x31 => {
+                let item = play::SetCarriedItem::decode(data)?;
+                debug!("Set carried item: slot={}", item.slot);
+
+                if let Some(uuid) = self.player_uuid {
+                    let mut world = self.world.write().await;
+                    if let Some(player) = world.players.get_mut(&uuid) {
+                        player.selected_slot = item.slot;
+                    }
+                }
+            }
+            // Swing
+            0x38 => {
+                let swing = play::Swing::decode(data)?;
+                debug!(
+                    "Player swing: hand={}",
+                    if swing.hand == 0 { "main" } else { "off" }
+                );
             }
             // Player Loaded
             0x2C => {
@@ -613,5 +773,70 @@ impl Connection {
             }
         }
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_connection() -> Connection {
+        let world = Arc::new(RwLock::new(World::new()));
+        let addr: SocketAddr = "127.0.0.1:25565".parse().unwrap();
+        Connection::new(addr, world)
+    }
+
+    #[test]
+    fn test_set_and_get_cookie() {
+        let mut conn = make_connection();
+        conn.set_cookie("minecraft:test".to_string(), vec![1, 2, 3]);
+        assert_eq!(conn.get_cookie("minecraft:test"), Some(&vec![1, 2, 3]));
+    }
+
+    #[test]
+    fn test_get_cookie_missing() {
+        let conn = make_connection();
+        assert_eq!(conn.get_cookie("minecraft:nonexistent"), None);
+    }
+
+    #[test]
+    fn test_remove_cookie() {
+        let mut conn = make_connection();
+        conn.set_cookie("minecraft:session".to_string(), vec![10, 20]);
+        let removed = conn.remove_cookie("minecraft:session");
+        assert_eq!(removed, Some(vec![10, 20]));
+        assert_eq!(conn.get_cookie("minecraft:session"), None);
+    }
+
+    #[test]
+    fn test_remove_cookie_missing() {
+        let mut conn = make_connection();
+        let removed = conn.remove_cookie("minecraft:missing");
+        assert_eq!(removed, None);
+    }
+
+    #[test]
+    fn test_cookie_overwrite() {
+        let mut conn = make_connection();
+        conn.set_cookie("minecraft:key".to_string(), vec![1]);
+        conn.set_cookie("minecraft:key".to_string(), vec![2, 3]);
+        assert_eq!(conn.get_cookie("minecraft:key"), Some(&vec![2, 3]));
+    }
+
+    #[test]
+    fn test_none_payload_removes_cookie() {
+        let mut conn = make_connection();
+        conn.set_cookie("minecraft:transfer".to_string(), vec![5, 6, 7]);
+
+        // Simulate what the handler does when payload is None
+        let payload: Option<Vec<u8>> = None;
+        let key = "minecraft:transfer".to_string();
+        if let Some(p) = payload {
+            conn.cookies.insert(key, p);
+        } else {
+            conn.cookies.remove(&key);
+        }
+
+        assert_eq!(conn.get_cookie("minecraft:transfer"), None);
     }
 }
