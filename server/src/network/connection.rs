@@ -476,7 +476,18 @@ impl Connection {
             }
             // Chat Command
             0x07 => {
-                debug!("Received chat command ({} bytes)", data.len());
+                let command = play::ChatCommand::decode(data)?;
+                if command.command.starts_with("transfer ") {
+                    let parts: Vec<&str> = command.command.splitn(3, ' ').collect();
+                    if parts.len() == 3 {
+                        if let Ok(port) = parts[2].parse::<i32>() {
+                            let packet = play::encode_transfer(parts[1], port)?;
+                            self.write_packet(writer, &packet).await?;
+                            return Ok(false);
+                        }
+                    }
+                }
+                debug!("Received chat command: {}", command.command);
             }
             // Chat Message
             0x09 => {
