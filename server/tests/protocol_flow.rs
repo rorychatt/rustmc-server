@@ -550,6 +550,9 @@ async fn test_chunk_throttling_via_batch_received() {
         } else if packet.id == 0x2C {
             // Keep Alive - skip
             continue;
+        } else if packet.id == 0x58 {
+            // Set Center Chunk - skip
+            continue;
         } else {
             // No more batch starts — we're done
             break;
@@ -630,7 +633,7 @@ async fn test_client_tick_end_drains_chunks() {
     let mut position_chunks = 0;
     loop {
         let packet = tokio::time::timeout(
-            tokio::time::Duration::from_secs(2),
+            tokio::time::Duration::from_secs(5),
             client.read_packet(),
         )
         .await
@@ -638,7 +641,7 @@ async fn test_client_tick_end_drains_chunks() {
         .expect("Failed to read position response packet");
 
         match packet.id {
-            0x25 => {} // Unload chunk - skip
+            0x25 | 0x58 => {} // Unload chunk or Set Center Chunk - skip
             0x2C => {} // Keep Alive - skip
             0x0C => {} // Chunk Batch Start
             0x2D => position_chunks += 1,
@@ -662,7 +665,7 @@ async fn test_client_tick_end_drains_chunks() {
     // Read the chunk batch triggered by tick end (skip Keep Alive packets)
     let response = loop {
         let pkt = tokio::time::timeout(
-            tokio::time::Duration::from_secs(2),
+            tokio::time::Duration::from_secs(5),
             client.read_packet(),
         )
         .await

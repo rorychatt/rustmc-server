@@ -680,6 +680,15 @@ impl Connection {
         let mut world = self.world.write().await;
         let view_distance = 8;
         if let Some(update) = world.compute_chunk_updates(uuid, view_distance) {
+            if !update.to_load.is_empty() || !update.to_unload.is_empty() {
+                if let Some(player) = world.players.get(uuid) {
+                    let chunk_x = (player.x as i32) >> 4;
+                    let chunk_z = (player.z as i32) >> 4;
+                    let center_chunk = play::encode_set_center_chunk(chunk_x, chunk_z);
+                    self.write_packet(writer, &center_chunk).await?;
+                }
+            }
+
             for chunk_pos in &update.to_unload {
                 let unload_packet = play::encode_unload_chunk(chunk_pos.x, chunk_pos.z);
                 self.write_packet(writer, &unload_packet).await?;
