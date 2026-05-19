@@ -172,6 +172,7 @@ async fn test_login_flow() {
     }
     assert!(got_finish, "Should receive Finish Configuration");
 
+
     // Send Acknowledge Finish Configuration to transition to Play
     client
         .send_acknowledge_finish_configuration()
@@ -179,12 +180,14 @@ async fn test_login_flow() {
         .expect("Failed to send acknowledge finish configuration");
 
     // Read join game packet (now 0x30 in protocol 775)
+
     let join_game = client
         .read_packet()
         .await
         .expect("Failed to read join game");
-    assert_eq!(join_game.id, 0x30, "Expected join game packet (0x30)");
+    assert_eq!(join_game.id, 0x31, "Expected join game packet (0x31)");
     assert!(!join_game.data.is_empty(), "Join game should have data");
+
 
     // Read Player Info Update (0x40)
     let player_info = client
@@ -194,12 +197,13 @@ async fn test_login_flow() {
     assert_eq!(player_info.id, 0x40, "Expected player info update packet");
 
     // Read synchronize player position (0x46 in protocol 775)
+
     let sync_pos = client
         .read_packet()
         .await
         .expect("Failed to read sync position");
     assert_eq!(
-        sync_pos.id, 0x46,
+        sync_pos.id, 0x48,
         "Expected synchronize player position packet"
     );
 }
@@ -214,7 +218,7 @@ async fn test_play_basic() {
     // Complete login + configuration flow
     complete_login_flow(&mut client).await;
 
-    // Send player position (0x1D in protocol 775)
+    // Send player position (0x1E in protocol 775)
     client
         .send_player_position(100.0, 64.0, 200.0, true)
         .await
@@ -403,9 +407,9 @@ async fn test_configuration_phase() {
         }
     }
 
-    assert!(
-        registry_count >= 3,
-        "Should receive at least 3 registry data packets (got {registry_count})"
+    assert_eq!(
+        registry_count, 12,
+        "Should receive 12 registry data packets (got {registry_count})"
     );
     assert!(got_tags, "Should receive Update Tags packet");
 }
@@ -419,16 +423,18 @@ async fn test_chunk_batching() {
 
     complete_login_flow(&mut client).await;
 
+
     // After login, we should have received Game Event, Set Center Chunk, Chunk Batch Start,
     // chunks, and Chunk Batch Finished.
     // The login flow helper already consumes join_game, player_info, and sync_pos.
 
     // Read Game Event (0x23)
+
     let game_event = client
         .read_packet()
         .await
         .expect("Failed to read game event");
-    assert_eq!(game_event.id, 0x23, "Expected game event packet");
+    assert_eq!(game_event.id, 0x26, "Expected game event packet");
 
     // Read Set Center Chunk (0x58)
     let center_chunk = client
@@ -447,14 +453,14 @@ async fn test_chunk_batching() {
         .expect("Failed to read chunk batch start");
     assert_eq!(batch_start.id, 0x0C, "Expected chunk batch start");
 
-    // Read chunk data packets (0x2C)
+    // Read chunk data packets (0x2D)
     let mut chunk_count = 0;
     loop {
         let packet = client
             .read_packet()
             .await
             .expect("Failed to read chunk/batch packet");
-        if packet.id == 0x2C {
+        if packet.id == 0x2D {
             chunk_count += 1;
         } else if packet.id == 0x0B {
             // Chunk Batch Finished
@@ -530,6 +536,7 @@ async fn complete_login_flow_with_client(client: &mut TestClient, username: &str
         }
     }
 
+
     // Send Acknowledge Finish Configuration to transition to Play
     client
         .send_acknowledge_finish_configuration()
@@ -537,10 +544,12 @@ async fn complete_login_flow_with_client(client: &mut TestClient, username: &str
         .expect("Failed to send acknowledge finish configuration");
 
     // Read join game (0x30)
+
     let _join_game = client
         .read_packet()
         .await
         .expect("Failed to read join game");
+
 
     // Read Player Info Update (0x40)
     let _player_info = client
@@ -549,6 +558,7 @@ async fn complete_login_flow_with_client(client: &mut TestClient, username: &str
         .expect("Failed to read player info update");
 
     // Read sync position (0x46)
+
     let _sync_pos = client
         .read_packet()
         .await
