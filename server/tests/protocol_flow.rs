@@ -13,7 +13,7 @@ async fn test_status_flow() {
 
     // Send handshake with status intent
     client
-        .send_handshake(765, 1)
+        .send_handshake(775, 1)
         .await
         .expect("Failed to send handshake");
 
@@ -45,8 +45,8 @@ async fn test_status_flow() {
     );
     assert_eq!(
         json["version"]["protocol"].as_i64().unwrap(),
-        765,
-        "Protocol version should be 765"
+        775,
+        "Protocol version should be 775"
     );
     assert_eq!(
         json["players"]["online"].as_i64().unwrap(),
@@ -85,7 +85,7 @@ async fn test_login_flow() {
 
     // Send handshake with login intent
     client
-        .send_handshake(765, 2)
+        .send_handshake(775, 2)
         .await
         .expect("Failed to send handshake");
 
@@ -127,27 +127,66 @@ async fn test_login_flow() {
         common::client::read_string(&mut cursor).expect("Failed to read username");
     assert_eq!(returned_username, username, "Username should match");
 
-    // Send login acknowledged
+    // Send login acknowledged to enter Configuration phase
     client
         .send_login_acknowledged()
         .await
         .expect("Failed to send login acknowledged");
 
-    // Read join game packet
+    // Read Known Packs packet (0x0E)
+    let known_packs = client
+        .read_packet()
+        .await
+        .expect("Failed to read known packs");
+    assert_eq!(known_packs.id, 0x0E, "Expected known packs packet");
+
+    // Send Known Packs response
+    client
+        .send_known_packs_response()
+        .await
+        .expect("Failed to send known packs response");
+
+    // Read configuration packets: registry data, tags, finish
+    let mut got_finish = false;
+    loop {
+        let packet = client
+            .read_packet()
+            .await
+            .expect("Failed to read config packet");
+        match packet.id {
+            0x07 => {
+                // Registry Data
+            }
+            0x0D => {
+                // Update Tags
+            }
+            0x03 => {
+                // Finish Configuration
+                got_finish = true;
+                break;
+            }
+            _ => {
+                panic!("Unexpected config packet: {:#04x}", packet.id);
+            }
+        }
+    }
+    assert!(got_finish, "Should receive Finish Configuration");
+
+    // Read join game packet (now 0x30 in protocol 775)
     let join_game = client
         .read_packet()
         .await
         .expect("Failed to read join game");
-    assert_eq!(join_game.id, 0x2B, "Expected join game packet (0x2B)");
+    assert_eq!(join_game.id, 0x30, "Expected join game packet (0x30)");
     assert!(!join_game.data.is_empty(), "Join game should have data");
 
-    // Read synchronize player position
+    // Read synchronize player position (0x46 in protocol 775)
     let sync_pos = client
         .read_packet()
         .await
         .expect("Failed to read sync position");
     assert_eq!(
-        sync_pos.id, 0x3E,
+        sync_pos.id, 0x46,
         "Expected synchronize player position packet"
     );
 }
@@ -159,43 +198,16 @@ async fn test_play_basic() {
         .await
         .expect("Failed to connect");
 
-    // Complete login flow
-    client
-        .send_handshake(765, 2)
-        .await
-        .expect("Failed to send handshake");
-    let uuid = Uuid::new_v4();
-    client
-        .send_login_start("TestPlayer", uuid)
-        .await
-        .expect("Failed to send login start");
+    // Complete login + configuration flow
+    complete_login_flow(&mut client).await;
 
-    let _login_success = client
-        .read_packet()
-        .await
-        .expect("Failed to read login success");
-    client
-        .send_login_acknowledged()
-        .await
-        .expect("Failed to send login acknowledged");
-    let _join_game = client
-        .read_packet()
-        .await
-        .expect("Failed to read join game");
-    let _sync_pos = client
-        .read_packet()
-        .await
-        .expect("Failed to read sync position");
-
-    // Send player position
+    // Send player position (0x1D in protocol 775)
     client
         .send_player_position(100.0, 64.0, 200.0, true)
         .await
         .expect("Failed to send position");
 
     // The server should handle this without errors
-    // We can't verify a specific response since the server may not echo positions,
-    // but connection should remain alive
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 }
 
@@ -209,7 +221,7 @@ async fn test_full_protocol_sequence() {
             .await
             .expect("Failed to connect A");
         client_a
-            .send_handshake(765, 1)
+            .send_handshake(775, 1)
             .await
             .expect("Failed to send handshake A");
         client_a
@@ -220,7 +232,6 @@ async fn test_full_protocol_sequence() {
             .read_packet()
             .await
             .expect("Failed to read status A");
-        // Client A disconnects (drops)
     }
 
     // Client B: Login flow then disconnect
@@ -228,26 +239,7 @@ async fn test_full_protocol_sequence() {
         let mut client_b = TestClient::connect(server.port())
             .await
             .expect("Failed to connect B");
-        client_b
-            .send_handshake(765, 2)
-            .await
-            .expect("Failed to send handshake B");
-        let uuid_b = Uuid::new_v4();
-        client_b
-            .send_login_start("PlayerB", uuid_b)
-            .await
-            .expect("Failed to send login B");
-        let _login = client_b
-            .read_packet()
-            .await
-            .expect("Failed to read login B");
-        client_b
-            .send_login_acknowledged()
-            .await
-            .expect("Failed to send ack B");
-        let _join = client_b.read_packet().await.expect("Failed to read join B");
-        let _sync = client_b.read_packet().await.expect("Failed to read sync B");
-        // Client B disconnects (drops)
+        complete_login_flow_with_client(&mut client_b, "PlayerB").await;
     }
 
     // Client C: Login and stay connected
@@ -255,32 +247,11 @@ async fn test_full_protocol_sequence() {
         let mut client_c = TestClient::connect(server.port())
             .await
             .expect("Failed to connect C");
-        client_c
-            .send_handshake(765, 2)
-            .await
-            .expect("Failed to send handshake C");
-        let uuid_c = Uuid::new_v4();
-        client_c
-            .send_login_start("PlayerC", uuid_c)
-            .await
-            .expect("Failed to send login C");
-        let _login = client_c
-            .read_packet()
-            .await
-            .expect("Failed to read login C");
-        client_c
-            .send_login_acknowledged()
-            .await
-            .expect("Failed to send ack C");
-        let _join = client_c.read_packet().await.expect("Failed to read join C");
-        let _sync = client_c.read_packet().await.expect("Failed to read sync C");
+        complete_login_flow_with_client(&mut client_c, "PlayerC").await;
 
         // Stay connected for a bit
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        // Client C disconnects (drops)
     }
-
-    // All sequences completed successfully
 }
 
 #[tokio::test]
@@ -293,40 +264,8 @@ async fn test_concurrent_clients() {
         let port = server.port();
         let handle = tokio::spawn(async move {
             let mut client = TestClient::connect(port).await.expect("Failed to connect");
-            client
-                .send_handshake(765, 2)
-                .await
-                .expect("Failed to send handshake");
-
-            let uuid = Uuid::new_v4();
             let username = format!("Player{i}");
-            client
-                .send_login_start(&username, uuid)
-                .await
-                .expect("Failed to send login");
-
-            // Read set compression packet (0x03)
-            let compression = client
-                .read_packet()
-                .await
-                .expect("Failed to read compression packet");
-            assert_eq!(compression.id, 0x03, "Expected set compression");
-
-            // Enable compression on client side
-            client.enable_compression(256);
-
-            let login_success = client
-                .read_packet()
-                .await
-                .expect("Failed to read login success");
-            assert_eq!(login_success.id, 0x02, "Expected login success");
-
-            client
-                .send_login_acknowledged()
-                .await
-                .expect("Failed to send ack");
-            let _join = client.read_packet().await.expect("Failed to read join");
-            let _sync = client.read_packet().await.expect("Failed to read sync");
+            complete_login_flow_with_client(&mut client, &username).await;
         });
         handles.push(handle);
     }
@@ -335,8 +274,6 @@ async fn test_concurrent_clients() {
     for handle in handles {
         handle.await.expect("Client task panicked");
     }
-
-    // All 10 clients successfully logged in
 }
 
 #[tokio::test]
@@ -350,17 +287,13 @@ async fn test_error_handling() {
             .expect("Failed to connect");
         let uuid = Uuid::new_v4();
 
-        // Skip handshake and send login start directly
         let result = client.send_login_start("BadPlayer", uuid).await;
 
-        // Server should reject this - either the send fails or reading fails
         if result.is_ok() {
-            // Try to read response - should fail or disconnect
             let read_result =
                 tokio::time::timeout(tokio::time::Duration::from_secs(1), client.read_packet())
                     .await;
 
-            // Either timeout or error - both are acceptable
             assert!(
                 read_result.is_err() || read_result.unwrap().is_err(),
                 "Server should disconnect on invalid protocol sequence"
@@ -374,20 +307,213 @@ async fn test_error_handling() {
             .await
             .expect("Failed to connect");
 
-        // Send handshake with invalid next_state (3 is invalid, should be 1 or 2)
-        let result = client.send_handshake(765, 99).await;
+        let result = client.send_handshake(775, 99).await;
 
         if result.is_ok() {
-            // Try to continue - should fail
             let read_result =
                 tokio::time::timeout(tokio::time::Duration::from_secs(1), client.read_packet())
                     .await;
 
-            // Connection should fail or timeout
             assert!(
                 read_result.is_err() || read_result.unwrap().is_err(),
                 "Server should reject invalid handshake"
             );
         }
     }
+}
+
+#[tokio::test]
+async fn test_configuration_phase() {
+    let server = TestServer::spawn().await.expect("Failed to spawn server");
+    let mut client = TestClient::connect(server.port())
+        .await
+        .expect("Failed to connect");
+
+    client
+        .send_handshake(775, 2)
+        .await
+        .expect("Failed to send handshake");
+
+    let uuid = Uuid::new_v4();
+    client
+        .send_login_start("ConfigTest", uuid)
+        .await
+        .expect("Failed to send login start");
+
+    // Compression
+    let compression = client
+        .read_packet()
+        .await
+        .expect("Failed to read compression");
+    assert_eq!(compression.id, 0x03);
+    client.enable_compression(256);
+
+    // Login Success
+    let login_success = client
+        .read_packet()
+        .await
+        .expect("Failed to read login success");
+    assert_eq!(login_success.id, 0x02);
+
+    // Send Login Acknowledged
+    client
+        .send_login_acknowledged()
+        .await
+        .expect("Failed to send ack");
+
+    // Should receive Known Packs
+    let known_packs = client
+        .read_packet()
+        .await
+        .expect("Failed to read known packs");
+    assert_eq!(known_packs.id, 0x0E, "Expected Known Packs");
+
+    // Send Known Packs response
+    client
+        .send_known_packs_response()
+        .await
+        .expect("Failed to send known packs response");
+
+    // Read all config packets until Finish Configuration
+    let mut registry_count = 0;
+    let mut got_tags = false;
+    loop {
+        let packet = client
+            .read_packet()
+            .await
+            .expect("Failed to read config packet");
+        match packet.id {
+            0x07 => registry_count += 1,
+            0x0D => got_tags = true,
+            0x03 => break, // Finish Configuration
+            other => panic!("Unexpected config packet: {other:#04x}"),
+        }
+    }
+
+    assert!(
+        registry_count >= 3,
+        "Should receive at least 3 registry data packets (got {registry_count})"
+    );
+    assert!(got_tags, "Should receive Update Tags packet");
+}
+
+#[tokio::test]
+async fn test_chunk_batching() {
+    let server = TestServer::spawn().await.expect("Failed to spawn server");
+    let mut client = TestClient::connect(server.port())
+        .await
+        .expect("Failed to connect");
+
+    complete_login_flow(&mut client).await;
+
+    // After login, we should have received Game Event, Chunk Batch Start, chunks, and Chunk Batch Finished
+    // The login flow helper already consumes join_game and sync_pos.
+    // Read Game Event (0x23)
+    let game_event = client
+        .read_packet()
+        .await
+        .expect("Failed to read game event");
+    assert_eq!(game_event.id, 0x23, "Expected game event packet");
+
+    // Read Chunk Batch Start (0x0C)
+    let batch_start = client
+        .read_packet()
+        .await
+        .expect("Failed to read chunk batch start");
+    assert_eq!(batch_start.id, 0x0C, "Expected chunk batch start");
+
+    // Read chunk data packets (0x2C)
+    let mut chunk_count = 0;
+    loop {
+        let packet = client
+            .read_packet()
+            .await
+            .expect("Failed to read chunk/batch packet");
+        if packet.id == 0x2C {
+            chunk_count += 1;
+        } else if packet.id == 0x0B {
+            // Chunk Batch Finished
+            break;
+        } else {
+            panic!("Unexpected packet during chunk batch: {:#04x}", packet.id);
+        }
+    }
+
+    assert!(
+        chunk_count > 0,
+        "Should receive at least one chunk data packet"
+    );
+    // 17x17 = 289 chunks for view distance 8
+    assert_eq!(chunk_count, 289, "Should receive 17x17 chunks");
+}
+
+/// Helper to complete the full login + configuration flow
+async fn complete_login_flow(client: &mut TestClient) {
+    complete_login_flow_with_client(client, "TestPlayer").await;
+}
+
+async fn complete_login_flow_with_client(client: &mut TestClient, username: &str) {
+    client
+        .send_handshake(775, 2)
+        .await
+        .expect("Failed to send handshake");
+    let uuid = Uuid::new_v4();
+    client
+        .send_login_start(username, uuid)
+        .await
+        .expect("Failed to send login start");
+
+    // Compression
+    let _compression = client
+        .read_packet()
+        .await
+        .expect("Failed to read compression");
+    client.enable_compression(256);
+
+    // Login Success
+    let _login_success = client
+        .read_packet()
+        .await
+        .expect("Failed to read login success");
+
+    // Login Acknowledged
+    client
+        .send_login_acknowledged()
+        .await
+        .expect("Failed to send login acknowledged");
+
+    // Known Packs
+    let _known_packs = client
+        .read_packet()
+        .await
+        .expect("Failed to read known packs");
+
+    // Send Known Packs response
+    client
+        .send_known_packs_response()
+        .await
+        .expect("Failed to send known packs response");
+
+    // Read configuration packets until Finish Configuration
+    loop {
+        let packet = client
+            .read_packet()
+            .await
+            .expect("Failed to read config packet");
+        if packet.id == 0x03 {
+            break; // Finish Configuration
+        }
+    }
+
+    // Read join game (0x30)
+    let _join_game = client
+        .read_packet()
+        .await
+        .expect("Failed to read join game");
+
+    // Read sync position (0x46)
+    let _sync_pos = client
+        .read_packet()
+        .await
+        .expect("Failed to read sync position");
 }

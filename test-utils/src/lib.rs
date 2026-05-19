@@ -139,7 +139,7 @@ impl TestClient {
         let mut builder = PacketBuilder::new();
         builder
             .write_varint(0x00) // Packet ID
-            .write_varint(765) // Protocol version (1.20.4)
+            .write_varint(775) // Protocol version (26.1.2)
             .write_string("localhost")
             .write_u16(25565)
             .write_varint(next_state);
@@ -215,8 +215,8 @@ impl TestClient {
         // For now, just verify we got a response
         Ok(StatusResponse {
             version: VersionInfo {
-                protocol: 765,
-                name: "1.20.4".to_string(),
+                protocol: 775,
+                name: "26.1.2".to_string(),
             },
             players: PlayersInfo { max: 20, online: 0 },
         })

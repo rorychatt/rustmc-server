@@ -7,6 +7,7 @@ use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
 use crate::protocol::chunk_data;
+use crate::protocol::configuration;
 use crate::protocol::handshake::{Handshake, NextState};
 use crate::protocol::login::{LoginStart, LoginSuccess};
 use crate::protocol::packet::{Packet, PacketWriter};
@@ -24,6 +25,7 @@ pub enum ConnectionState {
     Handshake,
     Status,
     Login,
+    Configuration,
     Play,
 }
 
@@ -32,6 +34,7 @@ pub struct Connection {
     state: ConnectionState,
     world: Arc<RwLock<World>>,
     player_uuid: Option<Uuid>,
+    player_name: Option<String>,
     compression_enabled: bool,
 }
 
@@ -42,6 +45,7 @@ impl Connection {
             state: ConnectionState::Handshake,
             world,
             player_uuid: None,
+            player_name: None,
             compression_enabled: false,
         }
     }
@@ -100,6 +104,9 @@ impl Connection {
             ConnectionState::Handshake => self.handle_handshake(packet_id, &data, writer).await,
             ConnectionState::Status => self.handle_status(packet_id, &data, writer).await,
             ConnectionState::Login => self.handle_login(packet_id, &data, writer).await,
+            ConnectionState::Configuration => {
+                self.handle_configuration(packet_id, &data, writer).await
+            }
             ConnectionState::Play => self.handle_play(packet_id, &data, writer).await,
         }
     }
@@ -228,26 +235,160 @@ impl Connection {
         let packet = success.to_packet()?;
         self.write_packet(writer, &packet).await?;
 
-        self.state = ConnectionState::Play;
+        // Store player info for later use
         self.player_uuid = Some(login.uuid);
+        self.player_name = Some(login.name);
+
+        // Transition to Configuration state (wait for Login Acknowledged from client)
+        self.state = ConnectionState::Configuration;
+
+        Ok(true)
+    }
+
+    async fn handle_configuration(
+        &mut self,
+        packet_id: i32,
+        _data: &[u8],
+        writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
+    ) -> std::io::Result<bool> {
+        match packet_id {
+            // Login Acknowledged (0x03) - client confirms transition from Login to Configuration
+            0x03 => {
+                debug!("Client acknowledged login, sending configuration data");
+                self.send_configuration_data(writer).await?;
+                Ok(true)
+            }
+            // Known Packs response (0x07) from client
+            0x07 => {
+                debug!("Received Known Packs response from client");
+                // Client confirmed known packs; send registry data
+                self.send_registry_data(writer).await?;
+                Ok(true)
+            }
+            // Acknowledge Finish Configuration (0x03 again, but after we send Finish)
+            // In practice the client sends 0x03 for both Login Acknowledged and
+            // Acknowledge Finish Configuration. We handle this by tracking flow state
+            // via whether we've already sent Finish Configuration.
+            // However, the way the flow works:
+            // 1. Client sends Login Acknowledged (0x03) -> we send Known Packs
+            // 2. Client sends Known Packs (0x07) -> we send registries + finish
+            // 3. Client sends Acknowledge Finish (0x03) -> transition to Play
+            // Since 0x03 appears twice, we need the second occurrence.
+            // The simplest approach: After sending finish, the next 0x03 transitions to Play.
+            // We'll handle this by checking if it's the "second" 0x03.
+            // Actually, let me re-read: After Login Success, client sends Login Acknowledged
+            // which is serverbound Login packet 0x03. Then we enter Configuration.
+            // In Configuration state, client's Acknowledge Finish is also 0x03.
+            // Since handle_login already waits for 0x03 as "Login Acknowledged",
+            // we need to restructure. Let me handle it differently:
+            // The first time we get 0x03 in Configuration, it's actually the
+            // "Login Acknowledged" if we enter Configuration immediately after Login Success.
+            // But actually looking at the current code, handle_login sets state to Configuration
+            // BEFORE reading the Login Acknowledged. So the first 0x03 here IS Login Acknowledged.
+            // Let me fix this: we handle the flow linearly.
+            _ => {
+                debug!(
+                    "Unhandled configuration packet: {packet_id:#04x} ({} bytes)",
+                    _data.len()
+                );
+                Ok(true)
+            }
+        }
+    }
+
+    async fn send_configuration_data(
+        &mut self,
+        writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
+    ) -> std::io::Result<()> {
+        // Send Known Packs
+        let known_packs = configuration::encode_known_packs()?;
+        self.write_packet(writer, &known_packs).await?;
+        Ok(())
+    }
+
+    async fn send_registry_data(
+        &mut self,
+        writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
+    ) -> std::io::Result<()> {
+        // Send registry data for each required registry
+        let dim_entries = configuration::dimension_type_registry()?;
+        let dim_packet =
+            configuration::encode_registry_data("minecraft:dimension_type", &dim_entries)?;
+        self.write_packet(writer, &dim_packet).await?;
+
+        let biome_entries = configuration::biome_registry()?;
+        let biome_packet =
+            configuration::encode_registry_data("minecraft:worldgen/biome", &biome_entries)?;
+        self.write_packet(writer, &biome_packet).await?;
+
+        let damage_entries = configuration::damage_type_registry()?;
+        let damage_packet =
+            configuration::encode_registry_data("minecraft:damage_type", &damage_entries)?;
+        self.write_packet(writer, &damage_packet).await?;
+
+        let painting_entries = configuration::painting_variant_registry()?;
+        let painting_packet =
+            configuration::encode_registry_data("minecraft:painting_variant", &painting_entries)?;
+        self.write_packet(writer, &painting_packet).await?;
+
+        let wolf_entries = configuration::wolf_variant_registry()?;
+        let wolf_packet =
+            configuration::encode_registry_data("minecraft:wolf_variant", &wolf_entries)?;
+        self.write_packet(writer, &wolf_packet).await?;
+
+        // Send Update Tags
+        let tags = configuration::encode_update_tags()?;
+        self.write_packet(writer, &tags).await?;
+
+        // Send Finish Configuration
+        let finish = configuration::encode_finish_configuration();
+        self.write_packet(writer, &finish).await?;
+
+        // Transition to Play state - next packet from client will be
+        // Acknowledge Finish Configuration (0x03), which we handle below
+        self.state = ConnectionState::Play;
+
+        // Now enter Play: send login play sequence
+        self.send_play_login_sequence(writer).await?;
+
+        Ok(())
+    }
+
+    async fn send_play_login_sequence(
+        &mut self,
+        writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
+    ) -> std::io::Result<()> {
+        let uuid = self.player_uuid.unwrap();
+        let name = self.player_name.clone().unwrap();
 
         let entity_id = {
             let mut world = self.world.write().await;
-            world.add_player(login.uuid, login.name.clone())
+            world.add_player(uuid, name.clone())
         };
 
+        // 1. Login (Play) packet
         let login_play = play::encode_login_play(entity_id)?;
         self.write_packet(writer, &login_play).await?;
 
+        // 2. Synchronize Player Position
         let pos = play::encode_player_position_and_look(0.0, 64.0, 0.0, 0.0, 0.0, 0, 0);
         self.write_packet(writer, &pos).await?;
 
-        // Send initial chunks around spawn
+        // 3. Game Event (Start waiting for level chunks, event=13, value=0)
+        let game_event = play::encode_game_event(13, 0.0);
+        self.write_packet(writer, &game_event).await?;
+
+        // 4. Chunk Batch Start
+        let batch_start = play::encode_chunk_batch_start();
+        self.write_packet(writer, &batch_start).await?;
+
+        // 5. Send initial chunks around spawn
         let view_distance = 8;
         let player_chunk_x = 0;
         let player_chunk_z = 0;
 
         let mut initial_chunks = std::collections::HashSet::new();
+        let mut chunk_count = 0;
         {
             let mut world = self.world.write().await;
             for cx in (player_chunk_x - view_distance)..=(player_chunk_x + view_distance) {
@@ -257,18 +398,23 @@ impl Connection {
                     let chunk = world.get_or_generate_chunk(pos);
                     let packet = chunk_data::encode_chunk_data(chunk)?;
                     self.write_packet(writer, &packet).await?;
+                    chunk_count += 1;
                 }
             }
 
             // Mark chunks as loaded for the player
-            if let Some(player) = world.players.get_mut(&login.uuid) {
+            if let Some(player) = world.players.get_mut(&uuid) {
                 player.loaded_chunks = initial_chunks;
             }
         }
 
-        info!("Sent chunk data to player {}", login.name);
+        // 6. Chunk Batch Finished
+        let batch_finished = play::encode_chunk_batch_finished(chunk_count)?;
+        self.write_packet(writer, &batch_finished).await?;
 
-        Ok(true)
+        info!("Sent chunk data to player {}", name);
+
+        Ok(())
     }
 
     async fn handle_play(
@@ -278,7 +424,33 @@ impl Connection {
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<bool> {
         match packet_id {
-            0x14 => {
+            // Confirm Teleportation
+            0x00 => {
+                debug!("Received teleport confirmation");
+            }
+            // Chat Command
+            0x06 => {
+                debug!("Received chat command ({} bytes)", data.len());
+            }
+            // Chat Message
+            0x08 => {
+                let chat = play::ChatMessage::decode(data)?;
+                info!("Chat from {}: {}", self.addr, chat.message);
+            }
+            // Chunk Batch Received
+            0x0B => {
+                debug!("Received chunk batch acknowledgement");
+            }
+            // Client Tick End
+            0x0D => {
+                // Empty packet, just acknowledge
+            }
+            // Keep Alive (serverbound)
+            0x1B => {
+                // Keep alive response - acknowledged
+            }
+            // Set Player Position
+            0x1D => {
                 let pos = play::PlayerPosition::decode(data)?;
                 debug!("Player position: ({}, {}, {})", pos.x, pos.y, pos.z);
 
@@ -295,11 +467,21 @@ impl Connection {
                             self.write_packet(writer, &unload_packet).await?;
                         }
 
-                        // Send new chunk data
-                        for chunk_pos in &update.to_load {
-                            let chunk = world.get_or_generate_chunk(*chunk_pos);
-                            let chunk_packet = chunk_data::encode_chunk_data(chunk)?;
-                            self.write_packet(writer, &chunk_packet).await?;
+                        // Send new chunk data with batching
+                        if !update.to_load.is_empty() {
+                            let batch_start = play::encode_chunk_batch_start();
+                            self.write_packet(writer, &batch_start).await?;
+
+                            let mut count = 0;
+                            for chunk_pos in &update.to_load {
+                                let chunk = world.get_or_generate_chunk(*chunk_pos);
+                                let chunk_packet = chunk_data::encode_chunk_data(chunk)?;
+                                self.write_packet(writer, &chunk_packet).await?;
+                                count += 1;
+                            }
+
+                            let batch_finished = play::encode_chunk_batch_finished(count)?;
+                            self.write_packet(writer, &batch_finished).await?;
                         }
 
                         debug!(
@@ -310,12 +492,13 @@ impl Connection {
                     }
                 }
             }
-            0x05 => {
-                let chat = play::ChatMessage::decode(data)?;
-                info!("Chat from {}: {}", self.addr, chat.message);
+            // Set Player Position and Rotation
+            0x1E => {
+                debug!("Player position and rotation ({} bytes)", data.len());
             }
-            0x15 => {
-                // Keep alive response - acknowledged
+            // Player Loaded
+            0x2C => {
+                debug!("Player loaded signal received");
             }
             _ => {
                 debug!(

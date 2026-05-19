@@ -7,7 +7,7 @@ A multi-threaded Rust-based Minecraft server with Paper plugin compatibility.
 - **Async I/O**: Built on Tokio for efficient concurrent client handling
 - **Multi-threaded world ticking**: Chunks are processed in parallel using a work-stealing thread pool
 - **Paper plugin support**: JNI bridge layer enables loading and running Paper/Bukkit plugins
-- **Minecraft 1.20.4 protocol**: Implements the Minecraft Java Edition protocol
+- **Minecraft 26.1.2 protocol**: Implements the Minecraft Java Edition protocol (protocol version 775)
 
 ## Architecture
 

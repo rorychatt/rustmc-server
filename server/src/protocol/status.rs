@@ -41,8 +41,8 @@ impl StatusResponse {
     pub fn default_response(online_count: i32, max_players: i32) -> Self {
         Self {
             version: StatusVersion {
-                name: "1.20.4".to_string(),
-                protocol: 765,
+                name: "26.1.2".to_string(),
+                protocol: 775,
             },
             players: StatusPlayers {
                 max: max_players,
@@ -102,7 +102,7 @@ mod tests {
         let response = StatusResponse::default_response(0, 20);
         let json = serde_json::to_string(&response).unwrap();
         assert!(json.contains("RustMC Server"));
-        assert!(json.contains("\"protocol\":765"));
+        assert!(json.contains("\"protocol\":775"));
     }
 
     #[test]

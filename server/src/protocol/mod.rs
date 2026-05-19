@@ -1,4 +1,5 @@
 pub mod chunk_data;
+pub mod configuration;
 pub mod handshake;
 pub mod login;
 pub mod nbt;

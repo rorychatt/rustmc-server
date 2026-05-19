@@ -60,10 +60,7 @@ async fn test_multiple_handshakes() {
     client.send_handshake(1).await.unwrap();
     client.send_status_request().await.unwrap();
     let response1 = client.recv_status_response().await.unwrap();
-    assert_eq!(response1.version.protocol, 765);
-
-    // Note: In a real server, we'd need to reconnect for a second handshake
-    // This test verifies the client can handle multiple requests
+    assert_eq!(response1.version.protocol, 775);
 }
 
 #[tokio::test]
