@@ -30,7 +30,10 @@ impl Operators {
             .unwrap_or_else(|_| Path::new("ops.toml").to_path_buf());
 
         if !path.exists() {
-            info!("No ops config found at {}, no operators configured", path.display());
+            info!(
+                "No ops config found at {}, no operators configured",
+                path.display()
+            );
             return Self {
                 levels: HashMap::new(),
             };

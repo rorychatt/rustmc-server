@@ -6,9 +6,7 @@ use uuid::Uuid;
 const OP_UUID: &str = "069a79f4-44e9-4726-a5be-fca90e38aaf5";
 
 fn ops_config(uuid: &str) -> String {
-    format!(
-        "[[operators]]\nuuid = \"{uuid}\"\nname = \"TestOp\"\nlevel = 4\n"
-    )
+    format!("[[operators]]\nuuid = \"{uuid}\"\nname = \"TestOp\"\nlevel = 4\n")
 }
 
 #[tokio::test]
@@ -19,9 +17,7 @@ async fn test_transfer_packet_sent() {
     let server_a = TestServer::spawn_with_ops(Some(&ops))
         .await
         .expect("Failed to spawn server A");
-    let server_b = TestServer::spawn()
-        .await
-        .expect("Failed to spawn server B");
+    let server_b = TestServer::spawn().await.expect("Failed to spawn server B");
 
     let mut client = TestClient::connect(server_a.port())
         .await

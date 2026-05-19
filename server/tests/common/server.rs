@@ -17,7 +17,6 @@ impl TestServer {
 
     pub async fn spawn_with_ops(ops_content: Option<&str>) -> anyhow::Result<Self> {
         let ops_file = if let Some(content) = ops_content {
-            
             let path = std::env::temp_dir().join(format!("rustmc_ops_{}.toml", std::process::id()));
             std::fs::write(&path, content)?;
             Some(path)
@@ -31,7 +30,8 @@ impl TestServer {
             vec![]
         };
 
-        let extra_refs: Vec<(&str, &str)> = extra_env.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let extra_refs: Vec<(&str, &str)> =
+            extra_env.iter().map(|(k, v)| (*k, v.as_str())).collect();
         Self::spawn_with_env_and_ops(&extra_refs, ops_file).await
     }
 
@@ -40,7 +40,10 @@ impl TestServer {
         Self::spawn_with_env_and_ops(extra_env, None).await
     }
 
-    async fn spawn_with_env_and_ops(extra_env: &[(&str, &str)], ops_file: Option<PathBuf>) -> anyhow::Result<Self> {
+    async fn spawn_with_env_and_ops(
+        extra_env: &[(&str, &str)],
+        ops_file: Option<PathBuf>,
+    ) -> anyhow::Result<Self> {
         let port = find_free_port().await?;
 
         let build_status = Command::new("cargo")
