@@ -10,6 +10,10 @@ pub struct TestServer {
 
 impl TestServer {
     pub async fn spawn() -> anyhow::Result<Self> {
+        Self::spawn_with_env(&[]).await
+    }
+
+    pub async fn spawn_with_env(extra_env: &[(&str, &str)]) -> anyhow::Result<Self> {
         let port = find_free_port().await?;
 
         let build_status = Command::new("cargo")
@@ -27,14 +31,19 @@ impl TestServer {
             .and_then(|v| v.parse().ok())
             .unwrap_or(30);
 
-        let mut child = Command::new("cargo")
-            .args(["run", "--bin", "rustmc-server"])
+        let mut cmd = Command::new("cargo");
+        cmd.args(["run", "--bin", "rustmc-server"])
             .env("RUSTMC_BIND", format!("127.0.0.1:{port}"))
             .env("RUSTMC_PLUGINS", "")
             .env("RUST_LOG", "rustmc_server=warn")
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()?;
+            .stderr(std::process::Stdio::null());
+
+        for (key, value) in extra_env {
+            cmd.env(key, value);
+        }
+
+        let mut child = cmd.spawn()?;
 
         let start = std::time::Instant::now();
         loop {

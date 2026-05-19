@@ -93,6 +93,12 @@ impl Connection {
 
         let keep_alive_interval = Duration::from_secs(15);
         let keep_alive_timeout = Duration::from_secs(30);
+        let non_play_timeout = Duration::from_secs(
+            std::env::var("RUSTMC_NON_PLAY_TIMEOUT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(30),
+        );
 
         loop {
             if self.state == ConnectionState::Play {
@@ -154,18 +160,26 @@ impl Connection {
                     }
                 }
             } else {
-                match self.read_and_handle_packet(&mut reader, &mut writer).await {
-                    Ok(true) => continue,
-                    Ok(false) => {
-                        debug!("Connection from {} closed normally", self.addr);
-                        break;
-                    }
-                    Err(e) => {
-                        if e.kind() == std::io::ErrorKind::UnexpectedEof {
-                            debug!("Connection from {} disconnected", self.addr);
-                        } else {
-                            error!("Error handling connection from {}: {}", self.addr, e);
+                tokio::select! {
+                    result = self.read_and_handle_packet(&mut reader, &mut writer) => {
+                        match result {
+                            Ok(true) => continue,
+                            Ok(false) => {
+                                debug!("Connection from {} closed normally", self.addr);
+                                break;
+                            }
+                            Err(e) => {
+                                if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                                    debug!("Connection from {} disconnected", self.addr);
+                                } else {
+                                    error!("Error handling connection from {}: {}", self.addr, e);
+                                }
+                                break;
+                            }
                         }
+                    }
+                    _ = tokio::time::sleep(non_play_timeout) => {
+                        warn!("Connection from {} timed out in {:?} state", self.addr, self.state);
                         break;
                     }
                 }
