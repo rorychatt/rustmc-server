@@ -1,4 +1,5 @@
 use super::packet::Packet;
+use super::packet_ids::play::clientbound as ids;
 use super::types::{read_string, write_string, VarInt};
 use std::io::{self, Cursor, Read, Write};
 
@@ -41,14 +42,14 @@ pub fn encode_system_chat_message(message: &str) -> io::Result<Packet> {
     let mut data = Vec::new();
     write_string(&mut data, &json)?;
     data.push(0); // overlay = false (chat, not action bar)
-    Ok(Packet::new(0x79, data))
+    Ok(Packet::new(ids::SYSTEM_CHAT_MESSAGE, data))
 }
 
 pub fn encode_set_center_chunk(chunk_x: i32, chunk_z: i32) -> Packet {
     let mut data = Vec::new();
     VarInt(chunk_x).write(&mut data).unwrap();
     VarInt(chunk_z).write(&mut data).unwrap();
-    Packet::new(0x58, data)
+    Packet::new(ids::SET_CENTER_CHUNK, data)
 }
 
 pub fn encode_player_info_update(uuid: uuid::Uuid, name: &str, game_mode: i32) -> Packet {
@@ -65,12 +66,12 @@ pub fn encode_player_info_update(uuid: uuid::Uuid, name: &str, game_mode: i32) -
     VarInt(game_mode).write(&mut data).unwrap();
     // Action 0x08: Update Listed
     data.push(1); // listed = true
-    Packet::new(0x40, data)
+    Packet::new(ids::PLAYER_INFO_UPDATE, data)
 }
 
 pub fn encode_keep_alive(id: i64) -> Packet {
     let data = id.to_be_bytes().to_vec();
-    Packet::new(0x2C, data)
+    Packet::new(ids::KEEP_ALIVE, data)
 }
 
 pub fn encode_player_position_and_look(
@@ -94,31 +95,31 @@ pub fn encode_player_position_and_look(
     data.extend_from_slice(&yaw.to_be_bytes());
     data.extend_from_slice(&pitch.to_be_bytes());
     data.extend_from_slice(&(flags as i32).to_be_bytes()); // Flags (Int in 775)
-    Packet::new(0x48, data)
+    Packet::new(ids::SYNCHRONIZE_PLAYER_POSITION, data)
 }
 
 pub fn encode_unload_chunk(chunk_x: i32, chunk_z: i32) -> Packet {
     let mut data = Vec::new();
     data.extend_from_slice(&chunk_z.to_be_bytes());
     data.extend_from_slice(&chunk_x.to_be_bytes());
-    Packet::new(0x25, data)
+    Packet::new(ids::UNLOAD_CHUNK, data)
 }
 
 pub fn encode_chunk_batch_start() -> Packet {
-    Packet::new(0x0C, Vec::new())
+    Packet::new(ids::CHUNK_BATCH_START, Vec::new())
 }
 
 pub fn encode_chunk_batch_finished(batch_size: i32) -> io::Result<Packet> {
     let mut data = Vec::new();
     VarInt(batch_size).write(&mut data)?;
-    Ok(Packet::new(0x0B, data))
+    Ok(Packet::new(ids::CHUNK_BATCH_FINISHED, data))
 }
 
 pub fn encode_game_event(event: u8, value: f32) -> Packet {
     let mut data = Vec::new();
     data.push(event);
     data.extend_from_slice(&value.to_be_bytes());
-    Packet::new(0x26, data)
+    Packet::new(ids::GAME_EVENT, data)
 }
 
 pub fn encode_login_play(entity_id: i32) -> io::Result<Packet> {
@@ -144,20 +145,20 @@ pub fn encode_login_play(entity_id: i32) -> io::Result<Packet> {
     VarInt(0).write(&mut data)?; // Portal cooldown
     VarInt(63).write(&mut data)?; // Sea Level
     data.push(0); // Enforces Secure Chat: false
-    Ok(Packet::new(0x31, data))
+    Ok(Packet::new(ids::LOGIN_PLAY, data))
 }
 
 pub fn encode_play_cookie_request(key: &str) -> io::Result<Packet> {
     let mut data = Vec::new();
     write_string(&mut data, key)?;
-    Ok(Packet::new(0x18, data))
+    Ok(Packet::new(ids::COOKIE_REQUEST, data))
 }
 
 pub fn encode_play_store_cookie(key: &str, payload: &[u8]) -> io::Result<Packet> {
     let mut data = Vec::new();
     write_string(&mut data, key)?;
     data.write_all(payload)?;
-    Ok(Packet::new(0x74, data))
+    Ok(Packet::new(ids::STORE_COOKIE, data))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -324,7 +325,7 @@ pub fn encode_transfer(host: &str, port: i32) -> io::Result<Packet> {
     let mut data = Vec::new();
     write_string(&mut data, host)?;
     VarInt(port).write(&mut data)?;
-    Ok(Packet::new(0x73, data))
+    Ok(Packet::new(ids::TRANSFER, data))
 }
 
 fn read_f64(reader: &mut impl Read) -> io::Result<f64> {
@@ -348,6 +349,7 @@ fn read_i16(reader: &mut impl Read) -> io::Result<i16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::ids;
 
     #[test]
     fn test_player_position_decode() {
@@ -367,49 +369,49 @@ mod tests {
     #[test]
     fn test_keep_alive_encode() {
         let packet = encode_keep_alive(42);
-        assert_eq!(packet.id, 0x2C);
+        assert_eq!(packet.id, ids::KEEP_ALIVE);
         assert_eq!(packet.data.len(), 8);
     }
 
     #[test]
     fn test_chunk_batch_start() {
         let packet = encode_chunk_batch_start();
-        assert_eq!(packet.id, 0x0C);
+        assert_eq!(packet.id, ids::CHUNK_BATCH_START);
         assert!(packet.data.is_empty());
     }
 
     #[test]
     fn test_chunk_batch_finished() {
         let packet = encode_chunk_batch_finished(17).unwrap();
-        assert_eq!(packet.id, 0x0B);
+        assert_eq!(packet.id, ids::CHUNK_BATCH_FINISHED);
         assert!(!packet.data.is_empty());
     }
 
     #[test]
     fn test_game_event() {
         let packet = encode_game_event(13, 0.0);
-        assert_eq!(packet.id, 0x26);
+        assert_eq!(packet.id, ids::GAME_EVENT);
         assert_eq!(packet.data.len(), 5); // 1 byte event + 4 bytes float
     }
 
     #[test]
     fn test_login_play_protocol_775() {
         let packet = encode_login_play(1).unwrap();
-        assert_eq!(packet.id, 0x31);
+        assert_eq!(packet.id, ids::LOGIN_PLAY);
         assert!(!packet.data.is_empty());
     }
 
     #[test]
     fn test_unload_chunk() {
         let packet = encode_unload_chunk(5, 10);
-        assert_eq!(packet.id, 0x25);
+        assert_eq!(packet.id, ids::UNLOAD_CHUNK);
         assert_eq!(packet.data.len(), 8);
     }
 
     #[test]
     fn test_player_position_and_look() {
         let packet = encode_player_position_and_look(0.0, 64.0, 0.0, 0.0, 0.0, 0, 0);
-        assert_eq!(packet.id, 0x48);
+        assert_eq!(packet.id, ids::SYNCHRONIZE_PLAYER_POSITION);
         // teleport_id(VarInt 1) + x,y,z(24) + vel_x,vel_y,vel_z(24) + yaw,pitch(8) + flags(4)
         assert!(packet.data.len() > 50);
     }
@@ -418,7 +420,7 @@ mod tests {
 
     fn test_set_center_chunk() {
         let packet = encode_set_center_chunk(3, -5);
-        assert_eq!(packet.id, 0x58);
+        assert_eq!(packet.id, ids::SET_CENTER_CHUNK);
         // Two VarInts
         assert!(!packet.data.is_empty());
 
@@ -434,7 +436,7 @@ mod tests {
     fn test_player_info_update() {
         let uuid = uuid::Uuid::from_bytes([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
         let packet = encode_player_info_update(uuid, "TestPlayer", 1);
-        assert_eq!(packet.id, 0x40);
+        assert_eq!(packet.id, ids::PLAYER_INFO_UPDATE);
         assert!(!packet.data.is_empty());
 
         // Verify actions bitmask
@@ -444,7 +446,7 @@ mod tests {
     #[test]
     fn test_encode_play_cookie_request() {
         let packet = encode_play_cookie_request("minecraft:velocity_data").unwrap();
-        assert_eq!(packet.id, 0x18);
+        assert_eq!(packet.id, ids::COOKIE_REQUEST);
         assert!(!packet.data.is_empty());
     }
 
@@ -452,7 +454,7 @@ mod tests {
     fn test_encode_play_store_cookie() {
         let payload = b"play_session_info";
         let packet = encode_play_store_cookie("minecraft:session", payload).unwrap();
-        assert_eq!(packet.id, 0x74);
+        assert_eq!(packet.id, ids::STORE_COOKIE);
         assert!(!packet.data.is_empty());
     }
 
@@ -484,14 +486,14 @@ mod tests {
     #[test]
     fn test_encode_transfer() {
         let packet = encode_transfer("play.example.com", 25565).unwrap();
-        assert_eq!(packet.id, 0x73);
+        assert_eq!(packet.id, ids::TRANSFER);
         assert!(!packet.data.is_empty());
     }
 
     #[test]
     fn test_encode_transfer_different_port() {
         let packet = encode_transfer("localhost", 19132).unwrap();
-        assert_eq!(packet.id, 0x73);
+        assert_eq!(packet.id, ids::TRANSFER);
 
         // Verify we can decode the host and port back
         let mut cursor = Cursor::new(&packet.data);
@@ -639,7 +641,7 @@ mod tests {
                 port in 1i32..65535i32
             ) {
                 let packet = encode_transfer(&host, port).unwrap();
-                prop_assert_eq!(packet.id, 0x73);
+                prop_assert_eq!(packet.id, ids::TRANSFER);
 
                 let mut cursor = Cursor::new(&packet.data);
                 let decoded_host = read_string(&mut cursor).unwrap();

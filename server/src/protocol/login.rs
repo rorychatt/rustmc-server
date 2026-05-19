@@ -1,4 +1,5 @@
 use super::packet::Packet;
+use super::packet_ids::login::clientbound as ids;
 use super::types::{read_string, write_string, VarInt};
 use std::io::{self, Cursor, Read, Write};
 use uuid::Uuid;
@@ -36,27 +37,27 @@ impl LoginSuccess {
         data.extend_from_slice(self.uuid.as_bytes());
         write_string(&mut data, &self.username)?;
         VarInt(0).write(&mut data)?; // Number of properties
-        Ok(Packet::new(0x02, data))
+        Ok(Packet::new(ids::LOGIN_SUCCESS, data))
     }
 }
 
 pub fn encode_set_compression(threshold: i32) -> Packet {
     let mut data = Vec::new();
     VarInt(threshold).write(&mut data).unwrap();
-    Packet::new(0x03, data)
+    Packet::new(ids::SET_COMPRESSION, data)
 }
 
 pub fn encode_login_cookie_request(key: &str) -> io::Result<Packet> {
     let mut data = Vec::new();
     write_string(&mut data, key)?;
-    Ok(Packet::new(0x05, data))
+    Ok(Packet::new(ids::COOKIE_REQUEST, data))
 }
 
 pub fn encode_login_store_cookie(key: &str, payload: &[u8]) -> io::Result<Packet> {
     let mut data = Vec::new();
     write_string(&mut data, key)?;
     data.write_all(payload)?;
-    Ok(Packet::new(0x06, data))
+    Ok(Packet::new(ids::STORE_COOKIE, data))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,6 +94,7 @@ impl LoginCookieResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::ids;
 
     #[test]
     fn test_login_start_decode() {
@@ -111,14 +113,14 @@ mod tests {
         let uuid = Uuid::new_v4();
         let success = LoginSuccess::new(uuid, "TestPlayer".to_string());
         let packet = success.to_packet().unwrap();
-        assert_eq!(packet.id, 0x02);
+        assert_eq!(packet.id, ids::LOGIN_SUCCESS);
         assert!(packet.data.len() > 16); // UUID + string
     }
 
     #[test]
     fn test_encode_login_cookie_request() {
         let packet = encode_login_cookie_request("minecraft:auth_token").unwrap();
-        assert_eq!(packet.id, 0x05);
+        assert_eq!(packet.id, ids::COOKIE_REQUEST);
         assert!(!packet.data.is_empty());
     }
 
@@ -126,7 +128,7 @@ mod tests {
     fn test_encode_login_store_cookie() {
         let payload = b"session_data_here";
         let packet = encode_login_store_cookie("minecraft:session", payload).unwrap();
-        assert_eq!(packet.id, 0x06);
+        assert_eq!(packet.id, ids::STORE_COOKIE);
         assert!(!packet.data.is_empty());
     }
 
@@ -186,7 +188,7 @@ mod tests {
                 let success = LoginSuccess::new(uuid, username.clone());
                 let packet = success.to_packet().unwrap();
 
-                prop_assert_eq!(packet.id, 0x02);
+                prop_assert_eq!(packet.id, ids::LOGIN_SUCCESS);
 
                 let uuid_from_packet = Uuid::from_bytes(packet.data[0..16].try_into().unwrap());
                 prop_assert_eq!(uuid_from_packet, uuid);
@@ -195,7 +197,7 @@ mod tests {
             #[test]
             fn test_set_compression_encoding(threshold in any::<i32>()) {
                 let packet = encode_set_compression(threshold);
-                prop_assert_eq!(packet.id, 0x03);
+                prop_assert_eq!(packet.id, ids::SET_COMPRESSION);
 
                 let decoded_threshold = VarInt::read(&mut Cursor::new(&packet.data)).unwrap().0;
                 prop_assert_eq!(decoded_threshold, threshold);
