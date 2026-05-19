@@ -86,9 +86,9 @@ pub struct RegistryEntry {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::ids;
-    use crate::protocol::version::{DATA_PACK_VERSION, PROTOCOL_VERSION};
+    use super::*;
+    use crate::protocol::version::DATA_PACK_VERSION;
     use crate::registry;
 
     #[test]
@@ -107,7 +107,7 @@ mod tests {
 
     #[test]
     fn test_encode_registry_data() {
-        let entries = registry::load("minecraft:dimension_type", PROTOCOL_VERSION).unwrap();
+        let entries = registry::load("minecraft:dimension_type").unwrap();
         let packet = encode_registry_data("minecraft:dimension_type", &entries).unwrap();
         assert_eq!(packet.id, ids::REGISTRY_DATA);
         assert!(!packet.data.is_empty());
@@ -121,34 +121,34 @@ mod tests {
 
     #[test]
     fn test_dimension_type_registry() {
-        let entries = registry::load("minecraft:dimension_type", PROTOCOL_VERSION).unwrap();
+        let entries = registry::load("minecraft:dimension_type").unwrap();
         assert_eq!(entries.len(), 4);
         assert_eq!(entries[0].id, "minecraft:overworld");
     }
 
     #[test]
     fn test_biome_registry() {
-        let entries = registry::load("minecraft:worldgen/biome", PROTOCOL_VERSION).unwrap();
+        let entries = registry::load("minecraft:worldgen/biome").unwrap();
         assert!(entries.len() >= 50);
         assert!(entries.iter().any(|e| e.id == "minecraft:plains"));
     }
 
     #[test]
     fn test_damage_type_registry() {
-        let entries = registry::load("minecraft:damage_type", PROTOCOL_VERSION).unwrap();
+        let entries = registry::load("minecraft:damage_type").unwrap();
         assert!(entries.len() >= 40);
     }
 
     #[test]
     fn test_painting_variant_registry() {
-        let entries = registry::load("minecraft:painting_variant", PROTOCOL_VERSION).unwrap();
+        let entries = registry::load("minecraft:painting_variant").unwrap();
         assert!(entries.len() >= 26);
         assert!(entries.iter().any(|e| e.id == "minecraft:kebab"));
     }
 
     #[test]
     fn test_wolf_variant_registry() {
-        let entries = registry::load("minecraft:wolf_variant", PROTOCOL_VERSION).unwrap();
+        let entries = registry::load("minecraft:wolf_variant").unwrap();
         assert_eq!(entries.len(), 9);
         assert!(entries.iter().any(|e| e.id == "minecraft:pale"));
     }

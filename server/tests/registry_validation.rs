@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use rustmc_server::registry;
 
 const EXPECTED_COUNTS: &[(&str, usize)] = &[
@@ -35,10 +37,7 @@ fn test_registry_field_completeness() {
     for registry_id in registry::ALL_REGISTRY_IDS {
         let entries = registry::load(registry_id).unwrap();
         for entry in &entries {
-            assert!(
-                !entry.id.is_empty(),
-                "{registry_id}: entry has empty id"
-            );
+            assert!(!entry.id.is_empty(), "{registry_id}: entry has empty id");
             assert!(
                 entry.id.starts_with("minecraft:"),
                 "{registry_id}: entry id '{}' missing minecraft: namespace",
@@ -105,5 +104,33 @@ fn test_registry_field_types() {
             entry.id,
             entry.nbt_data.len()
         );
+    }
+}
+
+#[test]
+fn test_registry_entry_ordering_matches_vanilla() {
+    let snapshot: HashMap<String, Vec<String>> =
+        serde_json::from_str(include_str!("data/vanilla_registry_order.json")).unwrap();
+
+    for (registry_id, expected_order) in &snapshot {
+        let entries = registry::load(registry_id).unwrap_or_else(|e| {
+            panic!("Failed to load {registry_id}: {e}");
+        });
+        let actual_order: Vec<&str> = entries.iter().map(|e| e.id.as_str()).collect();
+
+        assert_eq!(
+            actual_order.len(),
+            expected_order.len(),
+            "{registry_id}: entry count mismatch — got {}, expected {}",
+            actual_order.len(),
+            expected_order.len()
+        );
+
+        for (i, (actual, expected)) in actual_order.iter().zip(expected_order).enumerate() {
+            assert_eq!(
+                actual, expected,
+                "{registry_id}: entry at index {i} differs — got '{actual}', expected '{expected}'"
+            );
+        }
     }
 }

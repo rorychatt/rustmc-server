@@ -3,7 +3,7 @@ use crate::protocol::configuration::RegistryEntry;
 use serde_json::Value;
 use std::io;
 
-mod v775 {
+pub(crate) mod v775 {
     pub const DIMENSION_TYPE_JSON: &str =
         include_str!("../../data/registries/v775/dimension_type.json");
     pub const WORLDGEN_BIOME_JSON: &str =

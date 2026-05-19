@@ -33,6 +33,10 @@ proptest = { workspace = true }
 criterion = { workspace = true }
 rustmc-test-utils = { path = "../test-utils" }
 
+[[test]]
+name = "capture_vanilla_registries"
+path = "tests/tools/capture_vanilla_registries.rs"
+
 [[bench]]
 name = "protocol_bench"
 harness = false
