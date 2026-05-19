@@ -4,21 +4,12 @@ pub mod nbt_encoder;
 use crate::protocol::configuration::RegistryEntry;
 use std::io;
 
-pub const ALL_REGISTRY_IDS: &[&str] = &[
-    "minecraft:dimension_type",
-    "minecraft:worldgen/biome",
-    "minecraft:damage_type",
-    "minecraft:painting_variant",
-    "minecraft:wolf_variant",
-    "minecraft:chat_type",
-    "minecraft:trim_material",
-    "minecraft:trim_pattern",
-    "minecraft:banner_pattern",
-    "minecraft:enchantment",
-    "minecraft:jukebox_song",
-    "minecraft:instrument",
-];
+pub use loader::RegistrySet;
 
-pub fn load(registry_id: &str) -> io::Result<&'static [RegistryEntry]> {
-    loader::load_registry(registry_id)
+pub fn registry_set_for(protocol_version: i32) -> io::Result<&'static RegistrySet> {
+    loader::registry_set_for(protocol_version)
+}
+
+pub fn load(registry_id: &str, protocol_version: i32) -> io::Result<Vec<RegistryEntry>> {
+    loader::load_registry(registry_id, protocol_version)
 }
