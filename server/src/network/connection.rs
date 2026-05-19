@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::Cursor;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -37,6 +38,7 @@ pub struct Connection {
     player_name: Option<String>,
     compression_enabled: bool,
     pending_chunks: Vec<ChunkPos>,
+    cookies: HashMap<String, Vec<u8>>,
 }
 
 impl Connection {
@@ -49,7 +51,20 @@ impl Connection {
             player_name: None,
             compression_enabled: false,
             pending_chunks: Vec::new(),
+            cookies: HashMap::new(),
         }
+    }
+
+    pub fn get_cookie(&self, key: &str) -> Option<&Vec<u8>> {
+        self.cookies.get(key)
+    }
+
+    pub fn set_cookie(&mut self, key: String, payload: Vec<u8>) {
+        self.cookies.insert(key, payload);
+    }
+
+    pub fn remove_cookie(&mut self, key: &str) -> Option<Vec<u8>> {
+        self.cookies.remove(key)
     }
 
     pub async fn handle(mut self, stream: TcpStream) {
@@ -244,6 +259,11 @@ impl Connection {
             0x04 => {
                 let response = LoginCookieResponse::decode(data)?;
                 debug!("Received login cookie response: key={}", response.key);
+                if let Some(payload) = response.payload {
+                    self.cookies.insert(response.key, payload);
+                } else {
+                    self.cookies.remove(&response.key);
+                }
                 Ok(true)
             }
             _ => {
@@ -263,7 +283,15 @@ impl Connection {
             // Cookie Response (0x02)
             0x02 => {
                 let response = configuration::CookieResponse::decode(_data)?;
-                debug!("Received cookie response: key={}", response.key);
+                debug!(
+                    "Received configuration cookie response: key={}",
+                    response.key
+                );
+                if let Some(payload) = response.payload {
+                    self.cookies.insert(response.key, payload);
+                } else {
+                    self.cookies.remove(&response.key);
+                }
                 Ok(true)
             }
             // Login Acknowledged (0x03) - client confirms transition from Login to Configuration
@@ -502,6 +530,11 @@ impl Connection {
             0x12 => {
                 let response = play::PlayCookieResponse::decode(data)?;
                 debug!("Received play cookie response: key={}", response.key);
+                if let Some(payload) = response.payload {
+                    self.cookies.insert(response.key, payload);
+                } else {
+                    self.cookies.remove(&response.key);
+                }
             }
             // Client Tick End
             0x0D => {
@@ -564,5 +597,70 @@ impl Connection {
             }
         }
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_connection() -> Connection {
+        let world = Arc::new(RwLock::new(World::new()));
+        let addr: SocketAddr = "127.0.0.1:25565".parse().unwrap();
+        Connection::new(addr, world)
+    }
+
+    #[test]
+    fn test_set_and_get_cookie() {
+        let mut conn = make_connection();
+        conn.set_cookie("minecraft:test".to_string(), vec![1, 2, 3]);
+        assert_eq!(conn.get_cookie("minecraft:test"), Some(&vec![1, 2, 3]));
+    }
+
+    #[test]
+    fn test_get_cookie_missing() {
+        let conn = make_connection();
+        assert_eq!(conn.get_cookie("minecraft:nonexistent"), None);
+    }
+
+    #[test]
+    fn test_remove_cookie() {
+        let mut conn = make_connection();
+        conn.set_cookie("minecraft:session".to_string(), vec![10, 20]);
+        let removed = conn.remove_cookie("minecraft:session");
+        assert_eq!(removed, Some(vec![10, 20]));
+        assert_eq!(conn.get_cookie("minecraft:session"), None);
+    }
+
+    #[test]
+    fn test_remove_cookie_missing() {
+        let mut conn = make_connection();
+        let removed = conn.remove_cookie("minecraft:missing");
+        assert_eq!(removed, None);
+    }
+
+    #[test]
+    fn test_cookie_overwrite() {
+        let mut conn = make_connection();
+        conn.set_cookie("minecraft:key".to_string(), vec![1]);
+        conn.set_cookie("minecraft:key".to_string(), vec![2, 3]);
+        assert_eq!(conn.get_cookie("minecraft:key"), Some(&vec![2, 3]));
+    }
+
+    #[test]
+    fn test_none_payload_removes_cookie() {
+        let mut conn = make_connection();
+        conn.set_cookie("minecraft:transfer".to_string(), vec![5, 6, 7]);
+
+        // Simulate what the handler does when payload is None
+        let payload: Option<Vec<u8>> = None;
+        let key = "minecraft:transfer".to_string();
+        if let Some(p) = payload {
+            conn.cookies.insert(key, p);
+        } else {
+            conn.cookies.remove(&key);
+        }
+
+        assert_eq!(conn.get_cookie("minecraft:transfer"), None);
     }
 }
