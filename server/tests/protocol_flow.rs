@@ -147,7 +147,7 @@ async fn test_login_flow() {
         .expect("Failed to send known packs response");
 
     // Read configuration packets: registry data, tags, finish
-    let mut got_finish = false;
+    let got_finish;
     loop {
         let packet = client
             .read_packet()
@@ -172,6 +172,12 @@ async fn test_login_flow() {
     }
     assert!(got_finish, "Should receive Finish Configuration");
 
+    // Send Acknowledge Finish Configuration to transition to Play
+    client
+        .send_acknowledge_finish_configuration()
+        .await
+        .expect("Failed to send acknowledge finish configuration");
+
     // Read join game packet (now 0x30 in protocol 775)
     let join_game = client
         .read_packet()
@@ -179,6 +185,13 @@ async fn test_login_flow() {
         .expect("Failed to read join game");
     assert_eq!(join_game.id, 0x30, "Expected join game packet (0x30)");
     assert!(!join_game.data.is_empty(), "Join game should have data");
+
+    // Read Player Info Update (0x40)
+    let player_info = client
+        .read_packet()
+        .await
+        .expect("Failed to read player info update");
+    assert_eq!(player_info.id, 0x40, "Expected player info update packet");
 
     // Read synchronize player position (0x46 in protocol 775)
     let sync_pos = client
@@ -406,14 +419,26 @@ async fn test_chunk_batching() {
 
     complete_login_flow(&mut client).await;
 
-    // After login, we should have received Game Event, Chunk Batch Start, chunks, and Chunk Batch Finished
-    // The login flow helper already consumes join_game and sync_pos.
+    // After login, we should have received Game Event, Set Center Chunk, Chunk Batch Start,
+    // chunks, and Chunk Batch Finished.
+    // The login flow helper already consumes join_game, player_info, and sync_pos.
+
     // Read Game Event (0x23)
     let game_event = client
         .read_packet()
         .await
         .expect("Failed to read game event");
     assert_eq!(game_event.id, 0x23, "Expected game event packet");
+
+    // Read Set Center Chunk (0x58)
+    let center_chunk = client
+        .read_packet()
+        .await
+        .expect("Failed to read set center chunk");
+    assert_eq!(
+        center_chunk.id, 0x58,
+        "Expected set center chunk packet before chunk data"
+    );
 
     // Read Chunk Batch Start (0x0C)
     let batch_start = client
@@ -505,11 +530,23 @@ async fn complete_login_flow_with_client(client: &mut TestClient, username: &str
         }
     }
 
+    // Send Acknowledge Finish Configuration to transition to Play
+    client
+        .send_acknowledge_finish_configuration()
+        .await
+        .expect("Failed to send acknowledge finish configuration");
+
     // Read join game (0x30)
     let _join_game = client
         .read_packet()
         .await
         .expect("Failed to read join game");
+
+    // Read Player Info Update (0x40)
+    let _player_info = client
+        .read_packet()
+        .await
+        .expect("Failed to read player info update");
 
     // Read sync position (0x46)
     let _sync_pos = client

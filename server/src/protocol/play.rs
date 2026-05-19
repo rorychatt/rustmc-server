@@ -44,6 +44,30 @@ pub fn encode_system_chat_message(message: &str) -> io::Result<Packet> {
     Ok(Packet::new(0x77, data))
 }
 
+pub fn encode_set_center_chunk(chunk_x: i32, chunk_z: i32) -> Packet {
+    let mut data = Vec::new();
+    VarInt(chunk_x).write(&mut data).unwrap();
+    VarInt(chunk_z).write(&mut data).unwrap();
+    Packet::new(0x58, data)
+}
+
+pub fn encode_player_info_update(uuid: uuid::Uuid, name: &str, game_mode: i32) -> Packet {
+    let mut data = Vec::new();
+    // Actions bitmask: 0x01 (Add Player) | 0x04 (Update Game Mode) | 0x08 (Update Listed)
+    data.push(0x01 | 0x04 | 0x08);
+    VarInt(1).write(&mut data).unwrap(); // Number of players
+                                         // UUID (128-bit, big-endian)
+    data.extend_from_slice(uuid.as_bytes());
+    // Action 0x01: Add Player
+    write_string(&mut data, name).unwrap(); // Player name
+    VarInt(0).write(&mut data).unwrap(); // Number of properties (0)
+                                         // Action 0x04: Update Game Mode
+    VarInt(game_mode).write(&mut data).unwrap();
+    // Action 0x08: Update Listed
+    data.push(1); // listed = true
+    Packet::new(0x40, data)
+}
+
 pub fn encode_keep_alive(id: i64) -> Packet {
     let data = id.to_be_bytes().to_vec();
     Packet::new(0x2B, data)
@@ -196,5 +220,31 @@ mod tests {
         assert_eq!(packet.id, 0x46);
         // teleport_id(VarInt 1) + x,y,z(24) + vel_x,vel_y,vel_z(24) + yaw,pitch(8) + flags(4)
         assert!(packet.data.len() > 50);
+    }
+
+    #[test]
+    fn test_set_center_chunk() {
+        let packet = encode_set_center_chunk(3, -5);
+        assert_eq!(packet.id, 0x58);
+        // Two VarInts
+        assert!(!packet.data.is_empty());
+
+        // Verify roundtrip of VarInt values
+        let mut cursor = Cursor::new(&packet.data);
+        let x = VarInt::read(&mut cursor).unwrap().0;
+        let z = VarInt::read(&mut cursor).unwrap().0;
+        assert_eq!(x, 3);
+        assert_eq!(z, -5);
+    }
+
+    #[test]
+    fn test_player_info_update() {
+        let uuid = uuid::Uuid::from_bytes([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+        let packet = encode_player_info_update(uuid, "TestPlayer", 1);
+        assert_eq!(packet.id, 0x40);
+        assert!(!packet.data.is_empty());
+
+        // Verify actions bitmask
+        assert_eq!(packet.data[0], 0x01 | 0x04 | 0x08);
     }
 }
