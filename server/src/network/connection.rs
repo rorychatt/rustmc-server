@@ -591,6 +591,7 @@ impl Connection {
         self.write_packet(writer, &batch_finished).await?;
 
         // Initialize keep-alive tracking
+        self.last_keep_alive_sent = Some(Instant::now());
         self.last_keep_alive_response = Some(Instant::now());
 
         info!("Sent play login sequence to player {}", name);
