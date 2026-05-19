@@ -447,6 +447,130 @@ async fn test_chunk_batching() {
     assert_eq!(chunk_count, 289, "Should receive 17x17 chunks");
 }
 
+#[tokio::test]
+async fn test_client_tick_end_drains_chunks() {
+    let server = TestServer::spawn().await.expect("Failed to spawn server");
+    let mut client = TestClient::connect(server.port())
+        .await
+        .expect("Failed to connect");
+
+    complete_login_flow(&mut client).await;
+
+    // Consume initial chunk batch (Game Event, Chunk Batch Start, chunks, Chunk Batch Finished)
+    let game_event = client
+        .read_packet()
+        .await
+        .expect("Failed to read game event");
+    assert_eq!(game_event.id, 0x26, "Expected game event packet");
+
+    let batch_start = client
+        .read_packet()
+        .await
+        .expect("Failed to read chunk batch start");
+    assert_eq!(batch_start.id, 0x0C, "Expected chunk batch start");
+
+    loop {
+        let packet = client
+            .read_packet()
+            .await
+            .expect("Failed to read chunk/batch packet");
+        if packet.id == 0x0B {
+            break;
+        }
+        assert_eq!(packet.id, 0x2D, "Expected chunk data or batch finished");
+    }
+
+    // Acknowledge the initial batch so the server knows we're ready
+    client
+        .send_chunk_batch_received(25.0)
+        .await
+        .expect("Failed to send chunk batch received");
+
+    // Move far away to queue new chunks. The 0x1E handler will:
+    // 1. Send unload packets (0x25) for old chunks
+    // 2. Queue new chunks into pending_chunks
+    // 3. Drain up to chunks_per_tick (25) immediately
+    // With view_distance=8 (17x17=289 chunks), moving far generates ~289 new chunks,
+    // so after draining 25, ~264 remain in pending_chunks.
+    client
+        .send_player_position(1000.0, 64.0, 1000.0, true)
+        .await
+        .expect("Failed to send position");
+
+    // Consume the position response: unload packets + first drain batch
+    let mut got_batch_finished = false;
+    let mut position_chunks = 0;
+    loop {
+        let packet = tokio::time::timeout(
+            tokio::time::Duration::from_secs(2),
+            client.read_packet(),
+        )
+        .await
+        .expect("Timed out reading position response")
+        .expect("Failed to read position response packet");
+
+        match packet.id {
+            0x25 => {} // Unload chunk - skip
+            0x0C => {} // Chunk Batch Start
+            0x2D => position_chunks += 1,
+            0x0B => {
+                got_batch_finished = true;
+                break;
+            }
+            other => panic!("Unexpected packet during position response: {other:#04x}"),
+        }
+    }
+
+    assert!(got_batch_finished, "Should get batch finished from position drain");
+    assert!(
+        position_chunks > 0 && position_chunks <= 25,
+        "Position handler should drain at most 25 chunks (got {position_chunks})"
+    );
+
+    // Now send Client Tick End — should drain more pending chunks
+    client
+        .send_client_tick_end()
+        .await
+        .expect("Failed to send client tick end");
+
+    // Read the chunk batch triggered by tick end
+    let response = tokio::time::timeout(
+        tokio::time::Duration::from_secs(2),
+        client.read_packet(),
+    )
+    .await
+    .expect("Timed out waiting for chunk response after tick end")
+    .expect("Failed to read packet after tick end");
+
+    assert_eq!(
+        response.id, 0x0C,
+        "Expected chunk batch start after client tick end"
+    );
+
+    let mut chunk_count = 0;
+    loop {
+        let packet = client
+            .read_packet()
+            .await
+            .expect("Failed to read chunk/batch packet");
+        if packet.id == 0x2D {
+            chunk_count += 1;
+        } else if packet.id == 0x0B {
+            break;
+        } else {
+            panic!(
+                "Unexpected packet during chunk batch: {:#04x}",
+                packet.id
+            );
+        }
+    }
+
+    assert!(
+        chunk_count > 0,
+        "Client Tick End should have drained pending chunks"
+    );
+}
+
 /// Helper to complete the full login + configuration flow
 async fn complete_login_flow(client: &mut TestClient) {
     complete_login_flow_with_client(client, "TestPlayer").await;
