@@ -2,6 +2,7 @@ mod loader;
 pub mod nbt_encoder;
 
 use crate::protocol::configuration::RegistryEntry;
+use crate::protocol::packet::Packet;
 use std::io;
 
 pub use loader::RegistrySet;
@@ -12,4 +13,8 @@ pub fn registry_set_for(protocol_version: i32) -> &'static RegistrySet {
 
 pub fn load(registry_id: &str, protocol_version: i32) -> io::Result<Vec<RegistryEntry>> {
     loader::load_registry(registry_id, protocol_version)
+}
+
+pub fn cached_registry_packets(protocol_version: i32) -> io::Result<&'static [Packet]> {
+    loader::cached_registry_packets(protocol_version)
 }

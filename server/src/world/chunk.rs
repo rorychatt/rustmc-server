@@ -29,9 +29,16 @@ pub struct BlockState(pub u16);
 impl BlockState {
     pub const AIR: Self = Self(0);
     pub const STONE: Self = Self(1);
-    pub const DIRT: Self = Self(10);
     pub const GRASS_BLOCK: Self = Self(9);
+    pub const DIRT: Self = Self(10);
+    pub const COBBLESTONE: Self = Self(14);
+    pub const OAK_PLANKS: Self = Self(15);
     pub const BEDROCK: Self = Self(33);
+    pub const WATER: Self = Self(34);
+    pub const LAVA: Self = Self(50);
+    pub const SAND: Self = Self(66);
+    pub const GRAVEL: Self = Self(68);
+    pub const OAK_LOG: Self = Self(77);
 }
 
 #[derive(Clone)]
@@ -156,11 +163,15 @@ mod block_state_tests {
 
         assert_eq!(
             BlockState::AIR.0 as i64,
-            blocks["minecraft:air"]["default_state_id"].as_i64().unwrap()
+            blocks["minecraft:air"]["default_state_id"]
+                .as_i64()
+                .unwrap()
         );
         assert_eq!(
             BlockState::STONE.0 as i64,
-            blocks["minecraft:stone"]["default_state_id"].as_i64().unwrap()
+            blocks["minecraft:stone"]["default_state_id"]
+                .as_i64()
+                .unwrap()
         );
         assert_eq!(
             BlockState::GRASS_BLOCK.0 as i64,
@@ -170,11 +181,55 @@ mod block_state_tests {
         );
         assert_eq!(
             BlockState::DIRT.0 as i64,
-            blocks["minecraft:dirt"]["default_state_id"].as_i64().unwrap()
+            blocks["minecraft:dirt"]["default_state_id"]
+                .as_i64()
+                .unwrap()
+        );
+        assert_eq!(
+            BlockState::COBBLESTONE.0 as i64,
+            blocks["minecraft:cobblestone"]["default_state_id"]
+                .as_i64()
+                .unwrap()
+        );
+        assert_eq!(
+            BlockState::OAK_PLANKS.0 as i64,
+            blocks["minecraft:oak_planks"]["default_state_id"]
+                .as_i64()
+                .unwrap()
         );
         assert_eq!(
             BlockState::BEDROCK.0 as i64,
             blocks["minecraft:bedrock"]["default_state_id"]
+                .as_i64()
+                .unwrap()
+        );
+        assert_eq!(
+            BlockState::WATER.0 as i64,
+            blocks["minecraft:water"]["default_state_id"]
+                .as_i64()
+                .unwrap()
+        );
+        assert_eq!(
+            BlockState::LAVA.0 as i64,
+            blocks["minecraft:lava"]["default_state_id"]
+                .as_i64()
+                .unwrap()
+        );
+        assert_eq!(
+            BlockState::SAND.0 as i64,
+            blocks["minecraft:sand"]["default_state_id"]
+                .as_i64()
+                .unwrap()
+        );
+        assert_eq!(
+            BlockState::GRAVEL.0 as i64,
+            blocks["minecraft:gravel"]["default_state_id"]
+                .as_i64()
+                .unwrap()
+        );
+        assert_eq!(
+            BlockState::OAK_LOG.0 as i64,
+            blocks["minecraft:oak_log"]["default_state_id"]
                 .as_i64()
                 .unwrap()
         );

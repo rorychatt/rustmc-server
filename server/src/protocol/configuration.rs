@@ -78,7 +78,7 @@ pub fn encode_finish_configuration() -> Packet {
     Packet::new(ids::FINISH_CONFIGURATION, Vec::new())
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RegistryEntry {
     pub id: String,
     pub nbt_data: Vec<u8>,
@@ -86,8 +86,8 @@ pub struct RegistryEntry {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::ids;
+    use super::*;
     use crate::protocol::version::{DATA_PACK_VERSION, PROTOCOL_VERSION};
     use crate::registry;
 

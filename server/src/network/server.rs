@@ -5,11 +5,13 @@ use tracing::{error, info};
 
 use super::broadcast::BroadcastEvent;
 use super::connection::Connection;
+use crate::config::Operators;
 use crate::world::World;
 
 pub struct Server {
     addr: String,
     world: Arc<RwLock<World>>,
+    operators: Arc<Operators>,
     broadcast_tx: broadcast::Sender<BroadcastEvent>,
 }
 
@@ -19,6 +21,7 @@ impl Server {
         Self {
             addr,
             world: Arc::new(RwLock::new(World::new())),
+            operators: Arc::new(Operators::load()),
             broadcast_tx,
         }
     }
@@ -36,10 +39,11 @@ impl Server {
             match listener.accept().await {
                 Ok((stream, addr)) => {
                     let world = self.world.clone();
+                    let operators = self.operators.clone();
                     let broadcast_tx = self.broadcast_tx.clone();
                     let broadcast_rx = self.broadcast_tx.subscribe();
                     tokio::spawn(async move {
-                        let connection = Connection::new(addr, world, broadcast_tx);
+                        let connection = Connection::new(addr, world, operators, broadcast_tx);
                         connection.handle(stream, broadcast_rx).await;
                     });
                 }
