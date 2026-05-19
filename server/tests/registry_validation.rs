@@ -1,3 +1,4 @@
+use rustmc_server::protocol::version::PROTOCOL_VERSION;
 use rustmc_server::registry;
 
 const EXPECTED_COUNTS: &[(&str, usize)] = &[
@@ -18,7 +19,7 @@ const EXPECTED_COUNTS: &[(&str, usize)] = &[
 #[test]
 fn test_registry_entry_counts_match_generated() {
     for (registry_id, expected) in EXPECTED_COUNTS {
-        let entries = registry::load(registry_id).unwrap_or_else(|e| {
+        let entries = registry::load(registry_id, PROTOCOL_VERSION).unwrap_or_else(|e| {
             panic!("Failed to load {registry_id}: {e}");
         });
         assert_eq!(
@@ -32,13 +33,11 @@ fn test_registry_entry_counts_match_generated() {
 
 #[test]
 fn test_registry_field_completeness() {
-    for registry_id in registry::ALL_REGISTRY_IDS {
-        let entries = registry::load(registry_id).unwrap();
+    let set = registry::registry_set_for(PROTOCOL_VERSION).unwrap();
+    for registry_id in set.registry_ids {
+        let entries = registry::load(registry_id, PROTOCOL_VERSION).unwrap();
         for entry in &entries {
-            assert!(
-                !entry.id.is_empty(),
-                "{registry_id}: entry has empty id"
-            );
+            assert!(!entry.id.is_empty(), "{registry_id}: entry has empty id");
             assert!(
                 entry.id.starts_with("minecraft:"),
                 "{registry_id}: entry id '{}' missing minecraft: namespace",
@@ -67,7 +66,7 @@ fn test_registry_field_completeness() {
 
 #[test]
 fn test_registry_field_types() {
-    let dimension_entries = registry::load("minecraft:dimension_type").unwrap();
+    let dimension_entries = registry::load("minecraft:dimension_type", PROTOCOL_VERSION).unwrap();
     for entry in &dimension_entries {
         assert!(
             entry.nbt_data.len() > 20,
@@ -77,7 +76,7 @@ fn test_registry_field_types() {
         );
     }
 
-    let biome_entries = registry::load("minecraft:worldgen/biome").unwrap();
+    let biome_entries = registry::load("minecraft:worldgen/biome", PROTOCOL_VERSION).unwrap();
     for entry in &biome_entries {
         assert!(
             entry.nbt_data.len() > 10,
@@ -87,7 +86,7 @@ fn test_registry_field_types() {
         );
     }
 
-    let damage_entries = registry::load("minecraft:damage_type").unwrap();
+    let damage_entries = registry::load("minecraft:damage_type", PROTOCOL_VERSION).unwrap();
     for entry in &damage_entries {
         assert!(
             entry.nbt_data.len() > 10,
@@ -97,7 +96,7 @@ fn test_registry_field_types() {
         );
     }
 
-    let enchantment_entries = registry::load("minecraft:enchantment").unwrap();
+    let enchantment_entries = registry::load("minecraft:enchantment", PROTOCOL_VERSION).unwrap();
     for entry in &enchantment_entries {
         assert!(
             entry.nbt_data.len() > 20,
