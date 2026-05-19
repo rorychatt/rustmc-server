@@ -7,7 +7,7 @@ use std::io;
 
 pub use loader::RegistrySet;
 
-pub fn registry_set_for(protocol_version: i32) -> io::Result<&'static RegistrySet> {
+pub fn registry_set_for(protocol_version: i32) -> &'static RegistrySet {
     loader::registry_set_for(protocol_version)
 }
 

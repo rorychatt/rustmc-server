@@ -5,6 +5,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::io;
 use std::sync::LazyLock;
+use tracing::warn;
 
 mod v775 {
     pub const DIMENSION_TYPE_JSON: &str =
@@ -83,25 +84,27 @@ impl RegistrySet {
     }
 }
 
-pub fn registry_set_for(protocol_version: i32) -> io::Result<&'static RegistrySet> {
+pub fn registry_set_for(protocol_version: i32) -> &'static RegistrySet {
     static V775_SET: RegistrySet = RegistrySet {
         registry_ids: v775::REGISTRY_IDS,
         version: 775,
     };
 
     match protocol_version {
-        775 => Ok(&V775_SET),
-        _ => Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("unsupported protocol version: {protocol_version}"),
-        )),
+        775 => &V775_SET,
+        _ => {
+            warn!(
+                "Unsupported protocol version {protocol_version}, falling back to registry set for version 775"
+            );
+            &V775_SET
+        }
     }
 }
 
 static ENTRY_CACHE: LazyLock<HashMap<(i32, &'static str), Vec<RegistryEntry>>> =
     LazyLock::new(|| {
         let mut map = HashMap::new();
-        let set = registry_set_for(775).unwrap();
+        let set = registry_set_for(775);
         for &reg_id in set.registry_ids {
             let entries = set.load(reg_id).unwrap();
             map.insert((775, reg_id), entries);
@@ -111,7 +114,7 @@ static ENTRY_CACHE: LazyLock<HashMap<(i32, &'static str), Vec<RegistryEntry>>> =
 
 static PACKET_CACHE: LazyLock<HashMap<i32, Vec<Packet>>> = LazyLock::new(|| {
     let mut map = HashMap::new();
-    let set = registry_set_for(775).unwrap();
+    let set = registry_set_for(775);
     let mut packets = Vec::new();
     for &reg_id in set.registry_ids {
         let entries = load_registry(reg_id, 775).unwrap();
@@ -123,7 +126,7 @@ static PACKET_CACHE: LazyLock<HashMap<i32, Vec<Packet>>> = LazyLock::new(|| {
 });
 
 pub fn load_registry(registry_id: &str, protocol_version: i32) -> io::Result<Vec<RegistryEntry>> {
-    let set = registry_set_for(protocol_version)?;
+    let set = registry_set_for(protocol_version);
     for &known_id in set.registry_ids {
         if known_id == registry_id {
             if let Some(entries) = ENTRY_CACHE.get(&(protocol_version, known_id)) {
@@ -135,7 +138,7 @@ pub fn load_registry(registry_id: &str, protocol_version: i32) -> io::Result<Vec
 }
 
 pub fn cached_registry_packets(protocol_version: i32) -> io::Result<&'static [Packet]> {
-    registry_set_for(protocol_version)?;
+    let _ = registry_set_for(protocol_version);
     PACKET_CACHE
         .get(&protocol_version)
         .map(|v| v.as_slice())
@@ -180,16 +183,14 @@ mod tests {
     }
 
     #[test]
-    fn test_load_registry_unknown_version_errors() {
-        let result = load_registry("minecraft:dimension_type", 999);
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.to_string().contains("unsupported protocol version"));
+    fn test_registry_set_for_unknown_falls_back() {
+        let set = registry_set_for(999);
+        assert_eq!(set.registry_ids, registry_set_for(775).registry_ids);
     }
 
     #[test]
     fn test_registry_ids_for_775() {
-        let set = registry_set_for(775).unwrap();
+        let set = registry_set_for(775);
         assert_eq!(set.registry_ids.len(), 12);
         assert!(set.registry_ids.contains(&"minecraft:dimension_type"));
         assert!(set.registry_ids.contains(&"minecraft:worldgen/biome"));
@@ -198,7 +199,7 @@ mod tests {
 
     #[test]
     fn test_load_all_registries() {
-        let set = registry_set_for(PROTOCOL_VERSION).unwrap();
+        let set = registry_set_for(PROTOCOL_VERSION);
         for registry_id in set.registry_ids {
             let entries = load_registry(registry_id, PROTOCOL_VERSION).unwrap_or_else(|e| {
                 panic!("Failed to load {registry_id}: {e}");
@@ -281,7 +282,7 @@ mod tests {
     #[test]
     fn test_cached_registry_packets_returns_correct_count() {
         let packets = cached_registry_packets(775).unwrap();
-        let set = registry_set_for(775).unwrap();
+        let set = registry_set_for(775);
         assert_eq!(packets.len(), set.registry_ids.len());
     }
 
