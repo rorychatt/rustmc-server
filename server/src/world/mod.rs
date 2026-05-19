@@ -17,7 +17,7 @@ pub struct Player {
     pub on_ground: bool,
     pub is_sneaking: bool,
     pub is_sprinting: bool,
-    pub selected_slot: i16,
+    pub selected_slot: u8,
     pub loaded_chunks: HashSet<ChunkPos>,
     pub chunks_per_tick: f32,
 }
