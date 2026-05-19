@@ -12,6 +12,12 @@ pub struct Player {
     pub x: f64,
     pub y: f64,
     pub z: f64,
+    pub yaw: f32,
+    pub pitch: f32,
+    pub on_ground: bool,
+    pub is_sneaking: bool,
+    pub is_sprinting: bool,
+    pub selected_slot: i16,
     pub loaded_chunks: HashSet<ChunkPos>,
     pub chunks_per_tick: f32,
 }
@@ -47,6 +53,12 @@ impl World {
                 x: 0.0,
                 y: 64.0,
                 z: 0.0,
+                yaw: 0.0,
+                pitch: 0.0,
+                on_ground: false,
+                is_sneaking: false,
+                is_sprinting: false,
+                selected_slot: 0,
                 loaded_chunks: HashSet::new(),
                 chunks_per_tick: 25.0,
             },
@@ -67,6 +79,13 @@ impl World {
             player.x = x;
             player.y = y;
             player.z = z;
+        }
+    }
+
+    pub fn update_player_rotation(&mut self, uuid: &Uuid, yaw: f32, pitch: f32) {
+        if let Some(player) = self.players.get_mut(uuid) {
+            player.yaw = yaw;
+            player.pitch = pitch;
         }
     }
 
@@ -291,5 +310,18 @@ mod tests {
         // Valid value stays unchanged
         player.chunks_per_tick = 50.0_f32.clamp(1.0, 100.0);
         assert_eq!(player.chunks_per_tick, 50.0);
+    }
+
+    #[test]
+    fn test_update_player_rotation() {
+        let mut world = World::new();
+        let uuid = Uuid::new_v4();
+        world.add_player(uuid, "Test".to_string());
+
+        world.update_player_rotation(&uuid, 90.0, -45.0);
+
+        let player = world.players.get(&uuid).unwrap();
+        assert_eq!(player.yaw, 90.0);
+        assert_eq!(player.pitch, -45.0);
     }
 }
