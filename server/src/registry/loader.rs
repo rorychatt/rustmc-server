@@ -171,18 +171,21 @@ mod tests {
                 .len(),
             4
         );
-        assert!(
+        assert_eq!(
             load_registry("minecraft:worldgen/biome", 775)
                 .unwrap()
-                .len()
-                >= 50
+                .len(),
+            65
         );
-        assert!(load_registry("minecraft:damage_type", 775).unwrap().len() >= 40);
-        assert!(
+        assert_eq!(
+            load_registry("minecraft:damage_type", 775).unwrap().len(),
+            49
+        );
+        assert_eq!(
             load_registry("minecraft:painting_variant", 775)
                 .unwrap()
-                .len()
-                >= 26
+                .len(),
+            50
         );
         assert_eq!(
             load_registry("minecraft:wolf_variant", 775).unwrap().len(),
@@ -191,17 +194,26 @@ mod tests {
         assert_eq!(load_registry("minecraft:chat_type", 775).unwrap().len(), 7);
         assert_eq!(
             load_registry("minecraft:trim_material", 775).unwrap().len(),
-            10
+            11
         );
-        assert!(load_registry("minecraft:trim_pattern", 775).unwrap().len() >= 16);
-        assert!(
+        assert_eq!(
+            load_registry("minecraft:trim_pattern", 775).unwrap().len(),
+            18
+        );
+        assert_eq!(
             load_registry("minecraft:banner_pattern", 775)
                 .unwrap()
-                .len()
-                >= 40
+                .len(),
+            43
         );
-        assert!(load_registry("minecraft:enchantment", 775).unwrap().len() >= 40);
-        assert!(load_registry("minecraft:jukebox_song", 775).unwrap().len() >= 15);
+        assert_eq!(
+            load_registry("minecraft:enchantment", 775).unwrap().len(),
+            42
+        );
+        assert_eq!(
+            load_registry("minecraft:jukebox_song", 775).unwrap().len(),
+            19
+        );
         assert_eq!(load_registry("minecraft:instrument", 775).unwrap().len(), 8);
     }
 
