@@ -3,8 +3,28 @@
   "blocks": {
     "minecraft:air": { "default_state_id": 0 },
     "minecraft:stone": { "default_state_id": 1 },
+    "minecraft:granite": { "default_state_id": 2 },
+    "minecraft:polished_granite": { "default_state_id": 3 },
+    "minecraft:diorite": { "default_state_id": 4 },
+    "minecraft:polished_diorite": { "default_state_id": 5 },
+    "minecraft:andesite": { "default_state_id": 6 },
+    "minecraft:polished_andesite": { "default_state_id": 7 },
     "minecraft:grass_block": { "default_state_id": 9 },
     "minecraft:dirt": { "default_state_id": 10 },
-    "minecraft:bedrock": { "default_state_id": 33 }
+    "minecraft:coarse_dirt": { "default_state_id": 11 },
+    "minecraft:podzol": { "default_state_id": 13 },
+    "minecraft:cobblestone": { "default_state_id": 14 },
+    "minecraft:oak_planks": { "default_state_id": 15 },
+    "minecraft:spruce_planks": { "default_state_id": 16 },
+    "minecraft:birch_planks": { "default_state_id": 17 },
+    "minecraft:jungle_planks": { "default_state_id": 18 },
+    "minecraft:acacia_planks": { "default_state_id": 19 },
+    "minecraft:dark_oak_planks": { "default_state_id": 20 },
+    "minecraft:bedrock": { "default_state_id": 33 },
+    "minecraft:water": { "default_state_id": 34 },
+    "minecraft:lava": { "default_state_id": 50 },
+    "minecraft:sand": { "default_state_id": 66 },
+    "minecraft:gravel": { "default_state_id": 68 },
+    "minecraft:oak_log": { "default_state_id": 77 }
   }
 }
