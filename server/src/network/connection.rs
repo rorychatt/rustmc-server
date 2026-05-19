@@ -526,7 +526,112 @@ impl Connection {
             }
             // Set Player Position and Rotation
             0x1F => {
-                debug!("Player position and rotation ({} bytes)", data.len());
+                let pos_rot = play::PlayerPositionAndRotation::decode(data)?;
+                debug!(
+                    "Player pos+rot: ({}, {}, {}) yaw={} pitch={}",
+                    pos_rot.x, pos_rot.y, pos_rot.z, pos_rot.yaw, pos_rot.pitch
+                );
+
+                if let Some(uuid) = self.player_uuid {
+                    let mut world = self.world.write().await;
+                    world.update_player_position(&uuid, pos_rot.x, pos_rot.y, pos_rot.z);
+                    world.update_player_rotation(&uuid, pos_rot.yaw, pos_rot.pitch);
+                    if let Some(player) = world.players.get_mut(&uuid) {
+                        player.on_ground = pos_rot.on_ground;
+                    }
+
+                    let view_distance = 8;
+                    if let Some(update) = world.compute_chunk_updates(&uuid, view_distance) {
+                        for chunk_pos in &update.to_unload {
+                            let unload_packet = play::encode_unload_chunk(chunk_pos.x, chunk_pos.z);
+                            self.write_packet(writer, &unload_packet).await?;
+                        }
+
+                        if !update.to_load.is_empty() {
+                            self.pending_chunks.extend(update.to_load.iter());
+                        }
+
+                        debug!(
+                            "Chunk update: queued {}, unloaded {}",
+                            update.to_load.len(),
+                            update.to_unload.len()
+                        );
+                    }
+
+                    let limit = world
+                        .players
+                        .get(&uuid)
+                        .map(|p| p.chunks_per_tick)
+                        .unwrap_or(25.0);
+                    drop(world);
+
+                    self.drain_pending_chunks(writer, limit).await?;
+                }
+            }
+            // Move Player Rot
+            0x20 => {
+                let rot = play::PlayerRotation::decode(data)?;
+                debug!("Player rotation: yaw={} pitch={}", rot.yaw, rot.pitch);
+
+                if let Some(uuid) = self.player_uuid {
+                    let mut world = self.world.write().await;
+                    world.update_player_rotation(&uuid, rot.yaw, rot.pitch);
+                    if let Some(player) = world.players.get_mut(&uuid) {
+                        player.on_ground = rot.on_ground;
+                    }
+                }
+            }
+            // Move Player Status Only
+            0x21 => {
+                let status = play::PlayerStatusOnly::decode(data)?;
+
+                if let Some(uuid) = self.player_uuid {
+                    let mut world = self.world.write().await;
+                    if let Some(player) = world.players.get_mut(&uuid) {
+                        player.on_ground = status.on_ground;
+                    }
+                }
+            }
+            // Player Command
+            0x25 => {
+                let cmd = play::PlayerCommand::decode(data)?;
+                debug!(
+                    "Player command: action={} jump_boost={}",
+                    cmd.action_id, cmd.jump_boost
+                );
+
+                if let Some(uuid) = self.player_uuid {
+                    let mut world = self.world.write().await;
+                    if let Some(player) = world.players.get_mut(&uuid) {
+                        match cmd.action_id {
+                            0 => player.is_sneaking = true,
+                            1 => player.is_sneaking = false,
+                            3 => player.is_sprinting = true,
+                            4 => player.is_sprinting = false,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            // Set Carried Item
+            0x31 => {
+                let item = play::SetCarriedItem::decode(data)?;
+                debug!("Set carried item: slot={}", item.slot);
+
+                if let Some(uuid) = self.player_uuid {
+                    let mut world = self.world.write().await;
+                    if let Some(player) = world.players.get_mut(&uuid) {
+                        player.selected_slot = item.slot;
+                    }
+                }
+            }
+            // Swing
+            0x38 => {
+                let swing = play::Swing::decode(data)?;
+                debug!(
+                    "Player swing: hand={}",
+                    if swing.hand == 0 { "main" } else { "off" }
+                );
             }
             // Player Loaded
             0x2C => {
