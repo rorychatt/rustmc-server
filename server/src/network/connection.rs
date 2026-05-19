@@ -410,6 +410,39 @@ impl Connection {
         Ok(())
     }
 
+    #[allow(dead_code)]
+    async fn send_login_cookie_request(
+        &mut self,
+        writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
+        key: &str,
+    ) -> std::io::Result<()> {
+        let packet = crate::protocol::login::encode_login_cookie_request(key)?;
+        self.write_packet(writer, &packet).await?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    async fn send_cookie_request(
+        &mut self,
+        writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
+        key: &str,
+    ) -> std::io::Result<()> {
+        let packet = crate::protocol::configuration::encode_cookie_request(key)?;
+        self.write_packet(writer, &packet).await?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    async fn send_play_cookie_request(
+        &mut self,
+        writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
+        key: &str,
+    ) -> std::io::Result<()> {
+        let packet = crate::protocol::play::encode_play_cookie_request(key)?;
+        self.write_packet(writer, &packet).await?;
+        Ok(())
+    }
+
     async fn send_registry_data(
         &mut self,
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
