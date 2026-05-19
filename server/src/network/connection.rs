@@ -9,7 +9,7 @@ use tracing::{debug, error, info, warn};
 use crate::protocol::chunk_data;
 use crate::protocol::configuration;
 use crate::protocol::handshake::{Handshake, NextState};
-use crate::protocol::login::{LoginStart, LoginSuccess};
+use crate::protocol::login::{LoginCookieResponse, LoginStart, LoginSuccess};
 use crate::protocol::packet::{Packet, PacketWriter};
 use crate::protocol::play;
 use crate::protocol::status::{
@@ -218,33 +218,39 @@ impl Connection {
         data: &[u8],
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<bool> {
-        if packet_id != 0x00 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Expected login start 0x00, got {packet_id:#04x}"),
-            ));
+        match packet_id {
+            0x00 => {
+                let login = LoginStart::decode(data)?;
+                info!("Player login: {} ({})", login.name, login.uuid);
+
+                // Enable compression with 256 byte threshold
+                let compression_packet = crate::protocol::login::encode_set_compression(256);
+                self.write_packet(writer, &compression_packet).await?;
+                self.compression_enabled = true;
+
+                let success = LoginSuccess::new(login.uuid, login.name.clone());
+                let packet = success.to_packet()?;
+                self.write_packet(writer, &packet).await?;
+
+                // Store player info for later use
+                self.player_uuid = Some(login.uuid);
+                self.player_name = Some(login.name);
+
+                // Transition to Configuration state (wait for Login Acknowledged from client)
+                self.state = ConnectionState::Configuration;
+
+                Ok(true)
+            }
+            0x04 => {
+                let response = LoginCookieResponse::decode(data)?;
+                debug!("Received login cookie response: key={}", response.key);
+                Ok(true)
+            }
+            _ => {
+                warn!("Unknown login packet: {packet_id:#04x}");
+                Ok(true)
+            }
         }
-
-        let login = LoginStart::decode(data)?;
-        info!("Player login: {} ({})", login.name, login.uuid);
-
-        // Enable compression with 256 byte threshold
-        let compression_packet = crate::protocol::login::encode_set_compression(256);
-        self.write_packet(writer, &compression_packet).await?;
-        self.compression_enabled = true;
-
-        let success = LoginSuccess::new(login.uuid, login.name.clone());
-        let packet = success.to_packet()?;
-        self.write_packet(writer, &packet).await?;
-
-        // Store player info for later use
-        self.player_uuid = Some(login.uuid);
-        self.player_name = Some(login.name);
-
-        // Transition to Configuration state (wait for Login Acknowledged from client)
-        self.state = ConnectionState::Configuration;
-
-        Ok(true)
     }
 
     async fn handle_configuration(
@@ -254,6 +260,12 @@ impl Connection {
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<bool> {
         match packet_id {
+            // Cookie Response (0x02)
+            0x02 => {
+                let response = configuration::CookieResponse::decode(_data)?;
+                debug!("Received cookie response: key={}", response.key);
+                Ok(true)
+            }
             // Login Acknowledged (0x03) - client confirms transition from Login to Configuration
             0x03 => {
                 debug!("Client acknowledged login, sending configuration data");
@@ -485,6 +497,11 @@ impl Connection {
                     debug!("Chunk batch received: chunks_per_tick={:.1}", clamped);
                     self.drain_pending_chunks(writer, clamped).await?;
                 }
+            }
+            // Play Cookie Response
+            0x12 => {
+                let response = play::PlayCookieResponse::decode(data)?;
+                debug!("Received play cookie response: key={}", response.key);
             }
             // Client Tick End
             0x0D => {

@@ -1,6 +1,6 @@
 use super::packet::Packet;
 use super::types::{read_string, write_string, VarInt};
-use std::io::{self, Cursor, Read};
+use std::io::{self, Cursor, Read, Write};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -46,6 +46,50 @@ pub fn encode_set_compression(threshold: i32) -> Packet {
     Packet::new(0x03, data)
 }
 
+pub fn encode_login_cookie_request(key: &str) -> io::Result<Packet> {
+    let mut data = Vec::new();
+    write_string(&mut data, key)?;
+    Ok(Packet::new(0x05, data))
+}
+
+pub fn encode_login_store_cookie(key: &str, payload: &[u8]) -> io::Result<Packet> {
+    let mut data = Vec::new();
+    write_string(&mut data, key)?;
+    data.write_all(payload)?;
+    Ok(Packet::new(0x06, data))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoginCookieResponse {
+    pub key: String,
+    pub payload: Option<Vec<u8>>,
+}
+
+impl LoginCookieResponse {
+    pub fn decode(data: &[u8]) -> io::Result<Self> {
+        let mut cursor = Cursor::new(data);
+        let key = read_string(&mut cursor)?;
+        let mut has_payload_buf = [0u8; 1];
+        cursor.read_exact(&mut has_payload_buf)?;
+        let has_payload = has_payload_buf[0] != 0;
+        let payload = if has_payload {
+            let length = VarInt::read(&mut cursor)?.0 as usize;
+            if length > 5120 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Cookie payload too large",
+                ));
+            }
+            let mut buf = vec![0u8; length];
+            cursor.read_exact(&mut buf)?;
+            Some(buf)
+        } else {
+            None
+        };
+        Ok(Self { key, payload })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -71,13 +115,56 @@ mod tests {
         assert!(packet.data.len() > 16); // UUID + string
     }
 
+    #[test]
+    fn test_encode_login_cookie_request() {
+        let packet = encode_login_cookie_request("minecraft:auth_token").unwrap();
+        assert_eq!(packet.id, 0x05);
+        assert!(!packet.data.is_empty());
+    }
+
+    #[test]
+    fn test_encode_login_store_cookie() {
+        let payload = b"session_data_here";
+        let packet = encode_login_store_cookie("minecraft:session", payload).unwrap();
+        assert_eq!(packet.id, 0x06);
+        assert!(!packet.data.is_empty());
+    }
+
+    #[test]
+    fn test_login_cookie_response_decode_with_payload() {
+        let mut data = Vec::new();
+        write_string(&mut data, "minecraft:auth").unwrap();
+        data.push(1); // has_payload
+        let payload = b"auth_data";
+        VarInt(payload.len() as i32).write(&mut data).unwrap();
+        data.extend_from_slice(payload);
+
+        let response = LoginCookieResponse::decode(&data).unwrap();
+        assert_eq!(response.key, "minecraft:auth");
+        assert_eq!(response.payload, Some(b"auth_data".to_vec()));
+    }
+
+    #[test]
+    fn test_login_cookie_response_decode_without_payload() {
+        let mut data = Vec::new();
+        write_string(&mut data, "minecraft:empty").unwrap();
+        data.push(0); // no payload
+
+        let response = LoginCookieResponse::decode(&data).unwrap();
+        assert_eq!(response.key, "minecraft:empty");
+        assert_eq!(response.payload, None);
+    }
+
     mod proptest_tests {
         use super::*;
         use proptest::prelude::*;
 
-        // Valid Minecraft username pattern: 3-16 chars, alphanumeric + underscore
         fn minecraft_username_strategy() -> impl Strategy<Value = String> {
             "[a-zA-Z0-9_]{3,16}"
+        }
+
+        fn identifier_strategy() -> impl Strategy<Value = String> {
+            "[a-z][a-z0-9_]{0,15}:[a-z][a-z0-9_/]{0,30}"
         }
 
         proptest! {
@@ -101,7 +188,6 @@ mod tests {
 
                 prop_assert_eq!(packet.id, 0x02);
 
-                // Verify packet contains UUID at the start
                 let uuid_from_packet = Uuid::from_bytes(packet.data[0..16].try_into().unwrap());
                 prop_assert_eq!(uuid_from_packet, uuid);
             }
@@ -111,9 +197,33 @@ mod tests {
                 let packet = encode_set_compression(threshold);
                 prop_assert_eq!(packet.id, 0x03);
 
-                // Decode the threshold from packet data
                 let decoded_threshold = VarInt::read(&mut Cursor::new(&packet.data)).unwrap().0;
                 prop_assert_eq!(decoded_threshold, threshold);
+            }
+
+            #[test]
+            fn test_login_cookie_response_roundtrip(
+                key in identifier_strategy(),
+                has_payload in any::<bool>(),
+                payload_data in proptest::collection::vec(any::<u8>(), 0..512)
+            ) {
+                let mut data = Vec::new();
+                write_string(&mut data, &key).unwrap();
+                if has_payload {
+                    data.push(1);
+                    VarInt(payload_data.len() as i32).write(&mut data).unwrap();
+                    data.extend_from_slice(&payload_data);
+                } else {
+                    data.push(0);
+                }
+
+                let response = LoginCookieResponse::decode(&data).unwrap();
+                prop_assert_eq!(&response.key, &key);
+                if has_payload {
+                    prop_assert_eq!(response.payload, Some(payload_data));
+                } else {
+                    prop_assert_eq!(response.payload, None);
+                }
             }
         }
     }
