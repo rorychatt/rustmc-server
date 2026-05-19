@@ -1,6 +1,6 @@
 use super::packet::Packet;
-use super::types::{write_string, VarInt};
-use std::io::{self, Cursor, Read};
+use super::types::{read_string, write_string, VarInt};
+use std::io::{self, Cursor, Read, Write};
 
 #[derive(Debug, Clone)]
 pub struct PlayerPosition {
@@ -123,6 +123,57 @@ pub fn encode_login_play(entity_id: i32) -> io::Result<Packet> {
     Ok(Packet::new(0x30, data))
 }
 
+pub fn encode_play_cookie_request(key: &str) -> io::Result<Packet> {
+    let mut data = Vec::new();
+    write_string(&mut data, key)?;
+    Ok(Packet::new(0x18, data))
+}
+
+pub fn encode_play_store_cookie(key: &str, payload: &[u8]) -> io::Result<Packet> {
+    let mut data = Vec::new();
+    write_string(&mut data, key)?;
+    data.write_all(payload)?;
+    Ok(Packet::new(0x74, data))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlayCookieResponse {
+    pub key: String,
+    pub payload: Option<Vec<u8>>,
+}
+
+impl PlayCookieResponse {
+    pub fn decode(data: &[u8]) -> io::Result<Self> {
+        let mut cursor = Cursor::new(data);
+        let key = read_string(&mut cursor)?;
+        let mut has_payload_buf = [0u8; 1];
+        cursor.read_exact(&mut has_payload_buf)?;
+        let has_payload = has_payload_buf[0] != 0;
+        let payload = if has_payload {
+            let length = VarInt::read(&mut cursor)?.0 as usize;
+            if length > 5120 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Cookie payload too large",
+                ));
+            }
+            let mut buf = vec![0u8; length];
+            cursor.read_exact(&mut buf)?;
+            Some(buf)
+        } else {
+            None
+        };
+        Ok(Self { key, payload })
+    }
+}
+
+pub fn encode_transfer(host: &str, port: i32) -> io::Result<Packet> {
+    let mut data = Vec::new();
+    write_string(&mut data, host)?;
+    VarInt(port).write(&mut data)?;
+    Ok(Packet::new(0x73, data))
+}
+
 fn read_f64(reader: &mut impl Read) -> io::Result<f64> {
     let mut buf = [0u8; 8];
     reader.read_exact(&mut buf)?;
@@ -196,5 +247,132 @@ mod tests {
         assert_eq!(packet.id, 0x46);
         // teleport_id(VarInt 1) + x,y,z(24) + vel_x,vel_y,vel_z(24) + yaw,pitch(8) + flags(4)
         assert!(packet.data.len() > 50);
+    }
+
+    #[test]
+    fn test_encode_play_cookie_request() {
+        let packet = encode_play_cookie_request("minecraft:velocity_data").unwrap();
+        assert_eq!(packet.id, 0x18);
+        assert!(!packet.data.is_empty());
+    }
+
+    #[test]
+    fn test_encode_play_store_cookie() {
+        let payload = b"play_session_info";
+        let packet = encode_play_store_cookie("minecraft:session", payload).unwrap();
+        assert_eq!(packet.id, 0x74);
+        assert!(!packet.data.is_empty());
+    }
+
+    #[test]
+    fn test_play_cookie_response_decode_with_payload() {
+        let mut data = Vec::new();
+        write_string(&mut data, "minecraft:play_cookie").unwrap();
+        data.push(1); // has_payload
+        let payload = b"some_data";
+        VarInt(payload.len() as i32).write(&mut data).unwrap();
+        data.extend_from_slice(payload);
+
+        let response = PlayCookieResponse::decode(&data).unwrap();
+        assert_eq!(response.key, "minecraft:play_cookie");
+        assert_eq!(response.payload, Some(b"some_data".to_vec()));
+    }
+
+    #[test]
+    fn test_play_cookie_response_decode_without_payload() {
+        let mut data = Vec::new();
+        write_string(&mut data, "minecraft:empty").unwrap();
+        data.push(0);
+
+        let response = PlayCookieResponse::decode(&data).unwrap();
+        assert_eq!(response.key, "minecraft:empty");
+        assert_eq!(response.payload, None);
+    }
+
+    #[test]
+    fn test_encode_transfer() {
+        let packet = encode_transfer("play.example.com", 25565).unwrap();
+        assert_eq!(packet.id, 0x73);
+        assert!(!packet.data.is_empty());
+    }
+
+    #[test]
+    fn test_encode_transfer_different_port() {
+        let packet = encode_transfer("localhost", 19132).unwrap();
+        assert_eq!(packet.id, 0x73);
+
+        // Verify we can decode the host and port back
+        let mut cursor = Cursor::new(&packet.data);
+        let host = read_string(&mut cursor).unwrap();
+        let port = VarInt::read(&mut cursor).unwrap().0;
+        assert_eq!(host, "localhost");
+        assert_eq!(port, 19132);
+    }
+
+    #[test]
+    fn test_play_cookie_response_payload_too_large() {
+        let mut data = Vec::new();
+        write_string(&mut data, "minecraft:toobig").unwrap();
+        data.push(1);
+        VarInt(5121).write(&mut data).unwrap();
+        data.extend(vec![0u8; 5121]);
+
+        let result = PlayCookieResponse::decode(&data);
+        assert!(result.is_err());
+    }
+
+    mod proptest_tests {
+        use super::*;
+        use proptest::prelude::*;
+
+        fn identifier_strategy() -> impl Strategy<Value = String> {
+            "[a-z][a-z0-9_]{0,15}:[a-z][a-z0-9_/]{0,30}"
+        }
+
+        fn hostname_strategy() -> impl Strategy<Value = String> {
+            "[a-z][a-z0-9.]{0,30}"
+        }
+
+        proptest! {
+            #[test]
+            fn test_play_cookie_response_roundtrip(
+                key in identifier_strategy(),
+                has_payload in any::<bool>(),
+                payload_data in proptest::collection::vec(any::<u8>(), 0..512)
+            ) {
+                let mut data = Vec::new();
+                write_string(&mut data, &key).unwrap();
+                if has_payload {
+                    data.push(1);
+                    VarInt(payload_data.len() as i32).write(&mut data).unwrap();
+                    data.extend_from_slice(&payload_data);
+                } else {
+                    data.push(0);
+                }
+
+                let response = PlayCookieResponse::decode(&data).unwrap();
+                prop_assert_eq!(&response.key, &key);
+                if has_payload {
+                    prop_assert_eq!(response.payload, Some(payload_data));
+                } else {
+                    prop_assert_eq!(response.payload, None);
+                }
+            }
+
+            #[test]
+            fn test_transfer_roundtrip(
+                host in hostname_strategy(),
+                port in 1i32..65535i32
+            ) {
+                let packet = encode_transfer(&host, port).unwrap();
+                prop_assert_eq!(packet.id, 0x73);
+
+                let mut cursor = Cursor::new(&packet.data);
+                let decoded_host = read_string(&mut cursor).unwrap();
+                let decoded_port = VarInt::read(&mut cursor).unwrap().0;
+                prop_assert_eq!(decoded_host, host);
+                prop_assert_eq!(decoded_port, port);
+            }
+        }
     }
 }
