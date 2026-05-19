@@ -41,12 +41,12 @@ pub fn encode_system_chat_message(message: &str) -> io::Result<Packet> {
     let mut data = Vec::new();
     write_string(&mut data, &json)?;
     data.push(0); // overlay = false (chat, not action bar)
-    Ok(Packet::new(0x77, data))
+    Ok(Packet::new(0x79, data))
 }
 
 pub fn encode_keep_alive(id: i64) -> Packet {
     let data = id.to_be_bytes().to_vec();
-    Packet::new(0x2B, data)
+    Packet::new(0x2C, data)
 }
 
 pub fn encode_player_position_and_look(
@@ -70,7 +70,7 @@ pub fn encode_player_position_and_look(
     data.extend_from_slice(&yaw.to_be_bytes());
     data.extend_from_slice(&pitch.to_be_bytes());
     data.extend_from_slice(&(flags as i32).to_be_bytes()); // Flags (Int in 775)
-    Packet::new(0x46, data)
+    Packet::new(0x48, data)
 }
 
 pub fn encode_unload_chunk(chunk_x: i32, chunk_z: i32) -> Packet {
@@ -94,7 +94,7 @@ pub fn encode_game_event(event: u8, value: f32) -> Packet {
     let mut data = Vec::new();
     data.push(event);
     data.extend_from_slice(&value.to_be_bytes());
-    Packet::new(0x23, data)
+    Packet::new(0x26, data)
 }
 
 pub fn encode_login_play(entity_id: i32) -> io::Result<Packet> {
@@ -120,7 +120,7 @@ pub fn encode_login_play(entity_id: i32) -> io::Result<Packet> {
     VarInt(0).write(&mut data)?; // Portal cooldown
     VarInt(63).write(&mut data)?; // Sea Level
     data.push(0); // Enforces Secure Chat: false
-    Ok(Packet::new(0x30, data))
+    Ok(Packet::new(0x31, data))
 }
 
 fn read_f64(reader: &mut impl Read) -> io::Result<f64> {
@@ -151,7 +151,7 @@ mod tests {
     #[test]
     fn test_keep_alive_encode() {
         let packet = encode_keep_alive(42);
-        assert_eq!(packet.id, 0x2B);
+        assert_eq!(packet.id, 0x2C);
         assert_eq!(packet.data.len(), 8);
     }
 
@@ -172,14 +172,14 @@ mod tests {
     #[test]
     fn test_game_event() {
         let packet = encode_game_event(13, 0.0);
-        assert_eq!(packet.id, 0x23);
+        assert_eq!(packet.id, 0x26);
         assert_eq!(packet.data.len(), 5); // 1 byte event + 4 bytes float
     }
 
     #[test]
     fn test_login_play_protocol_775() {
         let packet = encode_login_play(1).unwrap();
-        assert_eq!(packet.id, 0x30);
+        assert_eq!(packet.id, 0x31);
         assert!(!packet.data.is_empty());
     }
 
@@ -193,7 +193,7 @@ mod tests {
     #[test]
     fn test_player_position_and_look() {
         let packet = encode_player_position_and_look(0.0, 64.0, 0.0, 0.0, 0.0, 0, 0);
-        assert_eq!(packet.id, 0x46);
+        assert_eq!(packet.id, 0x48);
         // teleport_id(VarInt 1) + x,y,z(24) + vel_x,vel_y,vel_z(24) + yaw,pitch(8) + flags(4)
         assert!(packet.data.len() > 50);
     }
