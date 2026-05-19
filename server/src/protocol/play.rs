@@ -191,6 +191,18 @@ impl PlayCookieResponse {
     }
 }
 
+pub struct ChatCommand {
+    pub command: String,
+}
+
+impl ChatCommand {
+    pub fn decode(data: &[u8]) -> io::Result<Self> {
+        let mut cursor = Cursor::new(data);
+        let command = read_string(&mut cursor)?;
+        Ok(Self { command })
+    }
+}
+
 pub fn encode_transfer(host: &str, port: i32) -> io::Result<Packet> {
     let mut data = Vec::new();
     write_string(&mut data, host)?;
