@@ -4,6 +4,7 @@ pub mod handshake;
 pub mod login;
 pub mod nbt;
 pub mod packet;
+pub mod packet_ids;
 pub mod play;
 pub mod status;
 pub mod types;

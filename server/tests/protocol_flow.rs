@@ -685,6 +685,78 @@ async fn test_client_tick_end_drains_chunks() {
         "Client Tick End should have drained pending chunks"
     );
 }
+#[tokio::test]
+async fn test_configuration_timeout() {
+    let server = TestServer::spawn_with_env(&[("RUSTMC_NON_PLAY_TIMEOUT", "3")])
+        .await
+        .expect("Failed to spawn server");
+    let mut client = TestClient::connect(server.port())
+        .await
+        .expect("Failed to connect");
+
+    client
+        .send_handshake(775, 2)
+        .await
+        .expect("Failed to send handshake");
+    let uuid = Uuid::new_v4();
+    client
+        .send_login_start("TimeoutTest", uuid)
+        .await
+        .expect("Failed to send login start");
+
+    let compression = client
+        .read_packet()
+        .await
+        .expect("Failed to read compression");
+    assert_eq!(compression.id, 0x03);
+    client.enable_compression(256);
+
+    let _login_success = client
+        .read_packet()
+        .await
+        .expect("Failed to read login success");
+
+    client
+        .send_login_acknowledged()
+        .await
+        .expect("Failed to send login acknowledged");
+
+    let _known_packs = client
+        .read_packet()
+        .await
+        .expect("Failed to read known packs");
+
+    client
+        .send_known_packs_response()
+        .await
+        .expect("Failed to send known packs response");
+
+    loop {
+        let packet = client
+            .read_packet()
+            .await
+            .expect("Failed to read config packet");
+        if packet.id == 0x03 {
+            break;
+        }
+    }
+
+    let start = std::time::Instant::now();
+    let result =
+        tokio::time::timeout(tokio::time::Duration::from_secs(10), client.read_packet()).await;
+    let elapsed = start.elapsed();
+
+    assert!(
+        result.is_err() || result.unwrap().is_err(),
+        "Server should drop the connection after timeout"
+    );
+    assert!(
+        elapsed.as_secs() >= 2 && elapsed.as_secs() <= 5,
+        "Timeout should fire around 3 seconds, but took {}s",
+        elapsed.as_secs()
+    );
+}
+
 
 /// Helper to complete the full login + configuration flow
 async fn complete_login_flow(client: &mut TestClient) {
