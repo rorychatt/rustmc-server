@@ -1,6 +1,7 @@
 use std::io::Cursor;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::TcpStream;
 use tokio::sync::RwLock;
@@ -37,7 +38,13 @@ pub struct Connection {
     player_uuid: Option<Uuid>,
     player_name: Option<String>,
     compression_enabled: bool,
+
+    configuration_finish_sent: bool,
+    last_keep_alive_sent: Option<Instant>,
+    last_keep_alive_id: i64,
+    last_keep_alive_response: Option<Instant>,
     pending_chunks: Vec<ChunkPos>,
+
 }
 
 impl Connection {
@@ -49,7 +56,13 @@ impl Connection {
             player_uuid: None,
             player_name: None,
             compression_enabled: false,
+
+            configuration_finish_sent: false,
+            last_keep_alive_sent: None,
+            last_keep_alive_id: 0,
+            last_keep_alive_response: None,
             pending_chunks: Vec::new(),
+
         }
     }
 
@@ -60,20 +73,83 @@ impl Connection {
         let mut reader = BufReader::new(reader);
         let mut writer = BufWriter::new(writer);
 
+        let keep_alive_interval = Duration::from_secs(15);
+        let keep_alive_timeout = Duration::from_secs(30);
+
         loop {
-            match self.read_and_handle_packet(&mut reader, &mut writer).await {
-                Ok(true) => continue,
-                Ok(false) => {
-                    debug!("Connection from {} closed normally", self.addr);
-                    break;
-                }
-                Err(e) => {
-                    if e.kind() == std::io::ErrorKind::UnexpectedEof {
-                        debug!("Connection from {} disconnected", self.addr);
+            if self.state == ConnectionState::Play {
+                let timeout = if let Some(last_sent) = self.last_keep_alive_sent {
+                    let elapsed = last_sent.elapsed();
+                    if elapsed >= keep_alive_interval {
+                        Duration::ZERO
                     } else {
-                        error!("Error handling connection from {}: {}", self.addr, e);
+                        keep_alive_interval - elapsed
                     }
-                    break;
+                } else {
+                    Duration::ZERO
+                };
+
+                tokio::select! {
+                    result = self.read_and_handle_packet(&mut reader, &mut writer) => {
+                        match result {
+                            Ok(true) => continue,
+                            Ok(false) => {
+                                debug!("Connection from {} closed normally", self.addr);
+                                break;
+                            }
+                            Err(e) => {
+                                if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                                    debug!("Connection from {} disconnected", self.addr);
+                                } else {
+                                    error!("Error handling connection from {}: {}", self.addr, e);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    _ = tokio::time::sleep(timeout) => {
+                        // Check for keep-alive timeout
+                        if let Some(last_sent) = self.last_keep_alive_sent {
+                            if let Some(last_response) = self.last_keep_alive_response {
+                                if last_sent.duration_since(last_response) > keep_alive_timeout {
+                                    info!("Client {} timed out (no keep-alive response)", self.addr);
+                                    break;
+                                }
+                            } else if last_sent.elapsed() > keep_alive_timeout {
+                                info!("Client {} timed out (no keep-alive response)", self.addr);
+                                break;
+                            }
+                        }
+
+                        // Send keep-alive
+                        let id = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis() as i64;
+                        let packet = play::encode_keep_alive(id);
+                        if let Err(e) = self.write_packet(&mut writer, &packet).await {
+                            error!("Failed to send keep-alive to {}: {}", self.addr, e);
+                            break;
+                        }
+                        self.last_keep_alive_id = id;
+                        self.last_keep_alive_sent = Some(Instant::now());
+                    }
+                }
+            } else {
+                match self.read_and_handle_packet(&mut reader, &mut writer).await {
+                    Ok(true) => continue,
+                    Ok(false) => {
+                        debug!("Connection from {} closed normally", self.addr);
+                        break;
+                    }
+                    Err(e) => {
+                        if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                            debug!("Connection from {} disconnected", self.addr);
+                        } else {
+                            error!("Error handling connection from {}: {}", self.addr, e);
+                        }
+                        break;
+                    }
                 }
             }
         }
@@ -267,40 +343,25 @@ impl Connection {
                 debug!("Received cookie response: key={}", response.key);
                 Ok(true)
             }
-            // Login Acknowledged (0x03) - client confirms transition from Login to Configuration
+
             0x03 => {
-                debug!("Client acknowledged login, sending configuration data");
-                self.send_configuration_data(writer).await?;
+                if !self.configuration_finish_sent {
+                    // First 0x03: Login Acknowledged — send configuration data
+                    debug!("Client acknowledged login, sending configuration data");
+                    self.send_configuration_data(writer).await?;
+                } else {
+                    // Second 0x03: Acknowledge Finish Configuration — transition to Play
+                    debug!("Client acknowledged finish configuration, transitioning to Play");
+                    self.state = ConnectionState::Play;
+                    self.send_play_login_sequence(writer).await?;
+                }
                 Ok(true)
             }
-            // Known Packs response (0x07) from client
             0x07 => {
                 debug!("Received Known Packs response from client");
-                // Client confirmed known packs; send registry data
                 self.send_registry_data(writer).await?;
                 Ok(true)
             }
-            // Acknowledge Finish Configuration (0x03 again, but after we send Finish)
-            // In practice the client sends 0x03 for both Login Acknowledged and
-            // Acknowledge Finish Configuration. We handle this by tracking flow state
-            // via whether we've already sent Finish Configuration.
-            // However, the way the flow works:
-            // 1. Client sends Login Acknowledged (0x03) -> we send Known Packs
-            // 2. Client sends Known Packs (0x07) -> we send registries + finish
-            // 3. Client sends Acknowledge Finish (0x03) -> transition to Play
-            // Since 0x03 appears twice, we need the second occurrence.
-            // The simplest approach: After sending finish, the next 0x03 transitions to Play.
-            // We'll handle this by checking if it's the "second" 0x03.
-            // Actually, let me re-read: After Login Success, client sends Login Acknowledged
-            // which is serverbound Login packet 0x03. Then we enter Configuration.
-            // In Configuration state, client's Acknowledge Finish is also 0x03.
-            // Since handle_login already waits for 0x03 as "Login Acknowledged",
-            // we need to restructure. Let me handle it differently:
-            // The first time we get 0x03 in Configuration, it's actually the
-            // "Login Acknowledged" if we enter Configuration immediately after Login Success.
-            // But actually looking at the current code, handle_login sets state to Configuration
-            // BEFORE reading the Login Acknowledged. So the first 0x03 here IS Login Acknowledged.
-            // Let me fix this: we handle the flow linearly.
             _ => {
                 debug!(
                     "Unhandled configuration packet: {packet_id:#04x} ({} bytes)",
@@ -334,12 +395,13 @@ impl Connection {
         let tags = configuration::encode_update_tags()?;
         self.write_packet(writer, &tags).await?;
 
+
+        // Send Finish Configuration — remain in Configuration state
+        // and wait for client to send Acknowledge Finish Configuration (0x03)
         let finish = configuration::encode_finish_configuration();
         self.write_packet(writer, &finish).await?;
+        self.configuration_finish_sent = true;
 
-        self.state = ConnectionState::Play;
-
-        self.send_play_login_sequence(writer).await?;
 
         Ok(())
     }
@@ -360,22 +422,30 @@ impl Connection {
         let login_play = play::encode_login_play(entity_id)?;
         self.write_packet(writer, &login_play).await?;
 
-        // 2. Synchronize Player Position
+        // 2. Player Info Update (required for client to finalize join)
+        let player_info = play::encode_player_info_update(uuid, &name, 1); // game_mode=1 (creative)
+        self.write_packet(writer, &player_info).await?;
+
+        // 3. Synchronize Player Position
         let pos = play::encode_player_position_and_look(0.0, 64.0, 0.0, 0.0, 0.0, 0, 0);
         self.write_packet(writer, &pos).await?;
 
-        // 3. Game Event (Start waiting for level chunks, event=13, value=0)
+        // 4. Game Event (Start waiting for level chunks, event=13, value=0)
         let game_event = play::encode_game_event(13, 0.0);
         self.write_packet(writer, &game_event).await?;
 
-        // 4. Chunk Batch Start
+        // 5. Set Center Chunk (required before sending chunk data)
+        let player_chunk_x = 0;
+        let player_chunk_z = 0;
+        let center_chunk = play::encode_set_center_chunk(player_chunk_x, player_chunk_z);
+        self.write_packet(writer, &center_chunk).await?;
+
+        // 6. Chunk Batch Start
         let batch_start = play::encode_chunk_batch_start();
         self.write_packet(writer, &batch_start).await?;
 
-        // 5. Send initial chunks around spawn
+        // 7. Send initial chunks around spawn
         let view_distance = 8;
-        let player_chunk_x = 0;
-        let player_chunk_z = 0;
 
         let mut initial_chunks = std::collections::HashSet::new();
         let mut chunk_count = 0;
@@ -398,11 +468,14 @@ impl Connection {
             }
         }
 
-        // 6. Chunk Batch Finished
+        // 8. Chunk Batch Finished
         let batch_finished = play::encode_chunk_batch_finished(chunk_count)?;
         self.write_packet(writer, &batch_finished).await?;
 
-        info!("Sent chunk data to player {}", name);
+        // Initialize keep-alive tracking
+        self.last_keep_alive_response = Some(Instant::now());
+
+        info!("Sent play login sequence to player {}", name);
 
         Ok(())
     }
@@ -485,7 +558,9 @@ impl Connection {
             }
             // Keep Alive (serverbound)
             0x1C => {
-                // Keep alive response - acknowledged
+                debug!("Received keep-alive response from {}", self.addr);
+                self.last_keep_alive_response = Some(Instant::now());
+
             }
             // Set Player Position
             0x1E => {
