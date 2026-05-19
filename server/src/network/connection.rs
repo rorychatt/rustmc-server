@@ -475,11 +475,11 @@ impl Connection {
                 debug!("Received teleport confirmation");
             }
             // Chat Command
-            0x06 => {
+            0x07 => {
                 debug!("Received chat command ({} bytes)", data.len());
             }
             // Chat Message
-            0x08 => {
+            0x09 => {
                 let chat = play::ChatMessage::decode(data)?;
                 info!("Chat from {}: {}", self.addr, chat.message);
             }
@@ -508,11 +508,11 @@ impl Connection {
                 // Empty packet, just acknowledge
             }
             // Keep Alive (serverbound)
-            0x1B => {
+            0x1C => {
                 // Keep alive response - acknowledged
             }
             // Set Player Position
-            0x1D => {
+            0x1E => {
                 let pos = play::PlayerPosition::decode(data)?;
                 debug!("Player position: ({}, {}, {})", pos.x, pos.y, pos.z);
 
@@ -549,7 +549,7 @@ impl Connection {
                 }
             }
             // Set Player Position and Rotation
-            0x1E => {
+            0x1F => {
                 debug!("Player position and rotation ({} bytes)", data.len());
             }
             // Player Loaded

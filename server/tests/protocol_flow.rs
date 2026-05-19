@@ -172,21 +172,21 @@ async fn test_login_flow() {
     }
     assert!(got_finish, "Should receive Finish Configuration");
 
-    // Read join game packet (now 0x30 in protocol 775)
+    // Read join game packet (0x31 in protocol 775)
     let join_game = client
         .read_packet()
         .await
         .expect("Failed to read join game");
-    assert_eq!(join_game.id, 0x30, "Expected join game packet (0x30)");
+    assert_eq!(join_game.id, 0x31, "Expected join game packet (0x31)");
     assert!(!join_game.data.is_empty(), "Join game should have data");
 
-    // Read synchronize player position (0x46 in protocol 775)
+    // Read synchronize player position (0x48 in protocol 775)
     let sync_pos = client
         .read_packet()
         .await
         .expect("Failed to read sync position");
     assert_eq!(
-        sync_pos.id, 0x46,
+        sync_pos.id, 0x48,
         "Expected synchronize player position packet"
     );
 }
@@ -201,7 +201,7 @@ async fn test_play_basic() {
     // Complete login + configuration flow
     complete_login_flow(&mut client).await;
 
-    // Send player position (0x1D in protocol 775)
+    // Send player position (0x1E in protocol 775)
     client
         .send_player_position(100.0, 64.0, 200.0, true)
         .await
@@ -408,12 +408,12 @@ async fn test_chunk_batching() {
 
     // After login, we should have received Game Event, Chunk Batch Start, chunks, and Chunk Batch Finished
     // The login flow helper already consumes join_game and sync_pos.
-    // Read Game Event (0x23)
+    // Read Game Event (0x26)
     let game_event = client
         .read_packet()
         .await
         .expect("Failed to read game event");
-    assert_eq!(game_event.id, 0x23, "Expected game event packet");
+    assert_eq!(game_event.id, 0x26, "Expected game event packet");
 
     // Read Chunk Batch Start (0x0C)
     let batch_start = client
@@ -422,14 +422,14 @@ async fn test_chunk_batching() {
         .expect("Failed to read chunk batch start");
     assert_eq!(batch_start.id, 0x0C, "Expected chunk batch start");
 
-    // Read chunk data packets (0x2C)
+    // Read chunk data packets (0x2D)
     let mut chunk_count = 0;
     loop {
         let packet = client
             .read_packet()
             .await
             .expect("Failed to read chunk/batch packet");
-        if packet.id == 0x2C {
+        if packet.id == 0x2D {
             chunk_count += 1;
         } else if packet.id == 0x0B {
             // Chunk Batch Finished
@@ -505,13 +505,13 @@ async fn complete_login_flow_with_client(client: &mut TestClient, username: &str
         }
     }
 
-    // Read join game (0x30)
+    // Read join game (0x31)
     let _join_game = client
         .read_packet()
         .await
         .expect("Failed to read join game");
 
-    // Read sync position (0x46)
+    // Read sync position (0x48)
     let _sync_pos = client
         .read_packet()
         .await

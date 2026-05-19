@@ -78,14 +78,14 @@ impl TestClient {
         data.extend_from_slice(&y.to_be_bytes());
         data.extend_from_slice(&z.to_be_bytes());
         data.push(if on_ground { 1 } else { 0 });
-        self.send_packet(0x1D, &data).await
+        self.send_packet(0x1E, &data).await
     }
 
     #[allow(dead_code)]
     pub async fn send_chat_message(&mut self, message: &str) -> anyhow::Result<()> {
         let mut data = Vec::new();
         write_string(&mut data, message)?;
-        self.send_packet(0x08, &data).await
+        self.send_packet(0x09, &data).await
     }
 
     #[allow(dead_code)]
