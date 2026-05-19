@@ -490,8 +490,9 @@ async fn test_chunk_throttling_via_batch_received() {
 
     complete_login_flow(&mut client).await;
 
-    // Consume the initial batch: Game Event, Chunk Batch Start, chunks, Chunk Batch Finished
+    // Consume the initial batch: Game Event, Set Center Chunk, Chunk Batch Start, chunks, Chunk Batch Finished
     let _game_event = client.read_packet().await.unwrap();
+    let _center_chunk = client.read_packet().await.unwrap();
     let _batch_start = client.read_packet().await.unwrap();
     loop {
         let packet = client.read_packet().await.unwrap();
@@ -546,6 +547,9 @@ async fn test_chunk_throttling_via_batch_received() {
         } else if packet.id == 0x25 {
             // Unload Chunk packets may arrive before the batch start
             continue;
+        } else if packet.id == 0x2C {
+            // Keep-alive — skip
+            continue;
         } else {
             // No more batch starts — we're done
             break;
@@ -575,12 +579,18 @@ async fn test_client_tick_end_drains_chunks() {
 
     complete_login_flow(&mut client).await;
 
-    // Consume initial chunk batch (Game Event, Chunk Batch Start, chunks, Chunk Batch Finished)
+    // Consume initial chunk batch (Game Event, Set Center Chunk, Chunk Batch Start, chunks, Chunk Batch Finished)
     let game_event = client
         .read_packet()
         .await
         .expect("Failed to read game event");
     assert_eq!(game_event.id, 0x26, "Expected game event packet");
+
+    let center_chunk = client
+        .read_packet()
+        .await
+        .expect("Failed to read set center chunk");
+    assert_eq!(center_chunk.id, 0x58, "Expected set center chunk packet");
 
     let batch_start = client
         .read_packet()
@@ -630,6 +640,7 @@ async fn test_client_tick_end_drains_chunks() {
         match packet.id {
             0x25 => {} // Unload chunk - skip
             0x0C => {} // Chunk Batch Start
+            0x2C => {} // Keep-alive - skip
             0x2D => position_chunks += 1,
             0x0B => {
                 break; // Batch finished
