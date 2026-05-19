@@ -13,6 +13,7 @@ use crate::protocol::configuration;
 use crate::protocol::handshake::{Handshake, NextState};
 use crate::protocol::login::{LoginCookieResponse, LoginStart, LoginSuccess};
 use crate::protocol::packet::{Packet, PacketWriter};
+use crate::protocol::packet_ids;
 use crate::protocol::play;
 use crate::protocol::status::{
     decode_ping_request, decode_status_request, encode_pong_response, StatusResponse,
@@ -251,7 +252,9 @@ impl Connection {
         data: &[u8],
         _writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<bool> {
-        if packet_id != 0x00 {
+        use packet_ids::handshake::serverbound::*;
+
+        if packet_id != HANDSHAKE {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("Expected handshake packet 0x00, got {packet_id:#04x}"),
@@ -282,8 +285,10 @@ impl Connection {
         data: &[u8],
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<bool> {
+        use packet_ids::status::serverbound::*;
+
         match packet_id {
-            0x00 => {
+            STATUS_REQUEST => {
                 decode_status_request(data)?;
                 let world = self.world.read().await;
                 let response = StatusResponse::default_response(world.player_count() as i32, 20);
@@ -291,7 +296,7 @@ impl Connection {
                 self.write_packet(writer, &packet).await?;
                 Ok(true)
             }
-            0x01 => {
+            PING_REQUEST => {
                 let payload = decode_ping_request(data)?;
                 let pong = encode_pong_response(payload);
                 self.write_packet(writer, &pong).await?;
@@ -310,8 +315,10 @@ impl Connection {
         data: &[u8],
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<bool> {
+        use packet_ids::login::serverbound::*;
+
         match packet_id {
-            0x00 => {
+            LOGIN_START => {
                 let login = LoginStart::decode(data)?;
                 info!("Player login: {} ({})", login.name, login.uuid);
 
@@ -333,7 +340,7 @@ impl Connection {
 
                 Ok(true)
             }
-            0x04 => {
+            COOKIE_RESPONSE => {
                 let response = LoginCookieResponse::decode(data)?;
                 debug!("Received login cookie response: key={}", response.key);
                 if let Some(payload) = response.payload {
@@ -356,9 +363,10 @@ impl Connection {
         _data: &[u8],
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<bool> {
+        use packet_ids::configuration::serverbound::*;
+
         match packet_id {
-            // Cookie Response (0x02)
-            0x02 => {
+            COOKIE_RESPONSE => {
                 let response = configuration::CookieResponse::decode(_data)?;
                 debug!(
                     "Received configuration cookie response: key={}",
@@ -372,7 +380,7 @@ impl Connection {
                 Ok(true)
             }
 
-            0x03 => {
+            ACKNOWLEDGE_FINISH => {
                 if !self.configuration_finish_sent {
                     // First 0x03: Login Acknowledged — send configuration data
                     debug!("Client acknowledged login, sending configuration data");
@@ -385,7 +393,7 @@ impl Connection {
                 }
                 Ok(true)
             }
-            0x07 => {
+            KNOWN_PACKS => {
                 debug!("Received Known Packs response from client");
                 self.send_registry_data(writer).await?;
                 Ok(true)
@@ -546,13 +554,13 @@ impl Connection {
         data: &[u8],
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<bool> {
+        use packet_ids::play::serverbound::*;
+
         match packet_id {
-            // Confirm Teleportation
-            0x00 => {
+            CONFIRM_TELEPORTATION => {
                 debug!("Received teleport confirmation");
             }
-            // Chat Command
-            0x07 => {
+            CHAT_COMMAND => {
                 let command = play::ChatCommand::decode(data)?;
                 if command.command.starts_with("transfer ") {
                     let parts: Vec<&str> = command.command.splitn(3, ' ').collect();
@@ -566,13 +574,11 @@ impl Connection {
                 }
                 debug!("Received chat command: {}", command.command);
             }
-            // Chat Message
-            0x09 => {
+            CHAT_MESSAGE => {
                 let chat = play::ChatMessage::decode(data)?;
                 info!("Chat from {}: {}", self.addr, chat.message);
             }
-            // Chunk Batch Received
-            0x0B => {
+            CHUNK_BATCH_RECEIVED => {
                 if data.len() >= 4 {
                     let chunks_per_tick = f32::from_be_bytes([data[0], data[1], data[2], data[3]]);
                     let clamped = chunks_per_tick.clamp(1.0, 100.0);
@@ -586,8 +592,7 @@ impl Connection {
                     self.drain_pending_chunks(writer, clamped).await?;
                 }
             }
-            // Play Cookie Response
-            0x12 => {
+            COOKIE_RESPONSE => {
                 let response = play::PlayCookieResponse::decode(data)?;
                 debug!("Received play cookie response: key={}", response.key);
                 if let Some(payload) = response.payload {
@@ -596,18 +601,15 @@ impl Connection {
                     self.cookies.remove(&response.key);
                 }
             }
-            // Client Tick End
-            0x0D => {
+            CLIENT_TICK_END => {
                 // Empty packet, just acknowledge
             }
-            // Keep Alive (serverbound)
-            0x1C => {
+            KEEP_ALIVE => {
                 debug!("Received keep-alive response from {}", self.addr);
                 self.last_keep_alive_response = Some(Instant::now());
 
             }
-            // Set Player Position
-            0x1E => {
+            SET_PLAYER_POSITION => {
                 let pos = play::PlayerPosition::decode(data)?;
                 debug!("Player position: ({}, {}, {})", pos.x, pos.y, pos.z);
 
@@ -643,12 +645,10 @@ impl Connection {
                     self.drain_pending_chunks(writer, limit).await?;
                 }
             }
-            // Set Player Position and Rotation
-            0x1F => {
+            SET_PLAYER_POSITION_AND_ROTATION => {
                 debug!("Player position and rotation ({} bytes)", data.len());
             }
-            // Player Loaded
-            0x2C => {
+            PLAYER_LOADED => {
                 debug!("Player loaded signal received");
             }
             _ => {
