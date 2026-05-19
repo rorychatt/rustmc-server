@@ -86,8 +86,8 @@ pub struct RegistryEntry {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::ids;
+    use super::*;
     use crate::protocol::version::{DATA_PACK_VERSION, PROTOCOL_VERSION};
     use crate::registry;
 
