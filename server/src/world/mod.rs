@@ -13,6 +13,7 @@ pub struct Player {
     pub y: f64,
     pub z: f64,
     pub loaded_chunks: HashSet<ChunkPos>,
+    pub chunks_per_tick: f32,
 }
 
 pub struct World {
@@ -47,6 +48,7 @@ impl World {
                 y: 64.0,
                 z: 0.0,
                 loaded_chunks: HashSet::new(),
+                chunks_per_tick: 25.0,
             },
         );
         entity_id
@@ -243,5 +245,51 @@ mod tests {
 
         let update = world.compute_chunk_updates(&uuid, 2);
         assert!(update.is_none());
+    }
+
+    #[test]
+    fn test_player_chunks_per_tick_default() {
+        let mut world = World::new();
+        let uuid = Uuid::new_v4();
+        world.add_player(uuid, "Test".to_string());
+
+        let player = world.players.get(&uuid).unwrap();
+        assert_eq!(player.chunks_per_tick, 25.0);
+    }
+
+    #[test]
+    fn test_player_chunks_per_tick_update() {
+        let mut world = World::new();
+        let uuid = Uuid::new_v4();
+        world.add_player(uuid, "Test".to_string());
+
+        let player = world.players.get_mut(&uuid).unwrap();
+        player.chunks_per_tick = 10.0;
+        assert_eq!(player.chunks_per_tick, 10.0);
+    }
+
+    #[test]
+    fn test_player_chunks_per_tick_clamping() {
+        let mut world = World::new();
+        let uuid = Uuid::new_v4();
+        world.add_player(uuid, "Test".to_string());
+
+        let player = world.players.get_mut(&uuid).unwrap();
+
+        // Clamp to minimum
+        player.chunks_per_tick = 0.0_f32.clamp(1.0, 100.0);
+        assert_eq!(player.chunks_per_tick, 1.0);
+
+        // Clamp to maximum
+        player.chunks_per_tick = 999.0_f32.clamp(1.0, 100.0);
+        assert_eq!(player.chunks_per_tick, 100.0);
+
+        // Negative value clamps to minimum
+        player.chunks_per_tick = (-1.0_f32).clamp(1.0, 100.0);
+        assert_eq!(player.chunks_per_tick, 1.0);
+
+        // Valid value stays unchanged
+        player.chunks_per_tick = 50.0_f32.clamp(1.0, 100.0);
+        assert_eq!(player.chunks_per_tick, 50.0);
     }
 }
