@@ -36,6 +36,7 @@ pub struct Connection {
     player_uuid: Option<Uuid>,
     player_name: Option<String>,
     compression_enabled: bool,
+    pending_chunks: Vec<ChunkPos>,
 }
 
 impl Connection {
@@ -47,6 +48,7 @@ impl Connection {
             player_uuid: None,
             player_name: None,
             compression_enabled: false,
+            pending_chunks: Vec::new(),
         }
     }
 
@@ -417,6 +419,38 @@ impl Connection {
         Ok(())
     }
 
+    async fn drain_pending_chunks(
+        &mut self,
+        writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
+        limit: f32,
+    ) -> std::io::Result<()> {
+        if self.pending_chunks.is_empty() {
+            return Ok(());
+        }
+
+        let send_count = (limit.ceil() as usize).min(self.pending_chunks.len());
+        let to_send: Vec<ChunkPos> = self.pending_chunks.drain(..send_count).collect();
+
+        let batch_start = play::encode_chunk_batch_start();
+        self.write_packet(writer, &batch_start).await?;
+
+        let mut count = 0;
+        {
+            let mut world = self.world.write().await;
+            for chunk_pos in &to_send {
+                let chunk = world.get_or_generate_chunk(*chunk_pos);
+                let chunk_packet = chunk_data::encode_chunk_data(chunk)?;
+                self.write_packet(writer, &chunk_packet).await?;
+                count += 1;
+            }
+        }
+
+        let batch_finished = play::encode_chunk_batch_finished(count)?;
+        self.write_packet(writer, &batch_finished).await?;
+
+        Ok(())
+    }
+
     async fn handle_play(
         &mut self,
         packet_id: i32,
@@ -439,7 +473,18 @@ impl Connection {
             }
             // Chunk Batch Received
             0x0B => {
-                debug!("Received chunk batch acknowledgement");
+                if data.len() >= 4 {
+                    let chunks_per_tick = f32::from_be_bytes([data[0], data[1], data[2], data[3]]);
+                    let clamped = chunks_per_tick.clamp(1.0, 100.0);
+                    if let Some(uuid) = self.player_uuid {
+                        let mut world = self.world.write().await;
+                        if let Some(player) = world.players.get_mut(&uuid) {
+                            player.chunks_per_tick = clamped;
+                        }
+                    }
+                    debug!("Chunk batch received: chunks_per_tick={:.1}", clamped);
+                    self.drain_pending_chunks(writer, clamped).await?;
+                }
             }
             // Client Tick End
             0x0D => {
@@ -454,42 +499,36 @@ impl Connection {
                 let pos = play::PlayerPosition::decode(data)?;
                 debug!("Player position: ({}, {}, {})", pos.x, pos.y, pos.z);
 
-                // Dynamic chunk loading
                 if let Some(uuid) = self.player_uuid {
                     let mut world = self.world.write().await;
                     world.update_player_position(&uuid, pos.x, pos.y, pos.z);
 
                     let view_distance = 8;
                     if let Some(update) = world.compute_chunk_updates(&uuid, view_distance) {
-                        // Send unload packets first
                         for chunk_pos in &update.to_unload {
                             let unload_packet = play::encode_unload_chunk(chunk_pos.x, chunk_pos.z);
                             self.write_packet(writer, &unload_packet).await?;
                         }
 
-                        // Send new chunk data with batching
                         if !update.to_load.is_empty() {
-                            let batch_start = play::encode_chunk_batch_start();
-                            self.write_packet(writer, &batch_start).await?;
-
-                            let mut count = 0;
-                            for chunk_pos in &update.to_load {
-                                let chunk = world.get_or_generate_chunk(*chunk_pos);
-                                let chunk_packet = chunk_data::encode_chunk_data(chunk)?;
-                                self.write_packet(writer, &chunk_packet).await?;
-                                count += 1;
-                            }
-
-                            let batch_finished = play::encode_chunk_batch_finished(count)?;
-                            self.write_packet(writer, &batch_finished).await?;
+                            self.pending_chunks.extend(update.to_load.iter());
                         }
 
                         debug!(
-                            "Chunk update: loaded {}, unloaded {}",
+                            "Chunk update: queued {}, unloaded {}",
                             update.to_load.len(),
                             update.to_unload.len()
                         );
                     }
+
+                    let limit = world
+                        .players
+                        .get(&uuid)
+                        .map(|p| p.chunks_per_tick)
+                        .unwrap_or(25.0);
+                    drop(world);
+
+                    self.drain_pending_chunks(writer, limit).await?;
                 }
             }
             // Set Player Position and Rotation
