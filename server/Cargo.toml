@@ -29,6 +29,7 @@ flate2 = { workspace = true }
 toml = { workspace = true }
 hmac = "0.12"
 sha2 = "0.10"
+reqwest = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
