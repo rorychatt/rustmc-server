@@ -57,11 +57,21 @@ impl VarInt {
 }
 
 pub fn read_string(reader: &mut impl Read) -> io::Result<String> {
+    read_string_with_max(reader, 32767)
+}
+
+pub fn read_string_with_max(reader: &mut impl Read, max_len: usize) -> io::Result<String> {
     let len = VarInt::read(reader)?.0 as usize;
     if len > 32767 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "String too long",
+        ));
+    }
+    if len > max_len {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("String length {len} exceeds maximum {max_len}"),
         ));
     }
     let mut buf = vec![0u8; len];
@@ -131,6 +141,36 @@ mod tests {
         let bad_data = [0x80, 0x80, 0x80, 0x80, 0x80, 0x01];
         let result = VarInt::read(&mut &bad_data[..]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_string_with_max_accepts_at_limit() {
+        let s = "a".repeat(256);
+        let mut buf = Vec::new();
+        write_string(&mut buf, &s).unwrap();
+        let result = read_string_with_max(&mut Cursor::new(&buf), 256).unwrap();
+        assert_eq!(s, result);
+    }
+
+    #[test]
+    fn test_read_string_with_max_rejects_over_limit() {
+        let s = "a".repeat(257);
+        let mut buf = Vec::new();
+        write_string(&mut buf, &s).unwrap();
+        let result = read_string_with_max(&mut Cursor::new(&buf), 256);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("exceeds maximum"));
+    }
+
+    #[test]
+    fn test_read_string_default_limit() {
+        let s = "a".repeat(1000);
+        let mut buf = Vec::new();
+        write_string(&mut buf, &s).unwrap();
+        let result = read_string(&mut Cursor::new(&buf)).unwrap();
+        assert_eq!(s, result);
     }
 
     #[cfg(test)]

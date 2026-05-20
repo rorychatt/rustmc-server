@@ -28,7 +28,12 @@ impl Server {
 
     pub async fn run(&self) -> anyhow::Result<()> {
         let listener = TcpListener::bind(&self.addr).await?;
-        info!("RustMC Server listening on {}", self.addr);
+        let bound_addr = listener.local_addr()?;
+        info!("RustMC Server listening on {}", bound_addr);
+
+        if let Ok(port_file) = std::env::var("RUSTMC_PORT_FILE") {
+            std::fs::write(&port_file, bound_addr.port().to_string())?;
+        }
 
         let tick_world = self.world.clone();
         tokio::spawn(async move {

@@ -1,6 +1,6 @@
 use super::packet::Packet;
 use super::packet_ids::play::clientbound as ids;
-use super::types::{read_string, write_string, VarInt};
+use super::types::{read_string, read_string_with_max, write_string, VarInt};
 use std::io::{self, Cursor, Read, Write};
 
 #[derive(Debug, Clone)]
@@ -46,7 +46,7 @@ pub struct ChatMessage {
 impl ChatMessage {
     pub fn decode(data: &[u8]) -> io::Result<Self> {
         let mut cursor = Cursor::new(data);
-        let message = super::types::read_string(&mut cursor)?;
+        let message = read_string_with_max(&mut cursor, 256)?;
         Ok(Self { message })
     }
 }
@@ -373,7 +373,7 @@ pub struct ChatCommand {
 impl ChatCommand {
     pub fn decode(data: &[u8]) -> io::Result<Self> {
         let mut cursor = Cursor::new(data);
-        let command = read_string(&mut cursor)?;
+        let command = read_string_with_max(&mut cursor, 256)?;
         Ok(Self { command })
     }
 }

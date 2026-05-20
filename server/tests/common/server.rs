@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::time::Duration;
-use tokio::net::TcpListener;
 use tokio::time::sleep;
 
 pub struct TestServer {
@@ -40,11 +39,44 @@ impl TestServer {
         Self::spawn_with_env_and_ops(extra_env, None).await
     }
 
+    #[allow(dead_code)]
+    pub async fn spawn_with_env_and_ops_config(
+        extra_env: &[(&str, &str)],
+        ops_content: Option<&str>,
+    ) -> anyhow::Result<Self> {
+        let ops_file = if let Some(content) = ops_content {
+            let path = std::env::temp_dir().join(format!("rustmc_ops_{}.toml", std::process::id()));
+            std::fs::write(&path, content)?;
+            Some(path)
+        } else {
+            None
+        };
+
+        let mut all_env: Vec<(&str, String)> = extra_env
+            .iter()
+            .map(|(k, v)| (*k, v.to_string()))
+            .collect();
+
+        if let Some(ref path) = ops_file {
+            all_env.push(("RUSTMC_OPS", path.to_string_lossy().into_owned()));
+        }
+
+        let all_refs: Vec<(&str, &str)> = all_env.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        Self::spawn_with_env_and_ops(&all_refs, ops_file).await
+    }
+
     async fn spawn_with_env_and_ops(
         extra_env: &[(&str, &str)],
         ops_file: Option<PathBuf>,
     ) -> anyhow::Result<Self> {
-        let port = find_free_port().await?;
+        let port_file = std::env::temp_dir().join(format!(
+            "rustmc_port_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .subsec_nanos()
+        ));
 
         let build_status = Command::new("cargo")
             .args(["build", "--bin", "rustmc-server"])
@@ -63,7 +95,8 @@ impl TestServer {
 
         let mut cmd = Command::new("cargo");
         cmd.args(["run", "--bin", "rustmc-server"])
-            .env("RUSTMC_BIND", format!("127.0.0.1:{port}"))
+            .env("RUSTMC_BIND", "127.0.0.1:0")
+            .env("RUSTMC_PORT_FILE", &port_file)
             .env("RUSTMC_PLUGINS", "")
             .env("RUST_LOG", "rustmc_server=warn")
             .stdout(std::process::Stdio::null())
@@ -73,28 +106,27 @@ impl TestServer {
             cmd.env(key, value);
         }
 
-        let mut child = cmd.spawn()?;
+        let child = cmd.spawn()?;
 
         let start = std::time::Instant::now();
-        loop {
+        let port = loop {
             if start.elapsed() > Duration::from_secs(timeout_secs) {
-                let _ = child.kill();
+                let _ = std::fs::remove_file(&port_file);
                 return Err(anyhow::anyhow!(
                     "Server failed to start within {timeout_secs} seconds"
                 ));
             }
 
-            if TcpListener::bind(format!("127.0.0.1:{port}"))
-                .await
-                .is_err()
-            {
-                break;
+            if let Ok(contents) = std::fs::read_to_string(&port_file) {
+                if let Ok(p) = contents.trim().parse::<u16>() {
+                    break p;
+                }
             }
 
-            sleep(Duration::from_millis(100)).await;
-        }
+            sleep(Duration::from_millis(50)).await;
+        };
 
-        sleep(Duration::from_millis(500)).await;
+        let _ = std::fs::remove_file(&port_file);
 
         Ok(TestServer {
             process: child,
@@ -117,11 +149,4 @@ impl Drop for TestServer {
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-}
-
-async fn find_free_port() -> anyhow::Result<u16> {
-    let listener = TcpListener::bind("127.0.0.1:0").await?;
-    let port = listener.local_addr()?.port();
-    drop(listener);
-    Ok(port)
 }

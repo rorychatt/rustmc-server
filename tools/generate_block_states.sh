@@ -49,20 +49,25 @@ echo "Generating block_states.json from: $BLOCKS_JSON"
 echo "Protocol version: $PROTOCOL_VERSION"
 echo "Output: $OUTPUT"
 
-# Extract each block's default state ID from the server JAR report.
+# Extract each block's full state data from the server JAR report.
 # The report format is:
-#   { "minecraft:air": { "states": [{ "id": 0, "default": true }, ...] }, ... }
+#   { "minecraft:air": { "properties": {...}, "states": [{ "id": 0, "default": true, "properties": {...} }, ...] }, ... }
 #
-# For each block, find the state with "default": true and extract its "id".
-jq '{
+# For each block, extract: default_state_id, properties (possible values), and all states with their property values.
+jq -c '{
   protocol_version: '"$PROTOCOL_VERSION"',
   blocks: (
     [to_entries[] | {
       key: .key,
-      value: { default_state_id: (.value.states[] | select(.default == true) | .id) }
+      value: {
+        default_state_id: (.value.states[] | select(.default == true) | .id),
+        properties: (.value.properties // {}),
+        states: [.value.states[] | {id: .id, properties: (.properties // {})}]
+      }
     }] | from_entries
   )
 }' "$BLOCKS_JSON" > "$OUTPUT"
 
 BLOCK_COUNT=$(jq '.blocks | length' "$OUTPUT")
-echo "Done. Generated $BLOCK_COUNT blocks."
+STATE_COUNT=$(jq '[.blocks[].states | length] | add' "$OUTPUT")
+echo "Done. Generated $BLOCK_COUNT blocks with $STATE_COUNT total states."
