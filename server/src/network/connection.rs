@@ -513,6 +513,11 @@ impl Connection {
     ) -> std::io::Result<bool> {
         use packet_ids::configuration::serverbound::*;
 
+        debug!(
+            "Configuration serverbound packet: {packet_id:#04x} ({} bytes)",
+            _data.len()
+        );
+
         match packet_id {
             COOKIE_RESPONSE => {
                 let response = configuration::CookieResponse::decode(_data)?;
