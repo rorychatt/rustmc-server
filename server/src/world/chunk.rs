@@ -25,7 +25,7 @@ impl ChunkPos {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlockState(pub u16);
 
-// IDs from protocol 775 — validated by test_block_state_ids_match_generated_data
+// IDs from version 26.1.2 — validated by test_block_state_ids_match_generated_data
 impl BlockState {
     pub const AIR: Self = Self(0);
     pub const STONE: Self = Self(1);
@@ -33,12 +33,12 @@ impl BlockState {
     pub const DIRT: Self = Self(10);
     pub const COBBLESTONE: Self = Self(14);
     pub const OAK_PLANKS: Self = Self(15);
-    pub const BEDROCK: Self = Self(33);
-    pub const WATER: Self = Self(34);
-    pub const LAVA: Self = Self(50);
-    pub const SAND: Self = Self(66);
-    pub const GRAVEL: Self = Self(68);
-    pub const OAK_LOG: Self = Self(77);
+    pub const BEDROCK: Self = Self(85);
+    pub const WATER: Self = Self(86);
+    pub const LAVA: Self = Self(102);
+    pub const SAND: Self = Self(118);
+    pub const GRAVEL: Self = Self(124);
+    pub const OAK_LOG: Self = Self(137);
 }
 
 #[derive(Clone)]
@@ -233,6 +233,74 @@ mod block_state_tests {
                 .as_i64()
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn test_all_default_states_in_states_list() {
+        let data: Value = serde_json::from_str(BLOCK_STATES_JSON).unwrap();
+        let blocks = data["blocks"].as_object().unwrap();
+
+        for (name, block) in blocks {
+            let default_id = block["default_state_id"].as_u64().unwrap();
+            let states = block["states"].as_array().unwrap();
+            assert!(
+                !states.is_empty(),
+                "Block {name} has no states"
+            );
+            let has_default = states.iter().any(|s| s["id"].as_u64().unwrap() == default_id);
+            assert!(
+                has_default,
+                "Block {name} default_state_id {default_id} not found in states list"
+            );
+        }
+    }
+
+    #[test]
+    fn test_state_ids_unique() {
+        let data: Value = serde_json::from_str(BLOCK_STATES_JSON).unwrap();
+        let blocks = data["blocks"].as_object().unwrap();
+
+        let mut seen = std::collections::HashSet::new();
+        for (name, block) in blocks {
+            let states = block["states"].as_array().unwrap();
+            for state in states {
+                let id = state["id"].as_u64().unwrap();
+                assert!(
+                    seen.insert(id),
+                    "Duplicate state ID {id} in block {name}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_state_properties_match_declared() {
+        let data: Value = serde_json::from_str(BLOCK_STATES_JSON).unwrap();
+        let blocks = data["blocks"].as_object().unwrap();
+
+        for (name, block) in blocks {
+            let properties = block["properties"].as_object().unwrap();
+            let states = block["states"].as_array().unwrap();
+
+            for state in states {
+                let state_props = state["properties"].as_object().unwrap();
+                assert_eq!(
+                    state_props.len(),
+                    properties.len(),
+                    "Block {name} state has wrong number of properties"
+                );
+                for (key, value) in state_props {
+                    let allowed = properties.get(key).unwrap_or_else(|| {
+                        panic!("Block {name} state has undeclared property {key}")
+                    });
+                    let allowed_values = allowed.as_array().unwrap();
+                    assert!(
+                        allowed_values.iter().any(|v| v == value),
+                        "Block {name} property {key}={value} not in allowed values"
+                    );
+                }
+            }
+        }
     }
 }
 
