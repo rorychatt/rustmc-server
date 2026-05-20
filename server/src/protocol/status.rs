@@ -1,4 +1,5 @@
 use super::packet::Packet;
+use super::packet_ids::status::clientbound as ids;
 use super::types::write_string;
 use super::version::{PROTOCOL_VERSION, VERSION_NAME};
 use serde::{Deserialize, Serialize};
@@ -61,7 +62,7 @@ impl StatusResponse {
         let json = serde_json::to_string(self).map_err(io::Error::other)?;
         let mut data = Vec::new();
         write_string(&mut data, &json)?;
-        Ok(Packet::new(0x00, data))
+        Ok(Packet::new(ids::STATUS_RESPONSE, data))
     }
 }
 
@@ -91,7 +92,7 @@ pub fn decode_ping_request(data: &[u8]) -> io::Result<i64> {
 
 pub fn encode_pong_response(payload: i64) -> Packet {
     let data = payload.to_be_bytes().to_vec();
-    Packet::new(0x01, data)
+    Packet::new(ids::PONG_RESPONSE, data)
 }
 
 #[cfg(test)]
@@ -114,7 +115,7 @@ mod tests {
         assert_eq!(decoded, payload);
 
         let pong = encode_pong_response(decoded);
-        assert_eq!(pong.id, 0x01);
+        assert_eq!(pong.id, ids::PONG_RESPONSE);
         assert_eq!(pong.data, data);
     }
 
@@ -131,7 +132,7 @@ mod tests {
                 prop_assert_eq!(decoded, payload);
 
                 let pong = encode_pong_response(decoded);
-                prop_assert_eq!(pong.id, 0x01);
+                prop_assert_eq!(pong.id, ids::PONG_RESPONSE);
                 prop_assert_eq!(pong.data, data);
             }
 
@@ -175,7 +176,7 @@ mod tests {
                 };
 
                 let packet = response.to_packet().unwrap();
-                prop_assert_eq!(packet.id, 0x00);
+                prop_assert_eq!(packet.id, ids::STATUS_RESPONSE);
 
                 // Verify we can parse the JSON back
                 let mut data_cursor = Cursor::new(&packet.data);

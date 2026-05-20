@@ -3,6 +3,7 @@ use std::io::{self, Write};
 
 use crate::protocol::nbt;
 use crate::protocol::packet::Packet;
+use crate::protocol::packet_ids::play::clientbound::LEVEL_CHUNK_WITH_LIGHT;
 use crate::protocol::types::VarInt;
 use crate::world::chunk::{BlockState, Chunk, CHUNK_WIDTH, SECTIONS_PER_CHUNK, SECTION_HEIGHT};
 
@@ -170,7 +171,7 @@ pub fn encode_chunk_data(chunk: &Chunk) -> io::Result<Packet> {
     // Light data
     write_light_data(&mut data)?;
 
-    Ok(Packet::new(0x2D, data))
+    Ok(Packet::new(LEVEL_CHUNK_WITH_LIGHT, data))
 }
 
 fn write_light_data(writer: &mut impl Write) -> io::Result<()> {
