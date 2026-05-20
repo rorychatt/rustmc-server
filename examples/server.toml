@@ -17,6 +17,12 @@ spawn_z = 0
 [plugins]
 directory = "plugins"
 
+[rate_limit]
+# Number of invalid packets before disconnecting a client
+invalid_packet_threshold = 16
+# Time window (seconds) for counting invalid packets
+invalid_packet_window_secs = 10
+
 [performance]
 # Number of Tokio worker threads (0 = auto-detect based on CPU cores)
 worker_threads = 0
