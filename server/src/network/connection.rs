@@ -27,8 +27,7 @@ use crate::world::chunk::ChunkPos;
 use crate::world::World;
 use uuid::Uuid;
 
-const INVALID_PACKET_THRESHOLD: u32 = 16;
-const INVALID_PACKET_WINDOW: Duration = Duration::from_secs(10);
+use crate::server_config::RateLimitSection;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionState {
@@ -59,6 +58,8 @@ pub struct Connection {
 
     broadcast_tx: broadcast::Sender<BroadcastEvent>,
 
+    invalid_packet_threshold: u32,
+    invalid_packet_window: Duration,
     invalid_packet_count: u32,
     invalid_packet_window_start: Option<Instant>,
 }
@@ -69,6 +70,7 @@ impl Connection {
         world: Arc<RwLock<World>>,
         operators: Arc<RwLock<Operators>>,
         broadcast_tx: broadcast::Sender<BroadcastEvent>,
+        rate_limit: &RateLimitSection,
     ) -> Self {
         Self {
             addr,
@@ -90,6 +92,8 @@ impl Connection {
 
             broadcast_tx,
 
+            invalid_packet_threshold: rate_limit.invalid_packet_threshold,
+            invalid_packet_window: Duration::from_secs(rate_limit.invalid_packet_window_secs),
             invalid_packet_count: 0,
             invalid_packet_window_start: None,
         }
@@ -98,7 +102,7 @@ impl Connection {
     fn record_invalid_packet(&mut self) -> bool {
         let now = Instant::now();
         match self.invalid_packet_window_start {
-            Some(start) if now.duration_since(start) < INVALID_PACKET_WINDOW => {
+            Some(start) if now.duration_since(start) < self.invalid_packet_window => {
                 self.invalid_packet_count += 1;
             }
             _ => {
@@ -106,7 +110,7 @@ impl Connection {
                 self.invalid_packet_count = 1;
             }
         }
-        self.invalid_packet_count >= INVALID_PACKET_THRESHOLD
+        self.invalid_packet_count >= self.invalid_packet_threshold
     }
 
     pub fn get_cookie(&self, key: &str) -> Option<&Vec<u8>> {
@@ -1173,12 +1177,22 @@ impl Connection {
 mod tests {
     use super::*;
 
+    const TEST_THRESHOLD: u32 = 16;
+    const TEST_WINDOW_SECS: u64 = 10;
+
+    fn test_rate_limit() -> RateLimitSection {
+        RateLimitSection {
+            invalid_packet_threshold: TEST_THRESHOLD,
+            invalid_packet_window_secs: TEST_WINDOW_SECS,
+        }
+    }
+
     fn make_connection() -> Connection {
         let world = Arc::new(RwLock::new(World::new()));
         let operators = Arc::new(RwLock::new(Operators::empty()));
         let addr: SocketAddr = "127.0.0.1:25565".parse().unwrap();
         let (broadcast_tx, _broadcast_rx) = broadcast::channel(16);
-        Connection::new(addr, world, operators, broadcast_tx)
+        Connection::new(addr, world, operators, broadcast_tx, &test_rate_limit())
     }
 
     #[test]
@@ -1223,7 +1237,6 @@ mod tests {
         let mut conn = make_connection();
         conn.set_cookie("minecraft:transfer".to_string(), vec![5, 6, 7]);
 
-        // Simulate what the handler does when payload is None
         let payload: Option<Vec<u8>> = None;
         let key = "minecraft:transfer".to_string();
         if let Some(p) = payload {
@@ -1238,7 +1251,7 @@ mod tests {
     #[test]
     fn test_record_invalid_packet_below_threshold() {
         let mut conn = make_connection();
-        for _ in 0..(INVALID_PACKET_THRESHOLD - 1) {
+        for _ in 0..(TEST_THRESHOLD - 1) {
             assert!(!conn.record_invalid_packet());
         }
     }
@@ -1246,7 +1259,7 @@ mod tests {
     #[test]
     fn test_record_invalid_packet_exceeds_threshold() {
         let mut conn = make_connection();
-        for _ in 0..(INVALID_PACKET_THRESHOLD - 1) {
+        for _ in 0..(TEST_THRESHOLD - 1) {
             assert!(!conn.record_invalid_packet());
         }
         assert!(conn.record_invalid_packet());
@@ -1255,13 +1268,11 @@ mod tests {
     #[test]
     fn test_record_invalid_packet_window_reset() {
         let mut conn = make_connection();
-        for _ in 0..(INVALID_PACKET_THRESHOLD - 1) {
+        for _ in 0..(TEST_THRESHOLD - 1) {
             conn.record_invalid_packet();
         }
-        // Simulate window expiry by backdating the start
         conn.invalid_packet_window_start =
-            Some(Instant::now() - INVALID_PACKET_WINDOW - Duration::from_secs(1));
-        // After window reset, counter restarts at 1
+            Some(Instant::now() - Duration::from_secs(TEST_WINDOW_SECS) - Duration::from_secs(1));
         assert!(!conn.record_invalid_packet());
         assert_eq!(conn.invalid_packet_count, 1);
     }

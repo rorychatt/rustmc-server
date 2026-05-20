@@ -1,4 +1,5 @@
 use rustmc_server::network;
+use rustmc_server::server_config::ServerConfig;
 
 use tracing_subscriber::EnvFilter;
 
@@ -10,7 +11,9 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("Starting RustMC Server v{}", env!("CARGO_PKG_VERSION"));
 
-    let addr = std::env::var("RUSTMC_BIND").unwrap_or_else(|_| "0.0.0.0:25565".to_string());
+    let config = ServerConfig::load();
+
+    let addr = std::env::var("RUSTMC_BIND").unwrap_or_else(|_| config.server.bind.clone());
 
     let mut bridge = plugin_bridge::PluginBridge::new();
     let plugins_dir = std::env::var("RUSTMC_PLUGINS").unwrap_or_else(|_| "plugins".to_string());
@@ -19,6 +22,6 @@ async fn main() -> anyhow::Result<()> {
         Err(e) => tracing::warn!("Plugin loading failed: {e}"),
     }
 
-    let server = network::Server::new(addr);
+    let server = network::Server::new(addr, config);
     server.run().await
 }
