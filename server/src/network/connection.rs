@@ -27,7 +27,7 @@ use crate::world::chunk::ChunkPos;
 use crate::world::World;
 use uuid::Uuid;
 
-use crate::server_config::RateLimitSection;
+use crate::server_config::{NetworkSection, RateLimitSection, TransferSection};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionState {
@@ -62,6 +62,9 @@ pub struct Connection {
     invalid_packet_window: Duration,
     invalid_packet_count: u32,
     invalid_packet_window_start: Option<Instant>,
+
+    non_play_timeout: Duration,
+    transfer_secret: Option<String>,
 }
 
 impl Connection {
@@ -71,6 +74,8 @@ impl Connection {
         operators: Arc<RwLock<Operators>>,
         broadcast_tx: broadcast::Sender<BroadcastEvent>,
         rate_limit: &RateLimitSection,
+        network: &NetworkSection,
+        transfer: &TransferSection,
     ) -> Self {
         Self {
             addr,
@@ -96,6 +101,16 @@ impl Connection {
             invalid_packet_window: Duration::from_secs(rate_limit.invalid_packet_window_secs),
             invalid_packet_count: 0,
             invalid_packet_window_start: None,
+
+            non_play_timeout: Duration::from_secs(
+                std::env::var("RUSTMC_NON_PLAY_TIMEOUT")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(network.non_play_timeout_secs),
+            ),
+            transfer_secret: std::env::var("RUSTMC_TRANSFER_SECRET")
+                .ok()
+                .or_else(|| transfer.secret.clone()),
         }
     }
 
@@ -155,12 +170,7 @@ impl Connection {
 
         let keep_alive_interval = Duration::from_secs(15);
         let keep_alive_timeout = Duration::from_secs(30);
-        let non_play_timeout = Duration::from_secs(
-            std::env::var("RUSTMC_NON_PLAY_TIMEOUT")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(30),
-        );
+        let non_play_timeout = self.non_play_timeout;
 
         loop {
             if self.state == ConnectionState::Play {
@@ -602,7 +612,7 @@ impl Connection {
         self.write_packet(writer, &login_play).await?;
 
         // Request transfer token cookie if secret is configured
-        if std::env::var("RUSTMC_TRANSFER_SECRET").is_ok() {
+        if self.transfer_secret.is_some() {
             let cookie_request = play::encode_play_cookie_request("rustmc:transfer_token")?;
             self.write_packet(writer, &cookie_request).await?;
         }
@@ -774,7 +784,7 @@ impl Connection {
                         let parts: Vec<&str> = command.command.splitn(3, ' ').collect();
                         if parts.len() == 3 {
                             if let Ok(port) = parts[2].parse::<i32>() {
-                                if let Ok(secret) = std::env::var("RUSTMC_TRANSFER_SECRET") {
+                                if let Some(ref secret) = self.transfer_secret {
                                     if let (Some(uuid), Some(name)) =
                                         (self.player_uuid, self.player_name.as_ref())
                                     {
@@ -945,7 +955,7 @@ impl Connection {
                 debug!("Received play cookie response: key={}", response.key);
                 if response.key == "rustmc:transfer_token" {
                     if let Some(ref payload) = response.payload {
-                        if let Ok(secret) = std::env::var("RUSTMC_TRANSFER_SECRET") {
+                        if let Some(ref secret) = self.transfer_secret {
                             if let Some(token) =
                                 transfer_token::validate_token(secret.as_bytes(), payload)
                             {
@@ -1192,7 +1202,15 @@ mod tests {
         let operators = Arc::new(RwLock::new(Operators::empty()));
         let addr: SocketAddr = "127.0.0.1:25565".parse().unwrap();
         let (broadcast_tx, _broadcast_rx) = broadcast::channel(16);
-        Connection::new(addr, world, operators, broadcast_tx, &test_rate_limit())
+        Connection::new(
+            addr,
+            world,
+            operators,
+            broadcast_tx,
+            &test_rate_limit(),
+            &NetworkSection::default(),
+            &TransferSection::default(),
+        )
     }
 
     #[test]

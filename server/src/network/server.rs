@@ -57,9 +57,18 @@ impl Server {
                     let broadcast_tx = self.broadcast_tx.clone();
                     let broadcast_rx = self.broadcast_tx.subscribe();
                     let rate_limit = self.config.rate_limit.clone();
+                    let network = self.config.network.clone();
+                    let transfer = self.config.transfer.clone();
                     tokio::spawn(async move {
-                        let connection =
-                            Connection::new(addr, world, operators, broadcast_tx, &rate_limit);
+                        let connection = Connection::new(
+                            addr,
+                            world,
+                            operators,
+                            broadcast_tx,
+                            &rate_limit,
+                            &network,
+                            &transfer,
+                        );
                         connection.handle(stream, broadcast_rx).await;
                     });
                 }
