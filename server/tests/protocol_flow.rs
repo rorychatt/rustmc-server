@@ -577,8 +577,8 @@ async fn test_chunk_throttling_via_batch_received() {
 
             // Acknowledge this batch to trigger the next drain
             client.send_chunk_batch_received(3.0).await.unwrap();
-        } else if packet.id == 0x25 {
-            // Unload Chunk packets may arrive before the batch start
+        } else if packet.id == 0x25 || packet.id == 0x2C {
+            // Unload Chunk or Keep-Alive packets may arrive between batches
             continue;
         } else if packet.id == 0x58 {
             continue;
@@ -626,7 +626,11 @@ async fn test_client_tick_end_drains_chunks() {
         if packet.id == 0x0B {
             break;
         }
-        assert_eq!(packet.id, 0x2D, "Expected chunk data or batch finished");
+        assert!(
+            packet.id == 0x2D || packet.id == 0x58 || packet.id == 0x2C,
+            "Expected chunk data, batch finished, or skippable packet, got {:#04x}",
+            packet.id
+        );
     }
 
     // Acknowledge the initial batch so the server knows we're ready
@@ -656,8 +660,7 @@ async fn test_client_tick_end_drains_chunks() {
                 .expect("Failed to read position response packet");
 
         match packet.id {
-            0x25 | 0x58 => {} // Unload chunk or Set Center Chunk - skip
-            0x2C => {} // Keep Alive - skip
+            0x25 | 0x58 | 0x2C => {} // Unload chunk, Set Center Chunk, or Keep-Alive - skip
             0x0C => {} // Chunk Batch Start
             0x2D => position_chunks += 1,
             0x0B => {
