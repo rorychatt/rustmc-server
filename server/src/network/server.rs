@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, RwLock};
 use tracing::{error, info};
@@ -11,7 +12,7 @@ use crate::world::World;
 
 pub struct Server {
     addr: String,
-    config: ServerConfig,
+    config: Arc<RwLock<ServerConfig>>,
     world: Arc<RwLock<World>>,
     operators: Arc<RwLock<Operators>>,
     broadcast_tx: broadcast::Sender<BroadcastEvent>,
@@ -22,7 +23,7 @@ impl Server {
         let (broadcast_tx, _) = broadcast::channel(256);
         Self {
             addr,
-            config,
+            config: Arc::new(RwLock::new(config)),
             world: Arc::new(RwLock::new(World::new())),
             operators: Arc::new(RwLock::new(Operators::load())),
             broadcast_tx,
@@ -49,6 +50,11 @@ impl Server {
             Self::ops_reload_loop(ops_watch, ops_world).await;
         });
 
+        let config_watch = self.config.clone();
+        tokio::spawn(async move {
+            Self::config_reload_loop(config_watch).await;
+        });
+
         loop {
             match listener.accept().await {
                 Ok((stream, addr)) => {
@@ -56,7 +62,10 @@ impl Server {
                     let operators = self.operators.clone();
                     let broadcast_tx = self.broadcast_tx.clone();
                     let broadcast_rx = self.broadcast_tx.subscribe();
-                    let rate_limit = self.config.rate_limit.clone();
+                    let rate_limit = {
+                        let cfg = self.config.read().await;
+                        cfg.rate_limit.clone()
+                    };
                     tokio::spawn(async move {
                         let connection =
                             Connection::new(addr, world, operators, broadcast_tx, &rate_limit);
@@ -71,7 +80,7 @@ impl Server {
     }
 
     async fn world_tick_loop(world: Arc<RwLock<World>>) {
-        let mut interval = tokio::time::interval(std::time::Duration::from_millis(50)); // 20 TPS
+        let mut interval = tokio::time::interval(Duration::from_millis(50)); // 20 TPS
         loop {
             interval.tick().await;
             let mut world = world.write().await;
@@ -80,7 +89,7 @@ impl Server {
     }
 
     async fn ops_reload_loop(operators: Arc<RwLock<Operators>>, world: Arc<RwLock<World>>) {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+        let mut interval = tokio::time::interval(Duration::from_secs(5));
         loop {
             interval.tick().await;
             let changed = {
@@ -94,6 +103,21 @@ impl Server {
                 for (uuid, player) in world.players.iter_mut() {
                     player.op_level = ops.get_op_level(uuid);
                 }
+            }
+        }
+    }
+
+    async fn config_reload_loop(config: Arc<RwLock<ServerConfig>>) {
+        let mut interval = tokio::time::interval(Duration::from_secs(5));
+        loop {
+            interval.tick().await;
+            let changed = {
+                let cfg = config.read().await;
+                cfg.has_file_changed()
+            };
+            if changed {
+                let mut cfg = config.write().await;
+                cfg.reload();
             }
         }
     }
