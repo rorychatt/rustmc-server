@@ -98,6 +98,23 @@ impl Connection {
         self.cookies.remove(key)
     }
 
+    async fn is_source_in_range(&self, source_chunk_x: i32, source_chunk_z: i32) -> bool {
+        if let Some(ref my_uuid) = self.player_uuid {
+            let world = self.world.read().await;
+            if let Some(me) = world.players.get(my_uuid) {
+                let my_chunk_x = me.x as i32 >> 4;
+                let my_chunk_z = me.z as i32 >> 4;
+                return is_within_render_distance(
+                    source_chunk_x,
+                    source_chunk_z,
+                    my_chunk_x,
+                    my_chunk_z,
+                );
+            }
+        }
+        false
+    }
+
     pub async fn handle(
         mut self,
         stream: TcpStream,
@@ -152,48 +169,20 @@ impl Connection {
                     event = broadcast_rx.recv() => {
                         match event {
                             Ok(BroadcastEvent::EntityAnimation { exclude_uuid, entity_id, animation, source_chunk_x, source_chunk_z }) => {
-                                if self.player_uuid != Some(exclude_uuid) {
-                                    let in_range = if let Some(ref my_uuid) = self.player_uuid {
-                                        let world = self.world.read().await;
-                                        if let Some(me) = world.players.get(my_uuid) {
-                                            let my_chunk_x = me.x as i32 >> 4;
-                                            let my_chunk_z = me.z as i32 >> 4;
-                                            is_within_render_distance(source_chunk_x, source_chunk_z, my_chunk_x, my_chunk_z)
-                                        } else {
-                                            false
-                                        }
-                                    } else {
-                                        false
-                                    };
-                                    if in_range {
-                                        let packet = play::encode_entity_animation(entity_id, animation);
-                                        if let Err(e) = self.write_packet(&mut writer, &packet).await {
-                                            error!("Failed to send entity animation to {}: {}", self.addr, e);
-                                            break;
-                                        }
+                                if self.player_uuid != Some(exclude_uuid) && self.is_source_in_range(source_chunk_x, source_chunk_z).await {
+                                    let packet = play::encode_entity_animation(entity_id, animation);
+                                    if let Err(e) = self.write_packet(&mut writer, &packet).await {
+                                        error!("Failed to send entity animation to {}: {}", self.addr, e);
+                                        break;
                                     }
                                 }
                             }
                             Ok(BroadcastEvent::EntityMetadata { exclude_uuid, entity_id, metadata_bytes, source_chunk_x, source_chunk_z }) => {
-                                if self.player_uuid != Some(exclude_uuid) {
-                                    let in_range = if let Some(ref my_uuid) = self.player_uuid {
-                                        let world = self.world.read().await;
-                                        if let Some(me) = world.players.get(my_uuid) {
-                                            let my_chunk_x = me.x as i32 >> 4;
-                                            let my_chunk_z = me.z as i32 >> 4;
-                                            is_within_render_distance(source_chunk_x, source_chunk_z, my_chunk_x, my_chunk_z)
-                                        } else {
-                                            false
-                                        }
-                                    } else {
-                                        false
-                                    };
-                                    if in_range {
-                                        let packet = play::encode_set_entity_metadata(entity_id, &metadata_bytes);
-                                        if let Err(e) = self.write_packet(&mut writer, &packet).await {
-                                            error!("Failed to send entity metadata to {}: {}", self.addr, e);
-                                            break;
-                                        }
+                                if self.player_uuid != Some(exclude_uuid) && self.is_source_in_range(source_chunk_x, source_chunk_z).await {
+                                    let packet = play::encode_set_entity_metadata(entity_id, &metadata_bytes);
+                                    if let Err(e) = self.write_packet(&mut writer, &packet).await {
+                                        error!("Failed to send entity metadata to {}: {}", self.addr, e);
+                                        break;
                                     }
                                 }
                             }
