@@ -47,6 +47,7 @@ pub struct Connection {
     player_name: Option<String>,
     compression_enabled: bool,
     protocol_version: i32,
+    view_distance: i32,
 
     configuration_finish_sent: bool,
     last_keep_alive_sent: Option<Instant>,
@@ -71,6 +72,7 @@ impl Connection {
         operators: Arc<RwLock<Operators>>,
         broadcast_tx: broadcast::Sender<BroadcastEvent>,
         rate_limit: &RateLimitSection,
+        view_distance: i32,
     ) -> Self {
         Self {
             addr,
@@ -81,6 +83,7 @@ impl Connection {
             player_name: None,
             compression_enabled: false,
             protocol_version: 0,
+            view_distance,
 
             configuration_finish_sent: false,
             last_keep_alive_sent: None,
@@ -136,6 +139,7 @@ impl Connection {
                     source_chunk_z,
                     my_chunk_x,
                     my_chunk_z,
+                    self.view_distance,
                 );
             }
         }
@@ -594,11 +598,11 @@ impl Connection {
 
         let entity_id = {
             let mut world = self.world.write().await;
-            world.add_player_with_op_level(uuid, name.clone(), op_level)
+            world.add_player_with_op_level(uuid, name.clone(), op_level, self.view_distance)
         };
 
         // 1. Login (Play) packet
-        let login_play = play::encode_login_play(entity_id)?;
+        let login_play = play::encode_login_play(entity_id, self.view_distance)?;
         self.write_packet(writer, &login_play).await?;
 
         // Request transfer token cookie if secret is configured
@@ -630,7 +634,7 @@ impl Connection {
         self.write_packet(writer, &batch_start).await?;
 
         // 7. Send initial chunks around spawn
-        let view_distance = 8;
+        let view_distance = self.view_distance;
 
         let mut initial_chunks = std::collections::HashSet::new();
         let mut chunk_count = 0;
@@ -705,7 +709,7 @@ impl Connection {
         uuid: &Uuid,
     ) -> std::io::Result<()> {
         let mut world = self.world.write().await;
-        let view_distance = 8;
+        let view_distance = self.view_distance;
         if let Some(update) = world.compute_chunk_updates(uuid, view_distance) {
             if !update.to_load.is_empty() || !update.to_unload.is_empty() {
                 if let Some(player) = world.players.get(uuid) {
@@ -1192,7 +1196,7 @@ mod tests {
         let operators = Arc::new(RwLock::new(Operators::empty()));
         let addr: SocketAddr = "127.0.0.1:25565".parse().unwrap();
         let (broadcast_tx, _broadcast_rx) = broadcast::channel(16);
-        Connection::new(addr, world, operators, broadcast_tx, &test_rate_limit())
+        Connection::new(addr, world, operators, broadcast_tx, &test_rate_limit(), 8)
     }
 
     #[test]

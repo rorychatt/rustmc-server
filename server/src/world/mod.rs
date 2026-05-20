@@ -22,6 +22,7 @@ pub struct Player {
     pub loaded_chunks: HashSet<ChunkPos>,
     pub chunks_per_tick: f32,
     pub op_level: u8,
+    pub view_distance: i32,
 }
 
 pub struct World {
@@ -43,11 +44,11 @@ impl World {
         world
     }
 
-    pub fn add_player(&mut self, uuid: Uuid, name: String) -> i32 {
-        self.add_player_with_op_level(uuid, name, 0)
+    pub fn add_player(&mut self, uuid: Uuid, name: String, view_distance: i32) -> i32 {
+        self.add_player_with_op_level(uuid, name, 0, view_distance)
     }
 
-    pub fn add_player_with_op_level(&mut self, uuid: Uuid, name: String, op_level: u8) -> i32 {
+    pub fn add_player_with_op_level(&mut self, uuid: Uuid, name: String, op_level: u8, view_distance: i32) -> i32 {
         let entity_id = self.next_entity_id;
         self.next_entity_id += 1;
         self.players.insert(
@@ -68,6 +69,7 @@ impl World {
                 loaded_chunks: HashSet::new(),
                 chunks_per_tick: 25.0,
                 op_level,
+                view_distance,
             },
         );
         entity_id
@@ -190,7 +192,7 @@ mod tests {
     fn test_world_add_remove_player() {
         let mut world = World::new();
         let uuid = Uuid::new_v4();
-        let eid = world.add_player(uuid, "Test".to_string());
+        let eid = world.add_player(uuid, "Test".to_string(), 8);
         assert_eq!(world.player_count(), 1);
         assert!(eid > 0);
 
@@ -217,7 +219,7 @@ mod tests {
     fn test_update_player_position() {
         let mut world = World::new();
         let uuid = Uuid::new_v4();
-        world.add_player(uuid, "Test".to_string());
+        world.add_player(uuid, "Test".to_string(), 8);
 
         world.update_player_position(&uuid, 100.0, 65.0, 200.0);
 
@@ -231,7 +233,7 @@ mod tests {
     fn test_compute_chunk_updates_initial() {
         let mut world = World::new();
         let uuid = Uuid::new_v4();
-        world.add_player(uuid, "Test".to_string());
+        world.add_player(uuid, "Test".to_string(), 8);
 
         let update = world.compute_chunk_updates(&uuid, 2).unwrap();
         // View distance 2 means 5x5 grid = 25 chunks
@@ -243,7 +245,7 @@ mod tests {
     fn test_compute_chunk_updates_move_one_chunk() {
         let mut world = World::new();
         let uuid = Uuid::new_v4();
-        world.add_player(uuid, "Test".to_string());
+        world.add_player(uuid, "Test".to_string(), 8);
 
         // Initial load at (0, 0)
         world.compute_chunk_updates(&uuid, 2);
@@ -261,7 +263,7 @@ mod tests {
     fn test_compute_chunk_updates_no_move() {
         let mut world = World::new();
         let uuid = Uuid::new_v4();
-        world.add_player(uuid, "Test".to_string());
+        world.add_player(uuid, "Test".to_string(), 8);
 
         // Initial load
         world.compute_chunk_updates(&uuid, 2);
@@ -277,7 +279,7 @@ mod tests {
     fn test_player_chunks_per_tick_default() {
         let mut world = World::new();
         let uuid = Uuid::new_v4();
-        world.add_player(uuid, "Test".to_string());
+        world.add_player(uuid, "Test".to_string(), 8);
 
         let player = world.players.get(&uuid).unwrap();
         assert_eq!(player.chunks_per_tick, 25.0);
@@ -287,7 +289,7 @@ mod tests {
     fn test_player_chunks_per_tick_update() {
         let mut world = World::new();
         let uuid = Uuid::new_v4();
-        world.add_player(uuid, "Test".to_string());
+        world.add_player(uuid, "Test".to_string(), 8);
 
         let player = world.players.get_mut(&uuid).unwrap();
         player.chunks_per_tick = 10.0;
@@ -298,7 +300,7 @@ mod tests {
     fn test_player_chunks_per_tick_clamping() {
         let mut world = World::new();
         let uuid = Uuid::new_v4();
-        world.add_player(uuid, "Test".to_string());
+        world.add_player(uuid, "Test".to_string(), 8);
 
         let player = world.players.get_mut(&uuid).unwrap();
 
@@ -323,7 +325,7 @@ mod tests {
     fn test_player_op_level_default() {
         let mut world = World::new();
         let uuid = Uuid::new_v4();
-        world.add_player(uuid, "Test".to_string());
+        world.add_player(uuid, "Test".to_string(), 8);
 
         let player = world.players.get(&uuid).unwrap();
         assert_eq!(player.op_level, 0);
@@ -333,7 +335,7 @@ mod tests {
     fn test_player_op_level_with_value() {
         let mut world = World::new();
         let uuid = Uuid::new_v4();
-        world.add_player_with_op_level(uuid, "OpPlayer".to_string(), 4);
+        world.add_player_with_op_level(uuid, "OpPlayer".to_string(), 4, 8);
 
         let player = world.players.get(&uuid).unwrap();
         assert_eq!(player.op_level, 4);
@@ -343,7 +345,7 @@ mod tests {
     fn test_update_player_rotation() {
         let mut world = World::new();
         let uuid = Uuid::new_v4();
-        world.add_player(uuid, "Test".to_string());
+        world.add_player(uuid, "Test".to_string(), 8);
 
         world.update_player_rotation(&uuid, 90.0, -45.0);
 
