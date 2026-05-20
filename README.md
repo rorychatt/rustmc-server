@@ -32,6 +32,33 @@ cargo run -p rustmc-server
 
 The server binds to `0.0.0.0:25565` by default.
 
+## Configuration
+
+The server can be configured using a `server.yaml` (or `server.toml`) file. You can specify the configuration file path by setting the `RUSTMC_CONFIG` environment variable. If not set, the server will search for `server.yaml` (or `server.toml`) in the working directory, falling back to default values if not found.
+
+Example `server.yaml`:
+
+```yaml
+server:
+  bind: "0.0.0.0:25565"
+  view_distance: 8
+
+rate_limit:
+  invalid_packet_threshold: 16
+  invalid_packet_window_secs: 10
+
+gameplay:
+  motd: "RustMC Server - A Rust-powered Minecraft server"
+  max_players: 20
+  gamemode: "creative"        # Options: survival, creative, adventure, spectator
+  difficulty: "normal"        # Options: peaceful, easy, normal, hard
+  pvp: true
+  allow_flight: false
+  hardcore: false
+  simulation_distance: 8
+  sea_level: 63
+```
+
 ## Testing
 
 ```bash

@@ -136,28 +136,36 @@ pub fn encode_game_event(event: u8, value: f32) -> Packet {
     Packet::new(ids::GAME_EVENT, data)
 }
 
-pub fn encode_login_play(entity_id: i32, view_distance: i32) -> io::Result<Packet> {
+pub fn encode_login_play(
+    entity_id: i32,
+    view_distance: i32,
+    simulation_distance: i32,
+    max_players: i32,
+    hardcore: bool,
+    game_mode: i32,
+    sea_level: i32,
+) -> io::Result<Packet> {
     let mut data = Vec::new();
     data.extend_from_slice(&entity_id.to_be_bytes()); // Entity ID
-    data.push(0); // Is hardcore: false
+    data.push(if hardcore { 1 } else { 0 }); // Is hardcore
     VarInt(1).write(&mut data)?; // Dimension count
     write_string(&mut data, "minecraft:overworld")?; // Dimension name
-    VarInt(20).write(&mut data)?; // Max players
+    VarInt(max_players).write(&mut data)?; // Max players
     VarInt(view_distance).write(&mut data)?; // View distance
-    VarInt(view_distance).write(&mut data)?; // Simulation distance
+    VarInt(simulation_distance).write(&mut data)?; // Simulation distance
     data.push(0); // Reduced debug info
     data.push(1); // Enable respawn screen
     data.push(0); // Do limited crafting
     VarInt(0).write(&mut data)?; // Dimension Type (VarInt registry ID, 0 = overworld)
     write_string(&mut data, "minecraft:overworld")?; // Dimension name
     data.extend_from_slice(&0i64.to_be_bytes()); // Hashed seed
-    data.push(1); // Game mode: creative
+    data.push(game_mode as u8); // Game mode
     data.push(0xFF); // Previous game mode: -1
     data.push(0); // Is debug: false
     data.push(1); // Is flat: true
     data.push(0); // Has death location
     VarInt(0).write(&mut data)?; // Portal cooldown
-    VarInt(63).write(&mut data)?; // Sea Level
+    VarInt(sea_level).write(&mut data)?; // Sea Level
     data.push(0); // Enforces Secure Chat: false
     Ok(Packet::new(ids::LOGIN_PLAY, data))
 }
@@ -472,7 +480,7 @@ mod tests {
 
     #[test]
     fn test_login_play_protocol_775() {
-        let packet = encode_login_play(1, 8).unwrap();
+        let packet = encode_login_play(1, 8, 8, 20, false, 1, 63).unwrap();
         assert_eq!(packet.id, ids::LOGIN_PLAY);
         assert!(!packet.data.is_empty());
     }

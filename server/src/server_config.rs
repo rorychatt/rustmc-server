@@ -8,6 +8,8 @@ pub struct ServerConfig {
     pub server: ServerSection,
     #[serde(default)]
     pub rate_limit: RateLimitSection,
+    #[serde(default)]
+    pub gameplay: GameplaySection,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -26,6 +28,28 @@ pub struct RateLimitSection {
     pub invalid_packet_window_secs: u64,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct GameplaySection {
+    #[serde(default = "default_motd")]
+    pub motd: String,
+    #[serde(default = "default_max_players")]
+    pub max_players: i32,
+    #[serde(default = "default_gamemode")]
+    pub gamemode: String,
+    #[serde(default = "default_difficulty")]
+    pub difficulty: String,
+    #[serde(default = "default_pvp")]
+    pub pvp: bool,
+    #[serde(default = "default_allow_flight")]
+    pub allow_flight: bool,
+    #[serde(default = "default_hardcore")]
+    pub hardcore: bool,
+    #[serde(default = "default_simulation_distance")]
+    pub simulation_distance: i32,
+    #[serde(default = "default_sea_level")]
+    pub sea_level: i32,
+}
+
 fn default_bind() -> String {
     "0.0.0.0:25565".to_string()
 }
@@ -42,6 +66,42 @@ fn default_invalid_packet_window_secs() -> u64 {
     10
 }
 
+fn default_motd() -> String {
+    "RustMC Server - A Rust-powered Minecraft server".to_string()
+}
+
+fn default_max_players() -> i32 {
+    20
+}
+
+fn default_gamemode() -> String {
+    "creative".to_string()
+}
+
+fn default_difficulty() -> String {
+    "normal".to_string()
+}
+
+fn default_pvp() -> bool {
+    true
+}
+
+fn default_allow_flight() -> bool {
+    false
+}
+
+fn default_hardcore() -> bool {
+    false
+}
+
+fn default_simulation_distance() -> i32 {
+    8
+}
+
+fn default_sea_level() -> i32 {
+    63
+}
+
 impl Default for ServerSection {
     fn default() -> Self {
         Self {
@@ -56,6 +116,44 @@ impl Default for RateLimitSection {
         Self {
             invalid_packet_threshold: default_invalid_packet_threshold(),
             invalid_packet_window_secs: default_invalid_packet_window_secs(),
+        }
+    }
+}
+
+impl Default for GameplaySection {
+    fn default() -> Self {
+        Self {
+            motd: default_motd(),
+            max_players: default_max_players(),
+            gamemode: default_gamemode(),
+            difficulty: default_difficulty(),
+            pvp: default_pvp(),
+            allow_flight: default_allow_flight(),
+            hardcore: default_hardcore(),
+            simulation_distance: default_simulation_distance(),
+            sea_level: default_sea_level(),
+        }
+    }
+}
+
+impl GameplaySection {
+    pub fn gamemode_id(&self) -> i32 {
+        match self.gamemode.to_lowercase().as_str() {
+            "survival" => 0,
+            "creative" => 1,
+            "adventure" => 2,
+            "spectator" => 3,
+            _ => 1, // Default to creative
+        }
+    }
+
+    pub fn difficulty_id(&self) -> i32 {
+        match self.difficulty.to_lowercase().as_str() {
+            "peaceful" => 0,
+            "easy" => 1,
+            "normal" => 2,
+            "hard" => 3,
+            _ => 2, // Default to normal
         }
     }
 }
@@ -188,11 +286,32 @@ server:
 rate_limit:
   invalid_packet_threshold: 40
   invalid_packet_window_secs: 15
+gameplay:
+  motd: "Custom MOTD"
+  max_players: 50
+  gamemode: "survival"
+  difficulty: "hard"
+  pvp: false
+  allow_flight: true
+  hardcore: true
+  simulation_distance: 6
+  sea_level: 60
 "#;
         let config: ServerConfig = serde_yaml::from_str(yaml_str).unwrap();
         assert_eq!(config.server.bind, "127.0.0.1:25569");
         assert_eq!(config.server.view_distance, 12);
         assert_eq!(config.rate_limit.invalid_packet_threshold, 40);
         assert_eq!(config.rate_limit.invalid_packet_window_secs, 15);
+        assert_eq!(config.gameplay.motd, "Custom MOTD");
+        assert_eq!(config.gameplay.max_players, 50);
+        assert_eq!(config.gameplay.gamemode, "survival");
+        assert_eq!(config.gameplay.gamemode_id(), 0);
+        assert_eq!(config.gameplay.difficulty, "hard");
+        assert_eq!(config.gameplay.difficulty_id(), 3);
+        assert!(!config.gameplay.pvp);
+        assert!(config.gameplay.allow_flight);
+        assert!(config.gameplay.hardcore);
+        assert_eq!(config.gameplay.simulation_distance, 6);
+        assert_eq!(config.gameplay.sea_level, 60);
     }
 }
