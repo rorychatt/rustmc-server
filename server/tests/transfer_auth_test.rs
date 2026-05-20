@@ -3,23 +3,36 @@ mod common;
 use common::{TestClient, TestServer};
 use uuid::Uuid;
 
+const OP_UUID: &str = "069a79f4-44e9-4726-a5be-fca90e38aaf5";
+
+fn ops_config(uuid: &str) -> String {
+    format!("[[operators]]\nuuid = \"{uuid}\"\nname = \"TestOp\"\nlevel = 4\n")
+}
+
 #[tokio::test]
 async fn test_transfer_sends_cookie_token() {
-    let server_a =
-        TestServer::spawn_with_env(&[("RUSTMC_TRANSFER_SECRET", "integration-test-secret")])
-            .await
-            .expect("Failed to spawn server A");
+    let op_uuid = Uuid::parse_str(OP_UUID).unwrap();
+    let ops = ops_config(OP_UUID);
 
-    let server_b =
-        TestServer::spawn_with_env(&[("RUSTMC_TRANSFER_SECRET", "integration-test-secret")])
-            .await
-            .expect("Failed to spawn server B");
+    let server_a = TestServer::spawn_with_env_and_ops_config(
+        &[("RUSTMC_TRANSFER_SECRET", "integration-test-secret")],
+        Some(&ops),
+    )
+    .await
+    .expect("Failed to spawn server A");
+
+    let server_b = TestServer::spawn_with_env_and_ops_config(
+        &[("RUSTMC_TRANSFER_SECRET", "integration-test-secret")],
+        Some(&ops),
+    )
+    .await
+    .expect("Failed to spawn server B");
 
     let mut client = TestClient::connect(server_a.port())
         .await
         .expect("Failed to connect to server A");
 
-    complete_login_flow(&mut client).await;
+    complete_login_flow_with_uuid(&mut client, op_uuid).await;
     drain_initial_play_packets(&mut client).await;
 
     let target_host = "127.0.0.1";
@@ -48,10 +61,9 @@ async fn test_transfer_sends_cookie_token() {
 
 #[tokio::test]
 async fn test_target_server_requests_transfer_cookie() {
-    let server =
-        TestServer::spawn_with_env(&[("RUSTMC_TRANSFER_SECRET", "integration-test-secret")])
-            .await
-            .expect("Failed to spawn server");
+    let server = TestServer::spawn_with_env(&[("RUSTMC_TRANSFER_SECRET", "integration-test-secret")])
+        .await
+        .expect("Failed to spawn server");
 
     let mut client = TestClient::connect(server.port())
         .await
@@ -62,14 +74,21 @@ async fn test_target_server_requests_transfer_cookie() {
 
 #[tokio::test]
 async fn test_transfer_without_secret_skips_token() {
-    let server_a = TestServer::spawn().await.expect("Failed to spawn server A");
-    let server_b = TestServer::spawn().await.expect("Failed to spawn server B");
+    let op_uuid = Uuid::parse_str(OP_UUID).unwrap();
+    let ops = ops_config(OP_UUID);
+
+    let server_a = TestServer::spawn_with_ops(Some(&ops))
+        .await
+        .expect("Failed to spawn server A");
+    let server_b = TestServer::spawn_with_ops(Some(&ops))
+        .await
+        .expect("Failed to spawn server B");
 
     let mut client = TestClient::connect(server_a.port())
         .await
         .expect("Failed to connect to server A");
 
-    complete_login_flow(&mut client).await;
+    complete_login_flow_with_uuid(&mut client, op_uuid).await;
     drain_initial_play_packets(&mut client).await;
 
     let target_host = "127.0.0.1";
@@ -90,12 +109,11 @@ async fn test_transfer_without_secret_skips_token() {
     );
 }
 
-async fn complete_login_flow(client: &mut TestClient) {
+async fn complete_login_flow_with_uuid(client: &mut TestClient, uuid: Uuid) {
     client
         .send_handshake(775, 2)
         .await
         .expect("Failed to send handshake");
-    let uuid = Uuid::new_v4();
     client
         .send_login_start("TransferAuthTest", uuid)
         .await
@@ -221,20 +239,20 @@ async fn complete_login_flow_and_check_cookie_request(client: &mut TestClient) {
         .expect("Failed to send acknowledge finish configuration");
 
     // After configuration, server sends play login sequence.
-    // With RUSTMC_TRANSFER_SECRET set, it should include a cookie request (0x16).
+    // With RUSTMC_TRANSFER_SECRET set, it should include a cookie request (0x18).
     let join_game = client
         .read_packet()
         .await
         .expect("Failed to read join game");
     assert_eq!(join_game.id, 0x31, "Expected join game packet");
 
-    // Next should be cookie request (0x16) for "rustmc:transfer_token"
+    // Next should be cookie request (0x18) for "rustmc:transfer_token"
     let cookie_request = client
         .read_packet()
         .await
         .expect("Failed to read cookie request");
     assert_eq!(
-        cookie_request.id, 0x16,
+        cookie_request.id, 0x18,
         "Expected cookie request packet after join game"
     );
 }
