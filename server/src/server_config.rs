@@ -15,6 +15,8 @@ pub struct ServerConfig {
     pub transfer: TransferSection,
     #[serde(default)]
     pub gameplay: GameplaySection,
+    #[serde(default)]
+    pub cache: CacheSection,
     #[serde(skip)]
     pub last_modified: Option<SystemTime>,
     #[serde(skip)]
@@ -29,6 +31,7 @@ impl Default for ServerConfig {
             network: NetworkSection::default(),
             transfer: TransferSection::default(),
             gameplay: GameplaySection::default(),
+            cache: CacheSection::default(),
             last_modified: None,
             config_path: Self::default_path(),
         }
@@ -85,6 +88,23 @@ pub struct GameplaySection {
     pub sea_level: i32,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct CacheSection {
+    #[serde(default = "default_uuid_cache_max_entries")]
+    pub uuid_cache_max_entries: usize,
+}
+
+fn default_uuid_cache_max_entries() -> usize {
+    256
+}
+
+impl Default for CacheSection {
+    fn default() -> Self {
+        Self {
+            uuid_cache_max_entries: default_uuid_cache_max_entries(),
+        }
+    }
+}
 fn default_bind() -> String {
     "0.0.0.0:25565".to_string()
 }
@@ -317,6 +337,7 @@ impl ServerConfig {
                         self.network = new_config.network;
                         self.transfer = new_config.transfer;
                         self.gameplay = new_config.gameplay;
+                        self.cache = new_config.cache;
                         self.last_modified = last_modified;
                         if self.server.bind != old_bind {
                             warn!(
