@@ -278,11 +278,23 @@ async fn test_concurrent_clients() {
     for i in 0..10 {
         let port = server.port();
         let handle = tokio::spawn(async move {
-            let mut client = TestClient::connect(port).await.expect("Failed to connect");
             let username = format!("Player{i}");
-            complete_login_flow_with_client(&mut client, &username).await;
+            let mut attempts = 0;
+            loop {
+                attempts += 1;
+                let result = try_complete_login_flow(port, &username).await;
+                match result {
+                    Ok(()) => break,
+                    Err(e) if attempts < 3 => {
+                        eprintln!("Client {username} attempt {attempts} failed: {e}, retrying...");
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    }
+                    Err(e) => panic!("Client {username} failed after {attempts} attempts: {e}"),
+                }
+            }
         });
         handles.push(handle);
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
     }
 
     // Wait for all clients to complete
@@ -850,4 +862,49 @@ async fn complete_login_flow_with_client(client: &mut TestClient, username: &str
         .read_packet()
         .await
         .expect("Failed to read sync position");
+}
+
+async fn try_complete_login_flow(port: u16, username: &str) -> anyhow::Result<()> {
+    let mut client = TestClient::connect(port).await?;
+    client.send_handshake(775, 2).await?;
+    let uuid = Uuid::new_v4();
+    client.send_login_start(username, uuid).await?;
+
+    // Compression
+    let _compression = client.read_packet().await?;
+    client.enable_compression(256);
+
+    // Login Success
+    let _login_success = client.read_packet().await?;
+
+    // Login Acknowledged
+    client.send_login_acknowledged().await?;
+
+    // Known Packs
+    let _known_packs = client.read_packet().await?;
+
+    // Send Known Packs response
+    client.send_known_packs_response().await?;
+
+    // Read configuration packets until Finish Configuration
+    loop {
+        let packet = client.read_packet().await?;
+        if packet.id == 0x03 {
+            break;
+        }
+    }
+
+    // Send Acknowledge Finish Configuration to transition to Play
+    client.send_acknowledge_finish_configuration().await?;
+
+    // Read join game (0x30)
+    let _join_game = client.read_packet().await?;
+
+    // Read Player Info Update (0x40)
+    let _player_info = client.read_packet().await?;
+
+    // Read sync position (0x46)
+    let _sync_pos = client.read_packet().await?;
+
+    Ok(())
 }

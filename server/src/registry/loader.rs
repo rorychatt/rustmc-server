@@ -1,6 +1,7 @@
 use super::nbt_encoder::json_to_nbt;
 use crate::protocol::configuration::{encode_registry_data, RegistryEntry};
 use crate::protocol::packet::Packet;
+use crate::protocol::version::SUPPORTED_VERSIONS;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io;
@@ -104,24 +105,28 @@ pub fn registry_set_for(protocol_version: i32) -> &'static RegistrySet {
 static ENTRY_CACHE: LazyLock<HashMap<(i32, &'static str), Vec<RegistryEntry>>> =
     LazyLock::new(|| {
         let mut map = HashMap::new();
-        let set = registry_set_for(775);
-        for &reg_id in set.registry_ids {
-            let entries = set.load(reg_id).unwrap();
-            map.insert((775, reg_id), entries);
+        for &version in SUPPORTED_VERSIONS {
+            let set = registry_set_for(version);
+            for &reg_id in set.registry_ids {
+                let entries = set.load(reg_id).unwrap();
+                map.insert((version, reg_id), entries);
+            }
         }
         map
     });
 
 static PACKET_CACHE: LazyLock<HashMap<i32, Vec<Packet>>> = LazyLock::new(|| {
     let mut map = HashMap::new();
-    let set = registry_set_for(775);
-    let mut packets = Vec::new();
-    for &reg_id in set.registry_ids {
-        let entries = load_registry(reg_id, 775).unwrap();
-        let packet = encode_registry_data(reg_id, &entries).unwrap();
-        packets.push(packet);
+    for &version in SUPPORTED_VERSIONS {
+        let set = registry_set_for(version);
+        let mut packets = Vec::new();
+        for &reg_id in set.registry_ids {
+            let entries = load_registry(reg_id, version).unwrap();
+            let packet = encode_registry_data(reg_id, &entries).unwrap();
+            packets.push(packet);
+        }
+        map.insert(version, packets);
     }
-    map.insert(775, packets);
     map
 });
 
@@ -174,7 +179,7 @@ fn parse_registry_json(json_str: &str) -> io::Result<Vec<RegistryEntry>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::version::PROTOCOL_VERSION;
+    use crate::protocol::version::{PROTOCOL_VERSION, SUPPORTED_VERSIONS};
 
     #[test]
     fn test_load_registry_with_protocol_version() {
@@ -297,5 +302,34 @@ mod tests {
     fn test_cached_registry_packets_unknown_version() {
         let result = cached_registry_packets(999);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_all_supported_versions_have_cached_packets() {
+        for &version in SUPPORTED_VERSIONS {
+            let packets = cached_registry_packets(version).unwrap_or_else(|e| {
+                panic!("cached_registry_packets({version}) failed: {e}");
+            });
+            assert!(
+                !packets.is_empty(),
+                "version {version} should have cached packets"
+            );
+        }
+    }
+
+    #[test]
+    fn test_all_supported_versions_have_entry_cache() {
+        for &version in SUPPORTED_VERSIONS {
+            let set = registry_set_for(version);
+            for &reg_id in set.registry_ids {
+                let entries = ENTRY_CACHE.get(&(version, reg_id)).unwrap_or_else(|| {
+                    panic!("ENTRY_CACHE missing ({version}, {reg_id})");
+                });
+                assert!(
+                    !entries.is_empty(),
+                    "({version}, {reg_id}) should have cached entries"
+                );
+            }
+        }
     }
 }
