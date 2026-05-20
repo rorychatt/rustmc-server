@@ -10,7 +10,7 @@ use crate::server_config::ServerConfig;
 use crate::world::World;
 
 pub struct Server {
-    view_distance: i32,
+    _view_distance: i32,
     addr: String,
     config: ServerConfig,
     world: Arc<RwLock<World>>,
@@ -23,7 +23,7 @@ impl Server {
         let view_distance = config.server.view_distance;
         let (broadcast_tx, _) = broadcast::channel(256);
         Self {
-            view_distance,
+            _view_distance: view_distance,
             addr,
             config,
             world: Arc::new(RwLock::new(World::new())),
