@@ -10,6 +10,7 @@ use tracing::{debug, error, info, warn};
 
 use super::broadcast::{is_within_render_distance, BroadcastEvent};
 use crate::config::Operators;
+use crate::network::transfer_token;
 use crate::protocol::chunk_data;
 use crate::protocol::configuration;
 use crate::protocol::handshake::{Handshake, NextState};
@@ -21,7 +22,6 @@ use crate::protocol::status::{
     decode_ping_request, decode_status_request, encode_pong_response, StatusResponse,
 };
 use crate::protocol::types::VarInt;
-use crate::network::transfer_token;
 use crate::registry;
 use crate::world::chunk::ChunkPos;
 use crate::world::World;
@@ -579,8 +579,7 @@ impl Connection {
 
         // Request transfer token cookie if secret is configured
         if std::env::var("RUSTMC_TRANSFER_SECRET").is_ok() {
-            let cookie_request =
-                play::encode_play_cookie_request("rustmc:transfer_token")?;
+            let cookie_request = play::encode_play_cookie_request("rustmc:transfer_token")?;
             self.write_packet(writer, &cookie_request).await?;
         }
 
@@ -761,8 +760,10 @@ impl Connection {
                                             player_name: name.clone(),
                                             timestamp: transfer_token::current_timestamp(),
                                         };
-                                        let payload =
-                                            transfer_token::generate_token(secret.as_bytes(), &token);
+                                        let payload = transfer_token::generate_token(
+                                            secret.as_bytes(),
+                                            &token,
+                                        );
                                         let cookie_packet = play::encode_play_store_cookie(
                                             "rustmc:transfer_token",
                                             &payload,
@@ -785,10 +786,7 @@ impl Connection {
                     } else {
                         let parts: Vec<&str> = command.command.splitn(3, ' ').collect();
                         let target_name = parts[1];
-                        let level: u8 = parts
-                            .get(2)
-                            .and_then(|s| s.parse().ok())
-                            .unwrap_or(3);
+                        let level: u8 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(3);
 
                         let target_uuid = {
                             let world = self.world.read().await;
@@ -799,14 +797,25 @@ impl Connection {
                                 .map(|(uuid, _)| *uuid)
                         };
 
+                        let target_uuid = match target_uuid {
+                            Some(uuid) => Some(uuid),
+                            None => {
+                                let ops = self.operators.read().await;
+                                ops.find_uuid_by_name(target_name)
+                            }
+                        };
+
+                        let target_uuid = match target_uuid {
+                            Some(uuid) => Some(uuid),
+                            None => {
+                                crate::uuid_resolver::resolve_uuid_from_mojang(target_name).await
+                            }
+                        };
+
                         if let Some(target_uuid) = target_uuid {
                             {
                                 let mut ops = self.operators.write().await;
-                                ops.set_op_level(
-                                    target_uuid,
-                                    target_name.to_string(),
-                                    level,
-                                );
+                                ops.set_op_level(target_uuid, target_name.to_string(), level);
                                 ops.save();
                             }
                             {
@@ -822,7 +831,7 @@ impl Connection {
                             self.write_packet(writer, &msg).await?;
                         } else {
                             let msg = play::encode_system_chat_message(&format!(
-                                "Player '{}' is not online",
+                                "Could not resolve player '{}' (not online, not in ops.toml, and Mojang API lookup failed)",
                                 target_name
                             ))?;
                             self.write_packet(writer, &msg).await?;
@@ -846,6 +855,21 @@ impl Connection {
                                 .map(|(uuid, _)| *uuid)
                         };
 
+                        let target_uuid = match target_uuid {
+                            Some(uuid) => Some(uuid),
+                            None => {
+                                let ops = self.operators.read().await;
+                                ops.find_uuid_by_name(target_name)
+                            }
+                        };
+
+                        let target_uuid = match target_uuid {
+                            Some(uuid) => Some(uuid),
+                            None => {
+                                crate::uuid_resolver::resolve_uuid_from_mojang(target_name).await
+                            }
+                        };
+
                         if let Some(target_uuid) = target_uuid {
                             {
                                 let mut ops = self.operators.write().await;
@@ -865,7 +889,7 @@ impl Connection {
                             self.write_packet(writer, &msg).await?;
                         } else {
                             let msg = play::encode_system_chat_message(&format!(
-                                "Player '{}' is not online",
+                                "Could not resolve player '{}' (not online, not in ops.toml, and Mojang API lookup failed)",
                                 target_name
                             ))?;
                             self.write_packet(writer, &msg).await?;

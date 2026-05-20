@@ -114,6 +114,13 @@ impl Operators {
         }
     }
 
+    pub fn find_uuid_by_name(&self, name: &str) -> Option<Uuid> {
+        self.entries
+            .iter()
+            .find(|(_, data)| data.name.eq_ignore_ascii_case(name))
+            .map(|(uuid, _)| *uuid)
+    }
+
     pub fn get_op_level(&self, uuid: &Uuid) -> u8 {
         self.entries.get(uuid).map(|d| d.level).unwrap_or(0)
     }
@@ -226,6 +233,18 @@ level = 4
         let toml_output = ops.serialize_to_toml();
         let parsed = Operators::parse(&toml_output);
         assert_eq!(parsed.get_op_level(&uuid), 4);
+    }
+
+    #[test]
+    fn test_find_uuid_by_name() {
+        let mut ops = Operators::empty();
+        let uuid = Uuid::parse_str("069a79f4-44e9-4726-a5be-fca90e38aaf5").unwrap();
+        ops.set_op_level(uuid, "Notch".to_string(), 4);
+
+        assert_eq!(ops.find_uuid_by_name("Notch"), Some(uuid));
+        assert_eq!(ops.find_uuid_by_name("notch"), Some(uuid));
+        assert_eq!(ops.find_uuid_by_name("NOTCH"), Some(uuid));
+        assert_eq!(ops.find_uuid_by_name("Unknown"), None);
     }
 
     #[test]
