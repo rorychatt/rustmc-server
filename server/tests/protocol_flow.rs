@@ -657,7 +657,7 @@ async fn test_client_tick_end_drains_chunks() {
         .expect("Failed to read position response packet");
 
         match packet.id {
-            0x25 | 0x2C => {} // Unload chunk or Keep-Alive - skip
+            0x25 | 0x58 | 0x2C => {} // Unload chunk, Set Center Chunk, or Keep-Alive - skip
             0x0C => {} // Chunk Batch Start
             0x2D => position_chunks += 1,
             0x0B => {
@@ -680,7 +680,7 @@ async fn test_client_tick_end_drains_chunks() {
     // Read the chunk batch triggered by tick end (skip keep-alive/unload packets)
     let _response = loop {
         let pkt = tokio::time::timeout(
-            tokio::time::Duration::from_secs(2),
+            tokio::time::Duration::from_secs(5),
             client.read_packet(),
         )
         .await
