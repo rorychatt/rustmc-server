@@ -38,6 +38,22 @@ The server binds to `0.0.0.0:25565` by default.
 cargo test --workspace
 ```
 
+## Development Tasks
+
+This project uses [just](https://github.com/casey/just) as a task runner. List all available targets:
+
+```bash
+just --list
+```
+
+Common tasks:
+
+```bash
+just ci                  # Run full CI checks locally
+just regenerate-blocks   # Regenerate block_states.json (requires Java 21+, jq)
+just validate-packets    # Validate packet IDs against server reports
+```
+
 ## Project Structure
 
 ```

@@ -1,4 +1,4 @@
-use tracing::warn;
+use tracing::error;
 
 pub const PROTOCOL_VERSION: i32 = 775;
 pub const VERSION_NAME: &str = "26.1.2";
@@ -9,8 +9,8 @@ pub fn data_pack_version_for(protocol_version: i32) -> &'static str {
     match protocol_version {
         775 => "1.21",
         _ => {
-            warn!(
-                "Unsupported protocol version {protocol_version}, falling back to latest known data pack version {DATA_PACK_VERSION}"
+            error!(
+                "Unsupported protocol version {protocol_version} (supported: {SUPPORTED_VERSIONS:?}), falling back to latest known data pack version {DATA_PACK_VERSION}"
             );
             DATA_PACK_VERSION
         }
