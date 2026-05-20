@@ -152,122 +152,90 @@ impl Chunk {
 #[cfg(test)]
 mod block_state_tests {
     use super::BlockState;
-    use serde_json::Value;
-
-    const BLOCK_STATES_JSON: &str = include_str!("../../data/block_states.json");
+    use crate::world::block_registry::{BlockRegistry, BLOCKS};
 
     #[test]
     fn test_block_state_ids_match_generated_data() {
-        let data: Value = serde_json::from_str(BLOCK_STATES_JSON).unwrap();
-        let blocks = data["blocks"].as_object().unwrap();
+        let registry = BlockRegistry::global();
 
         assert_eq!(
-            BlockState::AIR.0 as i64,
-            blocks["minecraft:air"]["default_state_id"]
-                .as_i64()
-                .unwrap()
+            BlockState::AIR.0,
+            registry.get_default_state_id("minecraft:air").unwrap()
         );
         assert_eq!(
-            BlockState::STONE.0 as i64,
-            blocks["minecraft:stone"]["default_state_id"]
-                .as_i64()
-                .unwrap()
+            BlockState::STONE.0,
+            registry.get_default_state_id("minecraft:stone").unwrap()
         );
         assert_eq!(
-            BlockState::GRASS_BLOCK.0 as i64,
-            blocks["minecraft:grass_block"]["default_state_id"]
-                .as_i64()
-                .unwrap()
+            BlockState::GRASS_BLOCK.0,
+            registry.get_default_state_id("minecraft:grass_block").unwrap()
         );
         assert_eq!(
-            BlockState::DIRT.0 as i64,
-            blocks["minecraft:dirt"]["default_state_id"]
-                .as_i64()
-                .unwrap()
+            BlockState::DIRT.0,
+            registry.get_default_state_id("minecraft:dirt").unwrap()
         );
         assert_eq!(
-            BlockState::COBBLESTONE.0 as i64,
-            blocks["minecraft:cobblestone"]["default_state_id"]
-                .as_i64()
-                .unwrap()
+            BlockState::COBBLESTONE.0,
+            registry.get_default_state_id("minecraft:cobblestone").unwrap()
         );
         assert_eq!(
-            BlockState::OAK_PLANKS.0 as i64,
-            blocks["minecraft:oak_planks"]["default_state_id"]
-                .as_i64()
-                .unwrap()
+            BlockState::OAK_PLANKS.0,
+            registry.get_default_state_id("minecraft:oak_planks").unwrap()
         );
         assert_eq!(
-            BlockState::BEDROCK.0 as i64,
-            blocks["minecraft:bedrock"]["default_state_id"]
-                .as_i64()
-                .unwrap()
+            BlockState::BEDROCK.0,
+            registry.get_default_state_id("minecraft:bedrock").unwrap()
         );
         assert_eq!(
-            BlockState::WATER.0 as i64,
-            blocks["minecraft:water"]["default_state_id"]
-                .as_i64()
-                .unwrap()
+            BlockState::WATER.0,
+            registry.get_default_state_id("minecraft:water").unwrap()
         );
         assert_eq!(
-            BlockState::LAVA.0 as i64,
-            blocks["minecraft:lava"]["default_state_id"]
-                .as_i64()
-                .unwrap()
+            BlockState::LAVA.0,
+            registry.get_default_state_id("minecraft:lava").unwrap()
         );
         assert_eq!(
-            BlockState::SAND.0 as i64,
-            blocks["minecraft:sand"]["default_state_id"]
-                .as_i64()
-                .unwrap()
+            BlockState::SAND.0,
+            registry.get_default_state_id("minecraft:sand").unwrap()
         );
         assert_eq!(
-            BlockState::GRAVEL.0 as i64,
-            blocks["minecraft:gravel"]["default_state_id"]
-                .as_i64()
-                .unwrap()
+            BlockState::GRAVEL.0,
+            registry.get_default_state_id("minecraft:gravel").unwrap()
         );
         assert_eq!(
-            BlockState::OAK_LOG.0 as i64,
-            blocks["minecraft:oak_log"]["default_state_id"]
-                .as_i64()
-                .unwrap()
+            BlockState::OAK_LOG.0,
+            registry.get_default_state_id("minecraft:oak_log").unwrap()
         );
     }
 
     #[test]
     fn test_all_default_states_in_states_list() {
-        let data: Value = serde_json::from_str(BLOCK_STATES_JSON).unwrap();
-        let blocks = data["blocks"].as_object().unwrap();
-
-        for (name, block) in blocks {
-            let default_id = block["default_state_id"].as_u64().unwrap();
-            let states = block["states"].as_array().unwrap();
+        for (name, block_def) in &BLOCKS {
             assert!(
-                !states.is_empty(),
+                !block_def.states.is_empty(),
                 "Block {name} has no states"
             );
-            let has_default = states.iter().any(|s| s["id"].as_u64().unwrap() == default_id);
+            let has_default = block_def
+                .states
+                .iter()
+                .any(|s| s.id == block_def.default_state_id);
             assert!(
                 has_default,
-                "Block {name} default_state_id {default_id} not found in states list"
+                "Block {} default_state_id {} not found in states list",
+                name, block_def.default_state_id
             );
         }
     }
 
     #[test]
     fn test_state_ids_unique() {
-        let data: Value = serde_json::from_str(BLOCK_STATES_JSON).unwrap();
-        let blocks = data["blocks"].as_object().unwrap();
-
         let mut seen = std::collections::HashSet::new();
-        for (name, block) in blocks {
-            let states = block["states"].as_array().unwrap();
-            for state in states {
-                let id = state["id"].as_u64().unwrap();
+        for (name, block_def) in &BLOCKS {
+            for state in block_def.states {
                 assert!(
-                    seen.insert(id),
-                    "Duplicate state ID {id} in block {name}"
+                    seen.insert(state.id),
+                    "Duplicate state ID {} in block {}",
+                    state.id, name
                 );
             }
         }
@@ -275,27 +243,20 @@ mod block_state_tests {
 
     #[test]
     fn test_state_properties_match_declared() {
-        let data: Value = serde_json::from_str(BLOCK_STATES_JSON).unwrap();
-        let blocks = data["blocks"].as_object().unwrap();
-
-        for (name, block) in blocks {
-            let properties = block["properties"].as_object().unwrap();
-            let states = block["states"].as_array().unwrap();
-
-            for state in states {
-                let state_props = state["properties"].as_object().unwrap();
+        for (name, block_def) in &BLOCKS {
+            for state in block_def.states {
                 assert_eq!(
-                    state_props.len(),
-                    properties.len(),
+                    state.properties.len(),
+                    block_def.properties.len(),
                     "Block {name} state has wrong number of properties"
                 );
-                for (key, value) in state_props {
-                    let allowed = properties.get(key).unwrap_or_else(|| {
+                for (key, value) in state.properties {
+                    let prop = block_def.properties.iter().find(|(k, _)| k == key);
+                    let (_, allowed_values) = prop.unwrap_or_else(|| {
                         panic!("Block {name} state has undeclared property {key}")
                     });
-                    let allowed_values = allowed.as_array().unwrap();
                     assert!(
-                        allowed_values.iter().any(|v| v == value),
+                        allowed_values.iter().any(|v| *v == *value),
                         "Block {name} property {key}={value} not in allowed values"
                     );
                 }
