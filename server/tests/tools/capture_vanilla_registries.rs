@@ -20,6 +20,8 @@ use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
 
+use rustmc_server::registry::ALL_REGISTRY_IDS;
+
 const PROTOCOL_VERSION: i32 = 775;
 const REGISTRY_DATA_PACKET_ID: i32 = 0x07;
 
@@ -354,10 +356,119 @@ fn capture_vanilla_registry_ordering() {
         }
     }
 
+    // Filter to only registries our server implements
+    registries.retain(|id, _| ALL_REGISTRY_IDS.contains(&id.as_str()));
+    println!(
+        "Retained {} registries (filtered from vanilla set)",
+        registries.len()
+    );
+
+    // Filter entries within each registry to only those in our data files
+    let data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data/registries/v775");
+    let registry_to_file: HashMap<&str, &str> = [
+        ("minecraft:banner_pattern", "banner_pattern.json"),
+        ("minecraft:chat_type", "chat_type.json"),
+        ("minecraft:damage_type", "damage_type.json"),
+        ("minecraft:dimension_type", "dimension_type.json"),
+        ("minecraft:enchantment", "enchantment.json"),
+        ("minecraft:instrument", "instrument.json"),
+        ("minecraft:jukebox_song", "jukebox_song.json"),
+        ("minecraft:painting_variant", "painting_variant.json"),
+        ("minecraft:trim_material", "trim_material.json"),
+        ("minecraft:trim_pattern", "trim_pattern.json"),
+        ("minecraft:wolf_variant", "wolf_variant.json"),
+        ("minecraft:worldgen/biome", "worldgen_biome.json"),
+    ]
+    .into_iter()
+    .collect();
+
+    for (registry_id, entries) in registries.iter_mut() {
+        if let Some(&filename) = registry_to_file.get(registry_id.as_str()) {
+            let file_path = data_dir.join(filename);
+            let content = std::fs::read_to_string(&file_path).unwrap();
+            let file_entries: Vec<serde_json::Value> = serde_json::from_str(&content).unwrap();
+            let our_ids: Vec<String> = file_entries
+                .iter()
+                .map(|e| e["id"].as_str().unwrap().to_string())
+                .collect();
+            entries.retain(|id| our_ids.contains(id));
+        }
+    }
+
     // Write to snapshot file
     let json = serde_json::to_string_pretty(&registries).unwrap();
     let output_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/data/vanilla_registry_order.json");
     std::fs::write(&output_path, json).unwrap();
     println!("Written registry ordering to {}", output_path.display());
+}
+
+#[test]
+#[ignore]
+fn reorder_registry_files_to_match_vanilla() {
+    let snapshot: HashMap<String, Vec<String>> = serde_json::from_str(include_str!(
+        "../../tests/data/vanilla_registry_order.json"
+    ))
+    .unwrap();
+
+    let data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data/registries/v775");
+
+    let registry_to_file: HashMap<&str, &str> = [
+        ("minecraft:banner_pattern", "banner_pattern.json"),
+        ("minecraft:chat_type", "chat_type.json"),
+        ("minecraft:damage_type", "damage_type.json"),
+        ("minecraft:dimension_type", "dimension_type.json"),
+        ("minecraft:enchantment", "enchantment.json"),
+        ("minecraft:instrument", "instrument.json"),
+        ("minecraft:jukebox_song", "jukebox_song.json"),
+        ("minecraft:painting_variant", "painting_variant.json"),
+        ("minecraft:trim_material", "trim_material.json"),
+        ("minecraft:trim_pattern", "trim_pattern.json"),
+        ("minecraft:wolf_variant", "wolf_variant.json"),
+        ("minecraft:worldgen/biome", "worldgen_biome.json"),
+    ]
+    .into_iter()
+    .collect();
+
+    for (registry_id, expected_order) in &snapshot {
+        let Some(&filename) = registry_to_file.get(registry_id.as_str()) else {
+            println!("Skipping {registry_id}: no file mapping");
+            continue;
+        };
+
+        let file_path = data_dir.join(filename);
+        let content = std::fs::read_to_string(&file_path).unwrap();
+        let entries: Vec<serde_json::Value> = serde_json::from_str(&content).unwrap();
+
+        let mut sorted = Vec::with_capacity(expected_order.len());
+        for expected_id in expected_order {
+            if let Some(entry) = entries
+                .iter()
+                .find(|e| e["id"].as_str() == Some(expected_id))
+            {
+                sorted.push(entry.clone());
+            }
+        }
+        // Append any entries from our file that aren't in the vanilla snapshot
+        for entry in &entries {
+            let id = entry["id"].as_str().unwrap();
+            if !expected_order.contains(&id.to_string()) {
+                sorted.push(entry.clone());
+            }
+        }
+
+        // Write in compact format: one JSON object per line
+        let mut output = String::from("[\n");
+        for (i, entry) in sorted.iter().enumerate() {
+            output.push_str("  ");
+            output.push_str(&serde_json::to_string(entry).unwrap());
+            if i < sorted.len() - 1 {
+                output.push(',');
+            }
+            output.push('\n');
+        }
+        output.push_str("]\n");
+        std::fs::write(&file_path, output).unwrap();
+        println!("Reordered {filename} ({} entries)", sorted.len());
+    }
 }

@@ -1,9 +1,9 @@
 [
-  {"id":"minecraft:chat","data":{"chat":{"parameters":["sender","content"],"translation_key":"chat.type.text"},"narration":{"parameters":["sender","content"],"translation_key":"chat.type.text.narrate"}}},
-  {"id":"minecraft:say_command","data":{"chat":{"parameters":["sender","content"],"translation_key":"chat.type.announcement"},"narration":{"parameters":["sender","content"],"translation_key":"chat.type.text.narrate"}}},
-  {"id":"minecraft:msg_command_incoming","data":{"chat":{"parameters":["sender","content"],"style":{"color":"gray","italic":true},"translation_key":"commands.message.display.incoming"},"narration":{"parameters":["sender","content"],"translation_key":"chat.type.text.narrate"}}},
-  {"id":"minecraft:msg_command_outgoing","data":{"chat":{"parameters":["target","content"],"style":{"color":"gray","italic":true},"translation_key":"commands.message.display.outgoing"},"narration":{"parameters":["sender","content"],"translation_key":"chat.type.text.narrate"}}},
-  {"id":"minecraft:team_msg_command_incoming","data":{"chat":{"parameters":["target","sender","content"],"translation_key":"chat.type.team.text"},"narration":{"parameters":["sender","content"],"translation_key":"chat.type.text.narrate"}}},
-  {"id":"minecraft:team_msg_command_outgoing","data":{"chat":{"parameters":["target","sender","content"],"translation_key":"chat.type.team.sent"},"narration":{"parameters":["sender","content"],"translation_key":"chat.type.text.narrate"}}},
-  {"id":"minecraft:emote_command","data":{"chat":{"parameters":["sender","content"],"translation_key":"chat.type.emote"},"narration":{"parameters":["sender","content"],"translation_key":"chat.type.emote"}}}
+  {"data":{"chat":{"parameters":["sender","content"],"translation_key":"chat.type.text"},"narration":{"parameters":["sender","content"],"translation_key":"chat.type.text.narrate"}},"id":"minecraft:chat"},
+  {"data":{"chat":{"parameters":["sender","content"],"translation_key":"chat.type.emote"},"narration":{"parameters":["sender","content"],"translation_key":"chat.type.emote"}},"id":"minecraft:emote_command"},
+  {"data":{"chat":{"parameters":["sender","content"],"style":{"color":"gray","italic":true},"translation_key":"commands.message.display.incoming"},"narration":{"parameters":["sender","content"],"translation_key":"chat.type.text.narrate"}},"id":"minecraft:msg_command_incoming"},
+  {"data":{"chat":{"parameters":["target","content"],"style":{"color":"gray","italic":true},"translation_key":"commands.message.display.outgoing"},"narration":{"parameters":["sender","content"],"translation_key":"chat.type.text.narrate"}},"id":"minecraft:msg_command_outgoing"},
+  {"data":{"chat":{"parameters":["sender","content"],"translation_key":"chat.type.announcement"},"narration":{"parameters":["sender","content"],"translation_key":"chat.type.text.narrate"}},"id":"minecraft:say_command"},
+  {"data":{"chat":{"parameters":["target","sender","content"],"translation_key":"chat.type.team.text"},"narration":{"parameters":["sender","content"],"translation_key":"chat.type.text.narrate"}},"id":"minecraft:team_msg_command_incoming"},
+  {"data":{"chat":{"parameters":["target","sender","content"],"translation_key":"chat.type.team.sent"},"narration":{"parameters":["sender","content"],"translation_key":"chat.type.text.narrate"}},"id":"minecraft:team_msg_command_outgoing"}
 ]
