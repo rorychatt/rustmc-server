@@ -9,6 +9,10 @@ pub struct ServerConfig {
     #[serde(default)]
     pub rate_limit: RateLimitSection,
     #[serde(default)]
+    pub network: NetworkSection,
+    #[serde(default)]
+    pub transfer: TransferSection,
+    #[serde(default)]
     pub gameplay: GameplaySection,
 }
 
@@ -16,8 +20,21 @@ pub struct ServerConfig {
 pub struct ServerSection {
     #[serde(default = "default_bind")]
     pub bind: String,
+    #[serde(default = "default_plugins_directory")]
+    pub plugins_directory: String,
     #[serde(default = "default_view_distance")]
     pub view_distance: i32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct NetworkSection {
+    #[serde(default = "default_non_play_timeout_secs")]
+    pub non_play_timeout_secs: u64,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct TransferSection {
+    pub secret: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -54,8 +71,16 @@ fn default_bind() -> String {
     "0.0.0.0:25565".to_string()
 }
 
+fn default_plugins_directory() -> String {
+    "plugins".to_string()
+}
+
 fn default_view_distance() -> i32 {
     8
+}
+
+fn default_non_play_timeout_secs() -> u64 {
+    30
 }
 
 fn default_invalid_packet_threshold() -> u32 {
@@ -106,7 +131,16 @@ impl Default for ServerSection {
     fn default() -> Self {
         Self {
             bind: default_bind(),
+            plugins_directory: default_plugins_directory(),
             view_distance: default_view_distance(),
+        }
+    }
+}
+
+impl Default for NetworkSection {
+    fn default() -> Self {
+        Self {
+            non_play_timeout_secs: default_non_play_timeout_secs(),
         }
     }
 }
@@ -235,6 +269,9 @@ mod tests {
         assert_eq!(config.rate_limit.invalid_packet_window_secs, 10);
         assert_eq!(config.server.bind, "0.0.0.0:25565");
         assert_eq!(config.server.view_distance, 8);
+        assert_eq!(config.server.plugins_directory, "plugins");
+        assert_eq!(config.network.non_play_timeout_secs, 30);
+        assert!(config.transfer.secret.is_none());
     }
 
     #[test]
@@ -275,6 +312,53 @@ bind = "0.0.0.0:25567"
         assert_eq!(config.rate_limit.invalid_packet_threshold, 16);
         assert_eq!(config.rate_limit.invalid_packet_window_secs, 10);
         std::env::remove_var("RUSTMC_CONFIG");
+    }
+
+    #[test]
+    fn test_network_section_defaults() {
+        let toml_str = "";
+        let config: ServerConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.network.non_play_timeout_secs, 30);
+    }
+
+    #[test]
+    fn test_transfer_section_defaults() {
+        let toml_str = "";
+        let config: ServerConfig = toml::from_str(toml_str).unwrap();
+        assert!(config.transfer.secret.is_none());
+    }
+
+    #[test]
+    fn test_plugins_directory_default() {
+        let toml_str = "";
+        let config: ServerConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.server.plugins_directory, "plugins");
+    }
+
+    #[test]
+    fn test_full_config_with_new_sections() {
+        let toml_str = r#"
+[server]
+bind = "127.0.0.1:25566"
+plugins_directory = "my_plugins"
+
+[network]
+non_play_timeout_secs = 60
+
+[transfer]
+secret = "my-secret-key"
+
+[rate_limit]
+invalid_packet_threshold = 32
+invalid_packet_window_secs = 20
+"#;
+        let config: ServerConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.server.bind, "127.0.0.1:25566");
+        assert_eq!(config.server.plugins_directory, "my_plugins");
+        assert_eq!(config.network.non_play_timeout_secs, 60);
+        assert_eq!(config.transfer.secret, Some("my-secret-key".to_string()));
+        assert_eq!(config.rate_limit.invalid_packet_threshold, 32);
+        assert_eq!(config.rate_limit.invalid_packet_window_secs, 20);
     }
 
     #[test]
