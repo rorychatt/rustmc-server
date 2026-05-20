@@ -1,34 +1,11 @@
 use std::collections::HashMap;
-use std::sync::OnceLock;
 
-use serde::Deserialize;
-
-const BLOCK_STATES_JSON: &str = include_str!("../../data/block_states.json");
-
-static REGISTRY: OnceLock<BlockRegistry> = OnceLock::new();
-
-#[derive(Deserialize)]
-struct RawData {
-    blocks: HashMap<String, RawBlock>,
+#[allow(clippy::type_complexity)]
+mod generated {
+    include!(concat!(env!("OUT_DIR"), "/block_states_generated.rs"));
 }
 
-#[derive(Deserialize)]
-struct RawBlock {
-    default_state_id: u16,
-    properties: HashMap<String, Vec<String>>,
-    states: Vec<RawState>,
-}
-
-#[derive(Deserialize)]
-struct RawState {
-    id: u16,
-    properties: HashMap<String, String>,
-}
-
-pub struct BlockRegistry {
-    blocks: HashMap<String, BlockEntry>,
-    state_to_block: HashMap<u16, (String, HashMap<String, String>)>,
-}
+pub use generated::{BlockDef, StateDef, BLOCKS, BLOCK_COUNT, STATES};
 
 pub struct BlockEntry {
     pub default_state_id: u16,
@@ -41,81 +18,79 @@ pub struct StateEntry {
     pub properties: HashMap<String, String>,
 }
 
+pub struct BlockRegistry;
+
 impl BlockRegistry {
     pub fn global() -> &'static BlockRegistry {
-        REGISTRY.get_or_init(Self::load)
-    }
-
-    fn load() -> Self {
-        let raw: RawData = serde_json::from_str(BLOCK_STATES_JSON)
-            .expect("block_states.json should be valid");
-
-        let mut blocks = HashMap::with_capacity(raw.blocks.len());
-        let mut state_to_block = HashMap::new();
-
-        for (name, raw_block) in raw.blocks {
-            for raw_state in &raw_block.states {
-                state_to_block.insert(
-                    raw_state.id,
-                    (name.clone(), raw_state.properties.clone()),
-                );
-            }
-
-            let states = raw_block
-                .states
-                .into_iter()
-                .map(|s| StateEntry {
-                    id: s.id,
-                    properties: s.properties,
-                })
-                .collect();
-
-            blocks.insert(
-                name,
-                BlockEntry {
-                    default_state_id: raw_block.default_state_id,
-                    properties: raw_block.properties,
-                    states,
-                },
-            );
-        }
-
-        Self {
-            blocks,
-            state_to_block,
-        }
+        static INSTANCE: BlockRegistry = BlockRegistry;
+        &INSTANCE
     }
 
     pub fn get_state_id(&self, block: &str, properties: &[(&str, &str)]) -> Option<u16> {
-        let entry = self.blocks.get(block)?;
-        entry.states.iter().find_map(|state| {
-            let matches = properties.iter().all(|(k, v)| {
-                state.properties.get(*k).is_some_and(|sv| sv == v)
-            });
-            if matches && state.properties.len() == properties.len() {
-                Some(state.id)
-            } else {
-                None
+        let block_def = BLOCKS.get(block)?;
+        block_def.states.iter().find_map(|state| {
+            if state.properties.len() != properties.len() {
+                return None;
             }
+            let matches = properties.iter().all(|(k, v)| {
+                state.properties.iter().any(|(sk, sv)| sk == k && sv == v)
+            });
+            if matches { Some(state.id) } else { None }
         })
     }
 
     pub fn get_default_state_id(&self, block: &str) -> Option<u16> {
-        self.blocks.get(block).map(|e| e.default_state_id)
+        BLOCKS.get(block).map(|b| b.default_state_id)
     }
 
     pub fn get_block_from_state(&self, state_id: u16) -> Option<(&str, &HashMap<String, String>)> {
-        self.state_to_block
+        use std::sync::OnceLock;
+        type StateCache = HashMap<u16, (String, HashMap<String, String>)>;
+        static CACHE: OnceLock<StateCache> = OnceLock::new();
+        let cache = CACHE.get_or_init(|| {
+            let mut map = HashMap::new();
+            for (id, (name, props)) in &STATES {
+                let props_map: HashMap<String, String> = props
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect();
+                map.insert(*id, (name.to_string(), props_map));
+            }
+            map
+        });
+        cache
             .get(&state_id)
             .map(|(name, props)| (name.as_str(), props))
     }
 
     pub fn block_count(&self) -> usize {
-        self.blocks.len()
+        BLOCK_COUNT
     }
 
-    pub fn get_block_entry(&self, block: &str) -> Option<&BlockEntry> {
-        self.blocks.get(block)
+    pub fn get_block_entry(&self, block: &str) -> Option<BlockEntry> {
+        let block_def = BLOCKS.get(block)?;
+        let properties: HashMap<String, Vec<String>> = block_def
+            .properties
+            .iter()
+            .map(|(k, vs)| (k.to_string(), vs.iter().map(|v| v.to_string()).collect()))
+            .collect();
+        let states: Vec<StateEntry> = block_def
+            .states
+            .iter()
+            .map(|s| StateEntry {
+                id: s.id,
+                properties: s
+                    .properties
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+            })
+            .collect();
+        Some(BlockEntry {
+            default_state_id: block_def.default_state_id,
+            properties,
+            states,
+        })
     }
 }
 
@@ -165,5 +140,31 @@ mod tests {
         assert!(entry.properties.is_empty());
         assert_eq!(entry.states.len(), 1);
         assert_eq!(entry.states[0].id, entry.default_state_id);
+    }
+
+    #[test]
+    fn test_codegen_forward_reverse_roundtrip() {
+        let registry = BlockRegistry::global();
+        let test_blocks = [
+            "minecraft:oak_log",
+            "minecraft:stone",
+            "minecraft:grass_block",
+            "minecraft:redstone_wire",
+        ];
+        for block_name in &test_blocks {
+            if let Some(default_id) = registry.get_default_state_id(block_name) {
+                let (name, _) = registry.get_block_from_state(default_id).unwrap();
+                assert_eq!(name, *block_name);
+            }
+        }
+    }
+
+    #[test]
+    fn test_build_generates_valid_lookup_tables() {
+        assert!(BLOCK_COUNT > 1000);
+        assert!(BLOCKS.get("minecraft:air").is_some());
+        assert!(BLOCKS.get("minecraft:stone").is_some());
+        let air = BLOCKS.get("minecraft:air").unwrap();
+        assert_eq!(air.name, "minecraft:air");
     }
 }
