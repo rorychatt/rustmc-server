@@ -1,8 +1,14 @@
 mod common;
 
-use common::{retry_test, TestClient, TestServer};
+use common::{TestClient, TestServer};
+use rustmc_server::protocol::packet_ids;
 use std::io::{Cursor, Read};
 use uuid::Uuid;
+
+use packet_ids::configuration::clientbound as config_cb;
+use packet_ids::login::clientbound as login_cb;
+use packet_ids::play::clientbound as play_cb;
+use packet_ids::status::clientbound as status_cb;
 
 #[tokio::test]
 async fn test_status_flow() {
@@ -28,7 +34,10 @@ async fn test_status_flow() {
         .read_packet()
         .await
         .expect("Failed to read status response");
-    assert_eq!(response.id, 0x00, "Expected status response packet");
+    assert_eq!(
+        response.id, status_cb::STATUS_RESPONSE,
+        "Expected status response packet"
+    );
 
     // Parse JSON response
     let mut cursor = Cursor::new(&response.data);
@@ -65,7 +74,7 @@ async fn test_status_flow() {
     // Read pong
     let pong = client.read_packet().await.expect("Failed to read pong");
     let elapsed = ping_time.elapsed();
-    assert_eq!(pong.id, 0x01, "Expected pong packet");
+    assert_eq!(pong.id, status_cb::PONG_RESPONSE, "Expected pong packet");
     assert!(elapsed.as_millis() < 100, "Ping should be under 100ms");
 
     // Verify payload matches
@@ -97,12 +106,15 @@ async fn test_login_flow() {
         .await
         .expect("Failed to send login start");
 
-    // Read set compression packet (0x03)
+    // Read set compression packet
     let compression = client
         .read_packet()
         .await
         .expect("Failed to read compression packet");
-    assert_eq!(compression.id, 0x03, "Expected set compression packet");
+    assert_eq!(
+        compression.id, login_cb::SET_COMPRESSION,
+        "Expected set compression packet"
+    );
 
     // Enable compression on client side
     client.enable_compression(256);
@@ -112,7 +124,10 @@ async fn test_login_flow() {
         .read_packet()
         .await
         .expect("Failed to read login success");
-    assert_eq!(login_success.id, 0x02, "Expected login success packet");
+    assert_eq!(
+        login_success.id, login_cb::LOGIN_SUCCESS,
+        "Expected login success packet"
+    );
 
     // Parse login success
     let mut cursor = Cursor::new(&login_success.data);
@@ -133,12 +148,15 @@ async fn test_login_flow() {
         .await
         .expect("Failed to send login acknowledged");
 
-    // Read Known Packs packet (0x0E)
+    // Read Known Packs packet
     let known_packs = client
         .read_packet()
         .await
         .expect("Failed to read known packs");
-    assert_eq!(known_packs.id, 0x0E, "Expected known packs packet");
+    assert_eq!(
+        known_packs.id, config_cb::KNOWN_PACKS,
+        "Expected known packs packet"
+    );
 
     // Send Known Packs response
     client
@@ -154,14 +172,9 @@ async fn test_login_flow() {
             .await
             .expect("Failed to read config packet");
         match packet.id {
-            0x07 => {
-                // Registry Data
-            }
-            0x0D => {
-                // Update Tags
-            }
-            0x03 => {
-                // Finish Configuration
+            id if id == config_cb::REGISTRY_DATA => {}
+            id if id == config_cb::UPDATE_TAGS => {}
+            id if id == config_cb::FINISH_CONFIGURATION => {
                 got_finish = true;
                 break;
             }
@@ -178,30 +191,31 @@ async fn test_login_flow() {
         .await
         .expect("Failed to send acknowledge finish configuration");
 
-    // Read join game packet (now 0x30 in protocol 775)
-
+    // Read join game packet
     let join_game = client
         .read_packet()
         .await
         .expect("Failed to read join game");
-    assert_eq!(join_game.id, 0x31, "Expected join game packet (0x31)");
+    assert_eq!(join_game.id, play_cb::LOGIN_PLAY, "Expected join game packet");
     assert!(!join_game.data.is_empty(), "Join game should have data");
 
-    // Read Player Info Update (0x40)
+    // Read Player Info Update
     let player_info = client
         .read_packet()
         .await
         .expect("Failed to read player info update");
-    assert_eq!(player_info.id, 0x40, "Expected player info update packet");
+    assert_eq!(
+        player_info.id, play_cb::PLAYER_INFO_UPDATE,
+        "Expected player info update packet"
+    );
 
-    // Read synchronize player position (0x46 in protocol 775)
-
+    // Read synchronize player position
     let sync_pos = client
         .read_packet()
         .await
         .expect("Failed to read sync position");
     assert_eq!(
-        sync_pos.id, 0x48,
+        sync_pos.id, play_cb::SYNCHRONIZE_PLAYER_POSITION,
         "Expected synchronize player position packet"
     );
 }
@@ -216,7 +230,7 @@ async fn test_play_basic() {
     // Complete login + configuration flow
     complete_login_flow(&mut client).await;
 
-    // Send player position (0x1E in protocol 775)
+    // Send player position
     client
         .send_player_position(100.0, 64.0, 200.0, true)
         .await
@@ -278,23 +292,11 @@ async fn test_concurrent_clients() {
     for i in 0..10 {
         let port = server.port();
         let handle = tokio::spawn(async move {
+            let mut client = TestClient::connect(port).await.expect("Failed to connect");
             let username = format!("Player{i}");
-            let mut attempts = 0;
-            loop {
-                attempts += 1;
-                let result = try_complete_login_flow(port, &username).await;
-                match result {
-                    Ok(()) => break,
-                    Err(e) if attempts < 3 => {
-                        eprintln!("Client {username} attempt {attempts} failed: {e}, retrying...");
-                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                    }
-                    Err(e) => panic!("Client {username} failed after {attempts} attempts: {e}"),
-                }
-            }
+            complete_login_flow_with_client(&mut client, &username).await;
         });
         handles.push(handle);
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
     }
 
     // Wait for all clients to complete
@@ -372,7 +374,7 @@ async fn test_configuration_phase() {
         .read_packet()
         .await
         .expect("Failed to read compression");
-    assert_eq!(compression.id, 0x03);
+    assert_eq!(compression.id, login_cb::SET_COMPRESSION);
     client.enable_compression(256);
 
     // Login Success
@@ -380,7 +382,7 @@ async fn test_configuration_phase() {
         .read_packet()
         .await
         .expect("Failed to read login success");
-    assert_eq!(login_success.id, 0x02);
+    assert_eq!(login_success.id, login_cb::LOGIN_SUCCESS);
 
     // Send Login Acknowledged
     client
@@ -393,7 +395,7 @@ async fn test_configuration_phase() {
         .read_packet()
         .await
         .expect("Failed to read known packs");
-    assert_eq!(known_packs.id, 0x0E, "Expected Known Packs");
+    assert_eq!(known_packs.id, config_cb::KNOWN_PACKS, "Expected Known Packs");
 
     // Send Known Packs response
     client
@@ -410,9 +412,9 @@ async fn test_configuration_phase() {
             .await
             .expect("Failed to read config packet");
         match packet.id {
-            0x07 => registry_count += 1,
-            0x0D => got_tags = true,
-            0x03 => break, // Finish Configuration
+            id if id == config_cb::REGISTRY_DATA => registry_count += 1,
+            id if id == config_cb::UPDATE_TAGS => got_tags = true,
+            id if id == config_cb::FINISH_CONFIGURATION => break,
             other => panic!("Unexpected config packet: {other:#04x}"),
         }
     }
@@ -426,252 +428,287 @@ async fn test_configuration_phase() {
 
 #[tokio::test]
 async fn test_chunk_batching() {
-    retry_test("test_chunk_batching", 3, || async {
-        let server = TestServer::spawn().await?;
-        let mut client = TestClient::connect(server.port()).await?;
+    let server = TestServer::spawn().await.expect("Failed to spawn server");
+    let mut client = TestClient::connect(server.port())
+        .await
+        .expect("Failed to connect");
 
-        complete_login_flow(&mut client).await;
+    complete_login_flow(&mut client).await;
 
-        let game_event = client.read_packet().await?;
-        anyhow::ensure!(game_event.id == 0x26, "Expected game event packet");
+    // After login, we should have received Game Event, Set Center Chunk, Chunk Batch Start,
+    // chunks, and Chunk Batch Finished.
 
-        let center_chunk = client.read_packet().await?;
-        anyhow::ensure!(
-            center_chunk.id == 0x58,
-            "Expected set center chunk packet before chunk data"
-        );
+    // Read Game Event
+    let game_event = client
+        .read_packet()
+        .await
+        .expect("Failed to read game event");
+    assert_eq!(game_event.id, play_cb::GAME_EVENT, "Expected game event packet");
 
-        let batch_start = client.read_packet().await?;
-        anyhow::ensure!(batch_start.id == 0x0C, "Expected chunk batch start");
+    // Read Set Center Chunk
+    let center_chunk = client
+        .read_packet()
+        .await
+        .expect("Failed to read set center chunk");
+    assert_eq!(
+        center_chunk.id, play_cb::SET_CENTER_CHUNK,
+        "Expected set center chunk packet before chunk data"
+    );
 
-        let mut chunk_count = 0;
-        loop {
-            let packet = client.read_packet().await?;
-            if packet.id == 0x2D {
-                chunk_count += 1;
-            } else if packet.id == 0x0B {
-                break;
-            } else {
-                anyhow::bail!("Unexpected packet during chunk batch: {:#04x}", packet.id);
-            }
-        }
+    // Read Chunk Batch Start
+    let batch_start = client
+        .read_packet()
+        .await
+        .expect("Failed to read chunk batch start");
+    assert_eq!(batch_start.id, play_cb::CHUNK_BATCH_START, "Expected chunk batch start");
 
-        anyhow::ensure!(
-            chunk_count > 0,
-            "Should receive at least one chunk data packet"
-        );
-        anyhow::ensure!(
-            chunk_count == 289,
-            "Should receive 17x17 chunks, got {chunk_count}"
-        );
-        Ok(())
-    })
-    .await;
-}
-
-async fn try_read_packet_skip_keepalive(
-    client: &mut TestClient,
-) -> anyhow::Result<common::client::RawPacket> {
+    // Read chunk data packets
+    let mut chunk_count = 0;
     loop {
-        let packet = client.read_packet().await?;
-        if packet.id != 0x2C {
-            return Ok(packet);
+        let packet = client
+            .read_packet()
+            .await
+            .expect("Failed to read chunk/batch packet");
+        if packet.id == play_cb::LEVEL_CHUNK_WITH_LIGHT {
+            chunk_count += 1;
+        } else if packet.id == play_cb::CHUNK_BATCH_FINISHED {
+            break;
+        } else {
+            panic!("Unexpected packet during chunk batch: {:#04x}", packet.id);
         }
     }
-}
 
-async fn try_read_packet_skip_keepalive_timeout(
-    client: &mut TestClient,
-    duration: tokio::time::Duration,
-) -> anyhow::Result<Option<common::client::RawPacket>> {
-    loop {
-        let packet = match tokio::time::timeout(duration, client.read_packet()).await {
-            Ok(Ok(p)) => p,
-            Ok(Err(e)) => return Err(e.into()),
-            Err(_) => return Ok(None),
-        };
-        if packet.id != 0x2C {
-            return Ok(Some(packet));
-        }
-    }
+    assert!(
+        chunk_count > 0,
+        "Should receive at least one chunk data packet"
+    );
+    // 17x17 = 289 chunks for view distance 8
+    assert_eq!(chunk_count, 289, "Should receive 17x17 chunks");
 }
 
 #[tokio::test]
 async fn test_chunk_throttling_via_batch_received() {
-    use tokio::time::Duration;
+    use tokio::time::{timeout, Duration};
 
-    retry_test("test_chunk_throttling_via_batch_received", 3, || async {
-        let server = TestServer::spawn().await?;
-        let mut client = TestClient::connect(server.port()).await?;
+    let server = TestServer::spawn().await.expect("Failed to spawn server");
+    let mut client = TestClient::connect(server.port())
+        .await
+        .expect("Failed to connect");
 
-        complete_login_flow(&mut client).await;
+    complete_login_flow(&mut client).await;
 
-        // Consume the initial batch
-        let _game_event = try_read_packet_skip_keepalive(&mut client).await?;
-        let _center_chunk = try_read_packet_skip_keepalive(&mut client).await?;
-        let _batch_start = try_read_packet_skip_keepalive(&mut client).await?;
-        loop {
-            let packet = try_read_packet_skip_keepalive(&mut client).await?;
-            if packet.id == 0x0B {
-                break;
-            }
+    // Consume the initial batch: Game Event, Set Center Chunk, Chunk Batch Start, chunks, Chunk Batch Finished
+    let _game_event = client.read_packet().await.unwrap();
+    let _center_chunk = client.read_packet().await.unwrap();
+    let _batch_start = client.read_packet().await.unwrap();
+    loop {
+        let packet = client.read_packet().await.unwrap();
+        if packet.id == play_cb::CHUNK_BATCH_FINISHED {
+            break;
         }
+    }
 
-        client.send_chunk_batch_received(3.0).await?;
+    // Tell the server we can only handle 3 chunks per tick
+    client.send_chunk_batch_received(3.0).await.unwrap();
 
-        client.send_player_position(256.0, 64.0, 0.0, true).await?;
+    // Move far enough to require new chunks (256 blocks in X)
+    client
+        .send_player_position(256.0, 64.0, 0.0, true)
+        .await
+        .unwrap();
 
-        let mut total_chunks = 0;
-        let mut batch_count = 0;
-        let mut max_batch_size = 0;
+    // Read chunk batches — each batch should have at most 3 chunks
+    let mut total_chunks = 0;
+    let mut batch_count = 0;
+    let mut max_batch_size = 0;
 
-        loop {
-            let packet =
-                match try_read_packet_skip_keepalive_timeout(&mut client, Duration::from_secs(5))
-                    .await?
-                {
-                    Some(p) => p,
-                    None => break,
-                };
-            if packet.id == 0x0C {
-                let mut batch_size = 0;
-                loop {
-                    let inner = try_read_packet_skip_keepalive(&mut client).await?;
-                    if inner.id == 0x2D {
-                        batch_size += 1;
-                    } else if inner.id == 0x0B {
-                        break;
-                    } else if inner.id == 0x25 || inner.id == 0x2C {
-                        continue;
-                    } else {
-                        anyhow::bail!("Unexpected packet in batch: {:#04x}", inner.id);
-                    }
+    // Drain all pending chunks by repeatedly acknowledging batches
+    loop {
+        let packet = match timeout(Duration::from_secs(2), client.read_packet()).await {
+            Ok(Ok(p)) => p,
+            _ => break,
+        };
+        if packet.id == play_cb::CHUNK_BATCH_START {
+            // Chunk Batch Start — read chunks until Chunk Batch Finished
+            let mut batch_size = 0;
+            loop {
+                let inner = client.read_packet().await.unwrap();
+                if inner.id == play_cb::LEVEL_CHUNK_WITH_LIGHT {
+                    batch_size += 1;
+                } else if inner.id == play_cb::CHUNK_BATCH_FINISHED {
+                    break;
+                } else if inner.id == play_cb::UNLOAD_CHUNK || inner.id == play_cb::KEEP_ALIVE {
+                    continue;
+                } else {
+                    panic!("Unexpected packet in batch: {:#04x}", inner.id);
                 }
-                total_chunks += batch_size;
-                batch_count += 1;
-                if batch_size > max_batch_size {
-                    max_batch_size = batch_size;
-                }
-
-                client.send_chunk_batch_received(3.0).await?;
-            } else if packet.id == 0x25 || packet.id == 0x2C {
-                continue;
-            } else if packet.id == 0x58 {
-                continue;
-            } else {
-                break;
             }
-        }
+            total_chunks += batch_size;
+            batch_count += 1;
+            if batch_size > max_batch_size {
+                max_batch_size = batch_size;
+            }
 
-        anyhow::ensure!(
-            batch_count >= 2,
-            "Expected multiple batches, got {batch_count}"
-        );
-        anyhow::ensure!(
-            max_batch_size <= 3,
-            "No batch should exceed 3 chunks, but got {max_batch_size}"
-        );
-        anyhow::ensure!(
-            total_chunks > 3,
-            "Should receive more than 3 total chunks, got {total_chunks}"
-        );
-        Ok(())
-    })
-    .await;
+            // Acknowledge this batch to trigger the next drain
+            client.send_chunk_batch_received(3.0).await.unwrap();
+        } else if packet.id == play_cb::UNLOAD_CHUNK
+            || packet.id == play_cb::KEEP_ALIVE
+            || packet.id == play_cb::SET_CENTER_CHUNK
+        {
+            continue;
+        } else {
+            // No more batch starts — we're done
+            break;
+        }
+    }
+
+    assert!(
+        batch_count >= 2,
+        "Expected multiple batches, got {batch_count}"
+    );
+    assert!(
+        max_batch_size <= 3,
+        "No batch should exceed 3 chunks, but got {max_batch_size}"
+    );
+    assert!(
+        total_chunks > 3,
+        "Should receive more than 3 total chunks, got {total_chunks}"
+    );
 }
 
 #[tokio::test]
 async fn test_client_tick_end_drains_chunks() {
-    retry_test("test_client_tick_end_drains_chunks", 3, || async {
-        let server = TestServer::spawn().await?;
-        let mut client = TestClient::connect(server.port()).await?;
+    let server = TestServer::spawn().await.expect("Failed to spawn server");
+    let mut client = TestClient::connect(server.port())
+        .await
+        .expect("Failed to connect");
 
-        complete_login_flow(&mut client).await;
+    complete_login_flow(&mut client).await;
 
-        let game_event = try_read_packet_skip_keepalive(&mut client).await?;
-        anyhow::ensure!(game_event.id == 0x26, "Expected game event packet");
+    // Consume initial chunk batch (Game Event, Set Center Chunk, Chunk Batch Start, chunks, Chunk Batch Finished)
+    let game_event = client
+        .read_packet()
+        .await
+        .expect("Failed to read game event");
+    assert_eq!(game_event.id, play_cb::GAME_EVENT, "Expected game event packet");
 
-        let center_chunk = try_read_packet_skip_keepalive(&mut client).await?;
-        anyhow::ensure!(center_chunk.id == 0x58, "Expected set center chunk packet");
+    let center_chunk = client
+        .read_packet()
+        .await
+        .expect("Failed to read set center chunk");
+    assert_eq!(
+        center_chunk.id, play_cb::SET_CENTER_CHUNK,
+        "Expected set center chunk packet"
+    );
 
-        let batch_start = try_read_packet_skip_keepalive(&mut client).await?;
-        anyhow::ensure!(batch_start.id == 0x0C, "Expected chunk batch start");
+    let batch_start = client
+        .read_packet()
+        .await
+        .expect("Failed to read chunk batch start");
+    assert_eq!(batch_start.id, play_cb::CHUNK_BATCH_START, "Expected chunk batch start");
 
-        loop {
-            let packet = try_read_packet_skip_keepalive(&mut client).await?;
-            if packet.id == 0x0B {
+    loop {
+        let packet = client
+            .read_packet()
+            .await
+            .expect("Failed to read chunk/batch packet");
+        if packet.id == play_cb::CHUNK_BATCH_FINISHED {
+            break;
+        }
+        assert_eq!(
+            packet.id, play_cb::LEVEL_CHUNK_WITH_LIGHT,
+            "Expected chunk data or batch finished"
+        );
+    }
+
+    // Acknowledge the initial batch so the server knows we're ready
+    client
+        .send_chunk_batch_received(25.0)
+        .await
+        .expect("Failed to send chunk batch received");
+
+    // Move far away to queue new chunks
+    client
+        .send_player_position(1000.0, 64.0, 1000.0, true)
+        .await
+        .expect("Failed to send position");
+
+    // Consume the position response: unload packets + first drain batch
+    let mut position_chunks = 0;
+    loop {
+        let packet = tokio::time::timeout(
+            tokio::time::Duration::from_secs(5),
+            client.read_packet(),
+        )
+        .await
+        .expect("Timed out reading position response")
+        .expect("Failed to read position response packet");
+
+        match packet.id {
+            id if id == play_cb::UNLOAD_CHUNK || id == play_cb::SET_CENTER_CHUNK => {}
+            id if id == play_cb::KEEP_ALIVE => {}
+            id if id == play_cb::CHUNK_BATCH_START => {}
+            id if id == play_cb::LEVEL_CHUNK_WITH_LIGHT => position_chunks += 1,
+            id if id == play_cb::CHUNK_BATCH_FINISHED => {
                 break;
             }
-            anyhow::ensure!(
-                packet.id == 0x2D || packet.id == 0x58 || packet.id == 0x2C,
-                "Expected chunk data, batch finished, or skippable packet, got {:#04x}",
+            other => panic!("Unexpected packet during position response: {other:#04x}"),
+        }
+    }
+    assert!(
+        position_chunks > 0 && position_chunks <= 25,
+        "Position handler should drain at most 25 chunks (got {position_chunks})"
+    );
+
+    // Now send Client Tick End — should drain more pending chunks
+    client
+        .send_client_tick_end()
+        .await
+        .expect("Failed to send client tick end");
+
+    // Read the chunk batch triggered by tick end (skip Keep Alive packets)
+    let response = loop {
+        let pkt = tokio::time::timeout(
+            tokio::time::Duration::from_secs(5),
+            client.read_packet(),
+        )
+        .await
+        .expect("Timed out waiting for chunk response after tick end")
+        .expect("Failed to read packet after tick end");
+        if pkt.id != play_cb::KEEP_ALIVE {
+            break pkt;
+        }
+    };
+
+    assert_eq!(
+        response.id, play_cb::CHUNK_BATCH_START,
+        "Expected chunk batch start after client tick end"
+    );
+
+    let mut chunk_count = 0;
+    loop {
+        let packet = client
+            .read_packet()
+            .await
+            .expect("Failed to read chunk/batch packet");
+        if packet.id == play_cb::LEVEL_CHUNK_WITH_LIGHT {
+            chunk_count += 1;
+        } else if packet.id == play_cb::CHUNK_BATCH_FINISHED {
+            break;
+        } else if packet.id == play_cb::KEEP_ALIVE {
+            continue;
+        } else {
+            panic!(
+                "Unexpected packet during chunk batch: {:#04x}",
                 packet.id
             );
         }
+    }
 
-        client.send_chunk_batch_received(25.0).await?;
-
-        client
-            .send_player_position(1000.0, 64.0, 1000.0, true)
-            .await?;
-
-        let mut position_chunks = 0;
-        loop {
-            let packet =
-                tokio::time::timeout(tokio::time::Duration::from_secs(5), client.read_packet())
-                    .await
-                    .map_err(|_| anyhow::anyhow!("Timed out reading position response"))??;
-
-            match packet.id {
-                0x25 | 0x58 | 0x2C => {}
-                0x0C => {}
-                0x2D => position_chunks += 1,
-                0x0B => break,
-                other => {
-                    anyhow::bail!("Unexpected packet during position response: {other:#04x}")
-                }
-            }
-        }
-        anyhow::ensure!(
-            position_chunks > 0 && position_chunks <= 25,
-            "Position handler should drain at most 25 chunks (got {position_chunks})"
-        );
-
-        client.send_client_tick_end().await?;
-
-        let response = try_read_packet_skip_keepalive_timeout(
-            &mut client,
-            tokio::time::Duration::from_secs(5),
-        )
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("Timed out waiting for chunk response after tick end"))?;
-
-        anyhow::ensure!(
-            response.id == 0x0C,
-            "Expected chunk batch start after client tick end"
-        );
-
-        let mut chunk_count = 0;
-        loop {
-            let packet = try_read_packet_skip_keepalive(&mut client).await?;
-            if packet.id == 0x2D {
-                chunk_count += 1;
-            } else if packet.id == 0x0B {
-                break;
-            } else if packet.id == 0x2C {
-                continue;
-            } else {
-                anyhow::bail!("Unexpected packet during chunk batch: {:#04x}", packet.id);
-            }
-        }
-
-        anyhow::ensure!(
-            chunk_count > 0,
-            "Client Tick End should have drained pending chunks"
-        );
-        Ok(())
-    })
-    .await;
+    assert!(
+        chunk_count > 0,
+        "Client Tick End should have drained pending chunks"
+    );
 }
 #[tokio::test]
 async fn test_configuration_timeout() {
@@ -696,7 +733,7 @@ async fn test_configuration_timeout() {
         .read_packet()
         .await
         .expect("Failed to read compression");
-    assert_eq!(compression.id, 0x03);
+    assert_eq!(compression.id, login_cb::SET_COMPRESSION);
     client.enable_compression(256);
 
     let _login_success = client
@@ -724,7 +761,7 @@ async fn test_configuration_timeout() {
             .read_packet()
             .await
             .expect("Failed to read config packet");
-        if packet.id == 0x03 {
+        if packet.id == config_cb::FINISH_CONFIGURATION {
             break;
         }
     }
@@ -798,8 +835,8 @@ async fn complete_login_flow_with_client(client: &mut TestClient, username: &str
             .read_packet()
             .await
             .expect("Failed to read config packet");
-        if packet.id == 0x03 {
-            break; // Finish Configuration
+        if packet.id == config_cb::FINISH_CONFIGURATION {
+            break;
         }
     }
 
@@ -809,68 +846,21 @@ async fn complete_login_flow_with_client(client: &mut TestClient, username: &str
         .await
         .expect("Failed to send acknowledge finish configuration");
 
-    // Read join game (0x30)
-
+    // Read join game
     let _join_game = client
         .read_packet()
         .await
         .expect("Failed to read join game");
 
-    // Read Player Info Update (0x40)
+    // Read Player Info Update
     let _player_info = client
         .read_packet()
         .await
         .expect("Failed to read player info update");
 
-    // Read sync position (0x46)
-
+    // Read sync position
     let _sync_pos = client
         .read_packet()
         .await
         .expect("Failed to read sync position");
-}
-
-async fn try_complete_login_flow(port: u16, username: &str) -> anyhow::Result<()> {
-    let mut client = TestClient::connect(port).await?;
-    client.send_handshake(775, 2).await?;
-    let uuid = Uuid::new_v4();
-    client.send_login_start(username, uuid).await?;
-
-    // Compression
-    let _compression = client.read_packet().await?;
-    client.enable_compression(256);
-
-    // Login Success
-    let _login_success = client.read_packet().await?;
-
-    // Login Acknowledged
-    client.send_login_acknowledged().await?;
-
-    // Known Packs
-    let _known_packs = client.read_packet().await?;
-
-    // Send Known Packs response
-    client.send_known_packs_response().await?;
-
-    // Read configuration packets until Finish Configuration
-    loop {
-        let packet = client.read_packet().await?;
-        if packet.id == 0x03 {
-            break;
-        }
-    }
-
-    // Send Acknowledge Finish Configuration to transition to Play
-    client.send_acknowledge_finish_configuration().await?;
-
-    // Read join game (0x30)
-    let _join_game = client.read_packet().await?;
-
-    // Read Player Info Update (0x40)
-    let _player_info = client.read_packet().await?;
-
-    // Read sync position (0x46)
-    let _sync_pos = client.read_packet().await?;
-
-    Ok(())
 }

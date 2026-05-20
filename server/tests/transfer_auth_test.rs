@@ -1,12 +1,16 @@
 mod common;
 
 use common::{TestClient, TestServer};
+use rustmc_server::protocol::packet_ids;
 use uuid::Uuid;
+
+use packet_ids::configuration::clientbound as config_cb;
+use packet_ids::play::clientbound as play_cb;
 
 const OP_UUID: &str = "069a79f4-44e9-4726-a5be-fca90e38aaf5";
 
 fn ops_config(uuid: &str) -> String {
-    format!("[[operators]]\nuuid = \"{uuid}\"\nname = \"TestOp\"\nlevel = 4\n")
+    format!("[[operators]]\nuuid = \"{uuid}\"\nname = \"TransferAuthTest\"\nlevel = 4\n")
 }
 
 #[tokio::test]
@@ -42,13 +46,13 @@ async fn test_transfer_sends_cookie_token() {
         .await
         .expect("Failed to send transfer command");
 
-    // Should receive Store Cookie packet (0x74) before Transfer packet (0x73)
+    // Should receive Store Cookie packet before Transfer packet
     let cookie_packet = client
         .read_packet()
         .await
         .expect("Failed to read store cookie packet");
     assert_eq!(
-        cookie_packet.id, 0x74,
+        cookie_packet.id, play_cb::STORE_COOKIE,
         "Expected store cookie packet before transfer"
     );
 
@@ -56,14 +60,15 @@ async fn test_transfer_sends_cookie_token() {
         .read_packet()
         .await
         .expect("Failed to read transfer packet");
-    assert_eq!(transfer_packet.id, 0x73, "Expected transfer packet");
+    assert_eq!(transfer_packet.id, play_cb::TRANSFER, "Expected transfer packet");
 }
 
 #[tokio::test]
 async fn test_target_server_requests_transfer_cookie() {
-    let server = TestServer::spawn_with_env(&[("RUSTMC_TRANSFER_SECRET", "integration-test-secret")])
-        .await
-        .expect("Failed to spawn server");
+    let server =
+        TestServer::spawn_with_env(&[("RUSTMC_TRANSFER_SECRET", "integration-test-secret")])
+            .await
+            .expect("Failed to spawn server");
 
     let mut client = TestClient::connect(server.port())
         .await
@@ -104,7 +109,7 @@ async fn test_transfer_without_secret_skips_token() {
         .await
         .expect("Failed to read transfer packet");
     assert_eq!(
-        packet.id, 0x73,
+        packet.id, play_cb::TRANSFER,
         "Expected transfer packet directly without secret"
     );
 }
@@ -156,7 +161,7 @@ async fn complete_login_flow_with_uuid(client: &mut TestClient, uuid: Uuid) {
             .read_packet()
             .await
             .expect("Failed to read config packet");
-        if packet.id == 0x03 {
+        if packet.id == config_cb::FINISH_CONFIGURATION {
             break;
         }
     }
@@ -167,13 +172,13 @@ async fn complete_login_flow_with_uuid(client: &mut TestClient, uuid: Uuid) {
         .await
         .expect("Failed to send acknowledge finish configuration");
 
-    // Read play login sequence packets until Game Event (0x26)
+    // Read play login sequence packets until Game Event
     loop {
         let packet = client
             .read_packet()
             .await
             .expect("Failed to read play login packet");
-        if packet.id == 0x26 {
+        if packet.id == play_cb::GAME_EVENT {
             break;
         }
     }
@@ -227,7 +232,7 @@ async fn complete_login_flow_and_check_cookie_request(client: &mut TestClient) {
             .read_packet()
             .await
             .expect("Failed to read config packet");
-        if packet.id == 0x03 {
+        if packet.id == config_cb::FINISH_CONFIGURATION {
             break;
         }
     }
@@ -239,20 +244,20 @@ async fn complete_login_flow_and_check_cookie_request(client: &mut TestClient) {
         .expect("Failed to send acknowledge finish configuration");
 
     // After configuration, server sends play login sequence.
-    // With RUSTMC_TRANSFER_SECRET set, it should include a cookie request (0x18).
+    // With RUSTMC_TRANSFER_SECRET set, it should include a cookie request.
     let join_game = client
         .read_packet()
         .await
         .expect("Failed to read join game");
-    assert_eq!(join_game.id, 0x31, "Expected join game packet");
+    assert_eq!(join_game.id, play_cb::LOGIN_PLAY, "Expected join game packet");
 
-    // Next should be cookie request (0x18) for "rustmc:transfer_token"
+    // Next should be cookie request for "rustmc:transfer_token"
     let cookie_request = client
         .read_packet()
         .await
         .expect("Failed to read cookie request");
     assert_eq!(
-        cookie_request.id, 0x18,
+        cookie_request.id, play_cb::COOKIE_REQUEST,
         "Expected cookie request packet after join game"
     );
 }
@@ -263,8 +268,7 @@ async fn drain_initial_play_packets(client: &mut TestClient) {
             .read_packet()
             .await
             .expect("Failed to read play packet");
-        if packet.id == 0x0B {
-            // Chunk Batch Finished
+        if packet.id == play_cb::CHUNK_BATCH_FINISHED {
             break;
         }
     }

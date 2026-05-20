@@ -16,7 +16,11 @@ impl TestServer {
 
     pub async fn spawn_with_ops(ops_content: Option<&str>) -> anyhow::Result<Self> {
         let ops_file = if let Some(content) = ops_content {
-            let path = std::env::temp_dir().join(format!("rustmc_ops_{}.toml", std::process::id()));
+            let path = std::env::temp_dir().join(format!(
+                "rustmc_ops_{}_{:?}.toml",
+                std::process::id(),
+                std::thread::current().id()
+            ));
             std::fs::write(&path, content)?;
             Some(path)
         } else {
@@ -45,7 +49,11 @@ impl TestServer {
         ops_content: Option<&str>,
     ) -> anyhow::Result<Self> {
         let ops_file = if let Some(content) = ops_content {
-            let path = std::env::temp_dir().join(format!("rustmc_ops_{}.toml", std::process::id()));
+            let path = std::env::temp_dir().join(format!(
+                "rustmc_ops_{}_{:?}.toml",
+                std::process::id(),
+                std::thread::current().id()
+            ));
             std::fs::write(&path, content)?;
             Some(path)
         } else {

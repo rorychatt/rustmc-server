@@ -1,9 +1,11 @@
 mod common;
 
-use anyhow::Result;
 use common::{TestClient, TestServer};
-use tokio::time::{sleep, Duration};
+use rustmc_server::protocol::packet_ids;
 use uuid::Uuid;
+
+use packet_ids::configuration::clientbound as config_cb;
+use packet_ids::play::clientbound as play_cb;
 
 const OP_UUID: &str = "069a79f4-44e9-4726-a5be-fca90e38aaf5";
 
@@ -21,7 +23,11 @@ async fn test_transfer_packet_sent() {
         .expect("Failed to spawn server A");
     let server_b = TestServer::spawn().await.expect("Failed to spawn server B");
 
-    let mut client = connect_with_retry(server_a.port(), op_uuid).await;
+    let mut client = TestClient::connect(server_a.port())
+        .await
+        .expect("Failed to connect to server A");
+
+    complete_login_flow_with_uuid(&mut client, op_uuid).await;
     drain_initial_play_packets(&mut client).await;
 
     let target_host = "127.0.0.1";
@@ -35,20 +41,27 @@ async fn test_transfer_packet_sent() {
         .read_packet()
         .await
         .expect("Failed to read transfer packet");
-    assert_eq!(packet.id, 0x73, "Expected transfer packet");
+    assert_eq!(packet.id, play_cb::TRANSFER, "Expected transfer packet");
 
     let (host, port) = packet.read_transfer().unwrap();
     assert_eq!(host, target_host);
     assert_eq!(port, target_port);
 
-    let _client_b = connect_with_retry(server_b.port(), Uuid::new_v4()).await;
+    let mut client_b = TestClient::connect(server_b.port())
+        .await
+        .expect("Failed to connect to server B");
+    complete_login_flow(&mut client_b).await;
 }
 
 #[tokio::test]
 async fn test_transfer_denied_without_permission() {
     let server = TestServer::spawn().await.expect("Failed to spawn server");
 
-    let mut client = connect_with_retry(server.port(), Uuid::new_v4()).await;
+    let mut client = TestClient::connect(server.port())
+        .await
+        .expect("Failed to connect");
+
+    complete_login_flow(&mut client).await;
     drain_initial_play_packets(&mut client).await;
 
     client
@@ -60,8 +73,10 @@ async fn test_transfer_denied_without_permission() {
         .read_packet()
         .await
         .expect("Failed to read response packet");
-    // System Chat Message packet (0x79)
-    assert_eq!(packet.id, 0x79, "Expected system chat message packet");
+    assert_eq!(
+        packet.id, play_cb::SYSTEM_CHAT_MESSAGE,
+        "Expected system chat message packet"
+    );
 
     let json = packet.read_system_chat().unwrap();
     assert!(
@@ -79,7 +94,11 @@ async fn test_transfer_invalid_command() {
         .await
         .expect("Failed to spawn server");
 
-    let mut client = connect_with_retry(server.port(), op_uuid).await;
+    let mut client = TestClient::connect(server.port())
+        .await
+        .expect("Failed to connect");
+
+    complete_login_flow_with_uuid(&mut client, op_uuid).await;
     drain_initial_play_packets(&mut client).await;
 
     // Send a malformed transfer command (missing port)
@@ -94,7 +113,7 @@ async fn test_transfer_invalid_command() {
         .await
         .expect("Failed to send position");
 
-    sleep(Duration::from_millis(200)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
     client
         .send_player_position(1.0, 64.0, 1.0, true)
@@ -102,92 +121,119 @@ async fn test_transfer_invalid_command() {
         .expect("Connection should still be alive");
 }
 
-async fn connect_with_retry(port: u16, uuid: Uuid) -> TestClient {
-    let mut attempts = 0;
-    loop {
-        attempts += 1;
-        match try_connect_and_login(port, uuid).await {
-            Ok(client) => return client,
-            Err(e) if attempts < 3 => {
-                eprintln!("Connection attempt {attempts} failed: {e}, retrying...");
-                sleep(Duration::from_millis(100)).await;
-            }
-            Err(e) => panic!("Failed after {attempts} attempts: {e}"),
-        }
-    }
+async fn complete_login_flow(client: &mut TestClient) {
+    complete_login_flow_with_uuid(client, Uuid::new_v4()).await;
 }
 
-async fn try_connect_and_login(port: u16, uuid: Uuid) -> Result<TestClient> {
-    let mut client = TestClient::connect(port).await?;
-    try_complete_login_flow_with_uuid(&mut client, uuid).await?;
-    Ok(client)
-}
+async fn complete_login_flow_with_uuid(client: &mut TestClient, uuid: Uuid) {
+    client
+        .send_handshake(775, 2)
+        .await
+        .expect("Failed to send handshake");
+    client
+        .send_login_start("TransferTest", uuid)
+        .await
+        .expect("Failed to send login start");
 
-async fn try_complete_login_flow_with_uuid(client: &mut TestClient, uuid: Uuid) -> Result<()> {
-    client.send_handshake(775, 2).await?;
-    client.send_login_start("TransferTest", uuid).await?;
-
-    let _compression = client.read_packet().await?;
+    // Compression
+    let _compression = client
+        .read_packet()
+        .await
+        .expect("Failed to read compression");
     client.enable_compression(256);
 
-    let _login_success = client.read_packet().await?;
+    // Login Success
+    let _login_success = client
+        .read_packet()
+        .await
+        .expect("Failed to read login success");
 
-    client.send_login_acknowledged().await?;
+    // Login Acknowledged
+    client
+        .send_login_acknowledged()
+        .await
+        .expect("Failed to send login acknowledged");
 
-    let _known_packs = client.read_packet().await?;
+    // Known Packs
+    let _known_packs = client
+        .read_packet()
+        .await
+        .expect("Failed to read known packs");
 
-    client.send_known_packs_response().await?;
+    // Send Known Packs response
+    client
+        .send_known_packs_response()
+        .await
+        .expect("Failed to send known packs response");
 
+    // Read configuration packets until Finish Configuration
     loop {
-        let packet = client.read_packet().await?;
-        if packet.id == 0x03 {
+        let packet = client
+            .read_packet()
+            .await
+            .expect("Failed to read config packet");
+        if packet.id == config_cb::FINISH_CONFIGURATION {
             break;
         }
     }
 
-    client.send_acknowledge_finish_configuration().await?;
+    // Send Acknowledge Finish Configuration to transition server to Play state
+    client
+        .send_acknowledge_finish_configuration()
+        .await
+        .expect("Failed to send acknowledge finish configuration");
 
-    // Read join game (0x31)
-    let _join_game = client.read_packet().await?;
+    // Read join game
+    let _join_game = client
+        .read_packet()
+        .await
+        .expect("Failed to read join game");
 
-    // Read player info update (0x40)
-    let _player_info = client.read_packet().await?;
+    // Read player info update
+    let _player_info = client
+        .read_packet()
+        .await
+        .expect("Failed to read player info update");
 
-    // Read sync position (0x48)
-    let _sync_pos = client.read_packet().await?;
-
-    Ok(())
+    // Read sync position
+    let _sync_pos = client
+        .read_packet()
+        .await
+        .expect("Failed to read sync position");
 }
 
 async fn drain_initial_play_packets(client: &mut TestClient) {
-    // Read Game Event (0x26)
+    // Read Game Event
     let game_event = client
         .read_packet()
         .await
         .expect("Failed to read game event");
-    assert_eq!(game_event.id, 0x26, "Expected game event packet");
+    assert_eq!(game_event.id, play_cb::GAME_EVENT, "Expected game event packet");
 
-    // Read Set Center Chunk (0x58)
+    // Read Set Center Chunk
     let center_chunk = client
         .read_packet()
         .await
         .expect("Failed to read set center chunk");
-    assert_eq!(center_chunk.id, 0x58, "Expected set center chunk packet");
+    assert_eq!(
+        center_chunk.id, play_cb::SET_CENTER_CHUNK,
+        "Expected set center chunk packet"
+    );
 
-    // Read Chunk Batch Start (0x0C)
+    // Read Chunk Batch Start
     let batch_start = client
         .read_packet()
         .await
         .expect("Failed to read chunk batch start");
-    assert_eq!(batch_start.id, 0x0C, "Expected chunk batch start");
+    assert_eq!(batch_start.id, play_cb::CHUNK_BATCH_START, "Expected chunk batch start");
 
-    // Read chunk data packets until Chunk Batch Finished (0x0B)
+    // Read chunk data packets until Chunk Batch Finished
     loop {
         let packet = client
             .read_packet()
             .await
             .expect("Failed to read chunk packet");
-        if packet.id == 0x0B {
+        if packet.id == play_cb::CHUNK_BATCH_FINISHED {
             break;
         }
     }
