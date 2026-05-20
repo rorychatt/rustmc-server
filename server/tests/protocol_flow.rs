@@ -424,6 +424,23 @@ async fn test_configuration_phase() {
         "Should receive 12 registry data packets (got {registry_count})"
     );
     assert!(got_tags, "Should receive Update Tags packet");
+
+    // Send Acknowledge Finish Configuration to transition to Play
+    client
+        .send_acknowledge_finish_configuration()
+        .await
+        .expect("Failed to send acknowledge finish configuration");
+
+    // Verify server transitions to Play by sending LOGIN_PLAY (join game)
+    let join_game = client
+        .read_packet()
+        .await
+        .expect("Failed to read join game after acknowledge finish");
+    assert_eq!(
+        join_game.id, play_cb::LOGIN_PLAY,
+        "Expected LOGIN_PLAY packet after configuration phase completes (got {:#04x})",
+        join_game.id
+    );
 }
 
 #[tokio::test]
