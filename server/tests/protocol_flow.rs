@@ -442,8 +442,8 @@ async fn test_configuration_phase() {
     }
 
     assert_eq!(
-        registry_count, 12,
-        "Should receive 12 registry data packets (got {registry_count})"
+        registry_count, 28,
+        "Should receive 28 registry data packets (got {registry_count})"
     );
     assert!(got_tags, "Should receive Update Tags packet");
 
