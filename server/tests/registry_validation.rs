@@ -35,7 +35,7 @@ fn test_registry_entry_counts_match_generated() {
 
 #[test]
 fn test_registry_field_completeness() {
-    let reg_set = registry::registry_set_for(PROTOCOL_VERSION);
+    let reg_set = registry::registry_set_for(PROTOCOL_VERSION).unwrap();
     for registry_id in reg_set.registry_ids {
         let entries = registry::load(registry_id, PROTOCOL_VERSION).unwrap();
         for entry in &entries {
