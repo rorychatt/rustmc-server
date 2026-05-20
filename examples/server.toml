@@ -2,6 +2,7 @@
 
 [server]
 bind = "0.0.0.0:25565"
+plugins_directory = "plugins"
 max_players = 20
 motd = "RustMC Server - A Rust-powered Minecraft server"
 view_distance = 8
@@ -14,8 +15,12 @@ spawn_x = 0
 spawn_y = 64
 spawn_z = 0
 
-[plugins]
-directory = "plugins"
+[network]
+# Timeout (seconds) for connections not yet in Play state
+non_play_timeout_secs = 30
+
+[transfer]
+# secret = "your-secret-here"
 
 [rate_limit]
 # Number of invalid packets before disconnecting a client
