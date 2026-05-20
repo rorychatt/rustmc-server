@@ -386,34 +386,24 @@ async fn main() -> anyhow::Result<()> {
     // Send player position to tick connection
     client.send_player_position(0.0, 64.0, 0.0, true).await?;
 
-    // Listen to play packets for a few seconds
-    println!("Listening for game play packets (ticking position)...");
-    let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
-    for _ in 1..=5 {
-        tokio::select! {
-            _ = interval.tick() => {
-                client.send_player_position(0.0, 64.0, 0.0, true).await?;
+    // Listen to play packets until initial chunk loading is finished
+    println!("Listening for initial chunk loading packets...");
+    let mut chunk_count = 0;
+    loop {
+        let pkt = client.read_packet().await?;
+        match pkt.id {
+            id if id == play_cb::KEEP_ALIVE => {
+                println!("Received Keep Alive packet ({} bytes)", pkt.data.len());
             }
-            pkt_res = client.read_packet() => {
-                match pkt_res {
-                    Ok(pkt) => {
-                        match pkt.id {
-                            id if id == play_cb::KEEP_ALIVE => {
-                                println!("Received Keep Alive packet ({} bytes)", pkt.data.len());
-                            }
-                            id if id == play_cb::LEVEL_CHUNK_WITH_LIGHT => {
-                                println!("Received Level Chunk With Light packet ({} bytes)", pkt.data.len());
-                            }
-                            other => {
-                                println!("Received play packet ID: {:#04x} ({} bytes)", other, pkt.data.len());
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        println!("Error reading packet: {}", e);
-                        break;
-                    }
-                }
+            id if id == play_cb::LEVEL_CHUNK_WITH_LIGHT => {
+                chunk_count += 1;
+            }
+            id if id == play_cb::CHUNK_BATCH_FINISHED => {
+                println!("Received Chunk Batch Finished packet! Successfully loaded {} spawn chunks.", chunk_count);
+                break;
+            }
+            other => {
+                println!("Received play packet ID: {:#04x} ({} bytes)", other, pkt.data.len());
             }
         }
     }
