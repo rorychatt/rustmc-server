@@ -370,6 +370,20 @@ fn capture_vanilla_registry_ordering() {
     println!("Written registry ordering to {}", output_path.display());
 }
 
+fn rekey_entry(entry: &serde_json::Value) -> serde_json::Value {
+    let obj = entry.as_object().unwrap();
+    let mut new_obj = serde_json::Map::with_capacity(obj.len());
+    if let Some(id) = obj.get("id") {
+        new_obj.insert("id".to_string(), id.clone());
+    }
+    for (k, v) in obj {
+        if k != "id" {
+            new_obj.insert(k.clone(), v.clone());
+        }
+    }
+    serde_json::Value::Object(new_obj)
+}
+
 #[test]
 #[ignore]
 fn reorder_registry_files_to_match_vanilla() {
@@ -413,14 +427,14 @@ fn reorder_registry_files_to_match_vanilla() {
                 .iter()
                 .find(|e| e["id"].as_str() == Some(expected_id))
             {
-                sorted.push(entry.clone());
+                sorted.push(rekey_entry(entry));
             }
         }
         // Append any entries from our file that aren't in the vanilla snapshot
         for entry in &entries {
             let id = entry["id"].as_str().unwrap();
             if !expected_order.contains(&id.to_string()) {
-                sorted.push(entry.clone());
+                sorted.push(rekey_entry(entry));
             }
         }
 
