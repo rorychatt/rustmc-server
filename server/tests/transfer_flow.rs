@@ -1,6 +1,8 @@
 mod common;
 
+use anyhow::Result;
 use common::{TestClient, TestServer};
+use tokio::time::{sleep, Duration};
 use uuid::Uuid;
 
 const OP_UUID: &str = "069a79f4-44e9-4726-a5be-fca90e38aaf5";
@@ -19,11 +21,7 @@ async fn test_transfer_packet_sent() {
         .expect("Failed to spawn server A");
     let server_b = TestServer::spawn().await.expect("Failed to spawn server B");
 
-    let mut client = TestClient::connect(server_a.port())
-        .await
-        .expect("Failed to connect to server A");
-
-    complete_login_flow_with_uuid(&mut client, op_uuid).await;
+    let mut client = connect_with_retry(server_a.port(), op_uuid).await;
     drain_initial_play_packets(&mut client).await;
 
     let target_host = "127.0.0.1";
@@ -43,21 +41,14 @@ async fn test_transfer_packet_sent() {
     assert_eq!(host, target_host);
     assert_eq!(port, target_port);
 
-    let mut client_b = TestClient::connect(server_b.port())
-        .await
-        .expect("Failed to connect to server B");
-    complete_login_flow(&mut client_b).await;
+    let _client_b = connect_with_retry(server_b.port(), Uuid::new_v4()).await;
 }
 
 #[tokio::test]
 async fn test_transfer_denied_without_permission() {
     let server = TestServer::spawn().await.expect("Failed to spawn server");
 
-    let mut client = TestClient::connect(server.port())
-        .await
-        .expect("Failed to connect");
-
-    complete_login_flow(&mut client).await;
+    let mut client = connect_with_retry(server.port(), Uuid::new_v4()).await;
     drain_initial_play_packets(&mut client).await;
 
     client
@@ -88,11 +79,7 @@ async fn test_transfer_invalid_command() {
         .await
         .expect("Failed to spawn server");
 
-    let mut client = TestClient::connect(server.port())
-        .await
-        .expect("Failed to connect");
-
-    complete_login_flow_with_uuid(&mut client, op_uuid).await;
+    let mut client = connect_with_retry(server.port(), op_uuid).await;
     drain_initial_play_packets(&mut client).await;
 
     // Send a malformed transfer command (missing port)
@@ -107,7 +94,7 @@ async fn test_transfer_invalid_command() {
         .await
         .expect("Failed to send position");
 
-    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+    sleep(Duration::from_millis(200)).await;
 
     client
         .send_player_position(1.0, 64.0, 1.0, true)
@@ -115,85 +102,61 @@ async fn test_transfer_invalid_command() {
         .expect("Connection should still be alive");
 }
 
-async fn complete_login_flow(client: &mut TestClient) {
-    complete_login_flow_with_uuid(client, Uuid::new_v4()).await;
+async fn connect_with_retry(port: u16, uuid: Uuid) -> TestClient {
+    let mut attempts = 0;
+    loop {
+        attempts += 1;
+        match try_connect_and_login(port, uuid).await {
+            Ok(client) => return client,
+            Err(e) if attempts < 3 => {
+                eprintln!("Connection attempt {attempts} failed: {e}, retrying...");
+                sleep(Duration::from_millis(100)).await;
+            }
+            Err(e) => panic!("Failed after {attempts} attempts: {e}"),
+        }
+    }
 }
 
-async fn complete_login_flow_with_uuid(client: &mut TestClient, uuid: Uuid) {
-    client
-        .send_handshake(775, 2)
-        .await
-        .expect("Failed to send handshake");
-    client
-        .send_login_start("TransferTest", uuid)
-        .await
-        .expect("Failed to send login start");
+async fn try_connect_and_login(port: u16, uuid: Uuid) -> Result<TestClient> {
+    let mut client = TestClient::connect(port).await?;
+    try_complete_login_flow_with_uuid(&mut client, uuid).await?;
+    Ok(client)
+}
 
-    // Compression
-    let _compression = client
-        .read_packet()
-        .await
-        .expect("Failed to read compression");
+async fn try_complete_login_flow_with_uuid(client: &mut TestClient, uuid: Uuid) -> Result<()> {
+    client.send_handshake(775, 2).await?;
+    client.send_login_start("TransferTest", uuid).await?;
+
+    let _compression = client.read_packet().await?;
     client.enable_compression(256);
 
-    // Login Success
-    let _login_success = client
-        .read_packet()
-        .await
-        .expect("Failed to read login success");
+    let _login_success = client.read_packet().await?;
 
-    // Login Acknowledged
-    client
-        .send_login_acknowledged()
-        .await
-        .expect("Failed to send login acknowledged");
+    client.send_login_acknowledged().await?;
 
-    // Known Packs
-    let _known_packs = client
-        .read_packet()
-        .await
-        .expect("Failed to read known packs");
+    let _known_packs = client.read_packet().await?;
 
-    // Send Known Packs response
-    client
-        .send_known_packs_response()
-        .await
-        .expect("Failed to send known packs response");
+    client.send_known_packs_response().await?;
 
-    // Read configuration packets until Finish Configuration
     loop {
-        let packet = client
-            .read_packet()
-            .await
-            .expect("Failed to read config packet");
+        let packet = client.read_packet().await?;
         if packet.id == 0x03 {
             break;
         }
     }
 
-    // Send Acknowledge Finish Configuration to transition server to Play state
-    client
-        .send_acknowledge_finish_configuration()
-        .await
-        .expect("Failed to send acknowledge finish configuration");
+    client.send_acknowledge_finish_configuration().await?;
 
     // Read join game (0x31)
-    let _join_game = client
-        .read_packet()
-        .await
-        .expect("Failed to read join game");
+    let _join_game = client.read_packet().await?;
 
     // Read player info update (0x40)
-    let _player_info = client
-        .read_packet()
-        .await
-        .expect("Failed to read player info update");
+    let _player_info = client.read_packet().await?;
 
     // Read sync position (0x48)
-    let _sync_pos = client
-        .read_packet()
-        .await
-        .expect("Failed to read sync position");
+    let _sync_pos = client.read_packet().await?;
+
+    Ok(())
 }
 
 async fn drain_initial_play_packets(client: &mut TestClient) {

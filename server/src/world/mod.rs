@@ -1,3 +1,4 @@
+pub mod block_registry;
 pub mod chunk;
 
 use chunk::{Chunk, ChunkPos};

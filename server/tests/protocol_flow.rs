@@ -487,9 +487,33 @@ async fn test_chunk_batching() {
     assert_eq!(chunk_count, 289, "Should receive 17x17 chunks");
 }
 
+async fn read_packet_skip_keepalive(client: &mut TestClient) -> common::client::RawPacket {
+    loop {
+        let packet = client.read_packet().await.expect("Failed to read packet");
+        if packet.id != 0x2C {
+            return packet;
+        }
+    }
+}
+
+async fn read_packet_skip_keepalive_timeout(
+    client: &mut TestClient,
+    duration: tokio::time::Duration,
+) -> Option<common::client::RawPacket> {
+    loop {
+        let packet = match tokio::time::timeout(duration, client.read_packet()).await {
+            Ok(Ok(p)) => p,
+            _ => return None,
+        };
+        if packet.id != 0x2C {
+            return Some(packet);
+        }
+    }
+}
+
 #[tokio::test]
 async fn test_chunk_throttling_via_batch_received() {
-    use tokio::time::{timeout, Duration};
+    use tokio::time::Duration;
 
     let server = TestServer::spawn().await.expect("Failed to spawn server");
     let mut client = TestClient::connect(server.port())
@@ -499,11 +523,11 @@ async fn test_chunk_throttling_via_batch_received() {
     complete_login_flow(&mut client).await;
 
     // Consume the initial batch: Game Event, Set Center Chunk, Chunk Batch Start, chunks, Chunk Batch Finished
-    let _game_event = client.read_packet().await.unwrap();
-    let _center_chunk = client.read_packet().await.unwrap(); // Set Center Chunk (0x58)
-    let _batch_start = client.read_packet().await.unwrap();
+    let _game_event = read_packet_skip_keepalive(&mut client).await;
+    let _center_chunk = read_packet_skip_keepalive(&mut client).await;
+    let _batch_start = read_packet_skip_keepalive(&mut client).await;
     loop {
-        let packet = client.read_packet().await.unwrap();
+        let packet = read_packet_skip_keepalive(&mut client).await;
         if packet.id == 0x0B {
             break;
         }
@@ -525,15 +549,16 @@ async fn test_chunk_throttling_via_batch_received() {
 
     // Drain all pending chunks by repeatedly acknowledging batches
     loop {
-        let packet = match timeout(Duration::from_secs(2), client.read_packet()).await {
-            Ok(Ok(p)) => p,
-            _ => break,
-        };
+        let packet =
+            match read_packet_skip_keepalive_timeout(&mut client, Duration::from_secs(5)).await {
+                Some(p) => p,
+                None => break,
+            };
         if packet.id == 0x0C {
             // Chunk Batch Start — read chunks until Chunk Batch Finished
             let mut batch_size = 0;
             loop {
-                let inner = client.read_packet().await.unwrap();
+                let inner = read_packet_skip_keepalive(&mut client).await;
                 if inner.id == 0x2D {
                     batch_size += 1;
                 } else if inner.id == 0x0B {
@@ -555,11 +580,7 @@ async fn test_chunk_throttling_via_batch_received() {
         } else if packet.id == 0x25 || packet.id == 0x2C {
             // Unload Chunk or Keep-Alive packets may arrive between batches
             continue;
-        } else if packet.id == 0x2C {
-            // Keep Alive - skip
-            continue;
         } else if packet.id == 0x58 {
-            // Set Center Chunk - skip
             continue;
         } else {
             // No more batch starts — we're done
@@ -591,33 +612,17 @@ async fn test_client_tick_end_drains_chunks() {
     complete_login_flow(&mut client).await;
 
     // Consume initial chunk batch (Game Event, Set Center Chunk, Chunk Batch Start, chunks, Chunk Batch Finished)
-    let game_event = client
-        .read_packet()
-        .await
-        .expect("Failed to read game event");
+    let game_event = read_packet_skip_keepalive(&mut client).await;
     assert_eq!(game_event.id, 0x26, "Expected game event packet");
 
-    // Skip packets until we get Chunk Batch Start (may receive Set Center Chunk, Keep-Alive, etc.)
-    let _batch_start = loop {
-        let pkt = client
-            .read_packet()
-            .await
-            .expect("Failed to read chunk batch start");
-        if pkt.id == 0x0C {
-            break pkt;
-        }
-        assert!(
-            pkt.id == 0x58 || pkt.id == 0x2C || pkt.id == 0x25,
-            "Expected chunk batch start or skippable packet, got {:#04x}",
-            pkt.id
-        );
-    };
+    let center_chunk = read_packet_skip_keepalive(&mut client).await;
+    assert_eq!(center_chunk.id, 0x58, "Expected set center chunk packet");
+
+    let batch_start = read_packet_skip_keepalive(&mut client).await;
+    assert_eq!(batch_start.id, 0x0C, "Expected chunk batch start");
 
     loop {
-        let packet = client
-            .read_packet()
-            .await
-            .expect("Failed to read chunk/batch packet");
+        let packet = read_packet_skip_keepalive(&mut client).await;
         if packet.id == 0x0B {
             break;
         }
@@ -675,29 +680,20 @@ async fn test_client_tick_end_drains_chunks() {
         .await
         .expect("Failed to send client tick end");
 
-    // Read the chunk batch triggered by tick end (skip keep-alive/unload packets)
-    let _response = loop {
-        let pkt = tokio::time::timeout(tokio::time::Duration::from_secs(5), client.read_packet())
+    // Read the chunk batch triggered by tick end
+    let response =
+        read_packet_skip_keepalive_timeout(&mut client, tokio::time::Duration::from_secs(5))
             .await
-            .expect("Timed out waiting for chunk response after tick end")
-            .expect("Failed to read packet after tick end");
+            .expect("Timed out waiting for chunk response after tick end");
 
-        if pkt.id == 0x0C {
-            break pkt;
-        }
-        assert!(
-            pkt.id == 0x25 || pkt.id == 0x2C,
-            "Expected chunk batch start or skippable packet, got {:#04x}",
-            pkt.id
-        );
-    };
+    assert_eq!(
+        response.id, 0x0C,
+        "Expected chunk batch start after client tick end"
+    );
 
     let mut chunk_count = 0;
     loop {
-        let packet = client
-            .read_packet()
-            .await
-            .expect("Failed to read chunk/batch packet");
+        let packet = read_packet_skip_keepalive(&mut client).await;
         if packet.id == 0x2D {
             chunk_count += 1;
         } else if packet.id == 0x0B {

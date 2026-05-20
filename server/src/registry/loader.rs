@@ -6,7 +6,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::io;
 use std::sync::LazyLock;
-use tracing::warn;
+use tracing::error;
 
 pub(crate) mod v775 {
     pub const DIMENSION_TYPE_JSON: &str =
@@ -94,8 +94,8 @@ pub fn registry_set_for(protocol_version: i32) -> &'static RegistrySet {
     match protocol_version {
         775 => &V775_SET,
         _ => {
-            warn!(
-                "Unsupported protocol version {protocol_version}, falling back to registry set for version 775"
+            error!(
+                "Unsupported protocol version {protocol_version} (supported: {SUPPORTED_VERSIONS:?}), falling back to registry set for version 775"
             );
             &V775_SET
         }
