@@ -109,7 +109,8 @@ impl TestClient {
     pub async fn send_confirm_teleportation(&mut self, teleport_id: i32) -> anyhow::Result<()> {
         let mut data = Vec::new();
         write_varint(&mut data, teleport_id)?;
-        self.send_packet(play_sb::CONFIRM_TELEPORTATION, &data).await
+        self.send_packet(play_sb::CONFIRM_TELEPORTATION, &data)
+            .await
     }
 
     #[allow(dead_code)]

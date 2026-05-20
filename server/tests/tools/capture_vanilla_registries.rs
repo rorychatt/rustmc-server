@@ -277,7 +277,9 @@ fn capture_vanilla_registry_ordering() {
     write_string(&mut handshake_data, &host);
     handshake_data.extend_from_slice(&port.to_be_bytes());
     write_varint(&mut handshake_data, 2); // Next state: Login
-    writer.write_packet(&Packet::new(0x00, handshake_data)).unwrap();
+    writer
+        .write_packet(&Packet::new(0x00, handshake_data))
+        .unwrap();
 
     // Login Start
     let mut login_data = Vec::new();
@@ -387,10 +389,8 @@ fn rekey_entry(entry: &serde_json::Value) -> serde_json::Value {
 #[test]
 #[ignore]
 fn reorder_registry_files_to_match_vanilla() {
-    let snapshot: HashMap<String, Vec<String>> = serde_json::from_str(include_str!(
-        "../../tests/data/vanilla_registry_order.json"
-    ))
-    .unwrap();
+    let snapshot: HashMap<String, Vec<String>> =
+        serde_json::from_str(include_str!("../../tests/data/vanilla_registry_order.json")).unwrap();
 
     let data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data/registries/v775");
 

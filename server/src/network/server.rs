@@ -68,7 +68,8 @@ impl Server {
                     let config = {
                         let cfg = self.config.read().await;
                         cfg.clone()
-                    };                    tokio::spawn(async move {
+                    };
+                    tokio::spawn(async move {
                         let connection =
                             Connection::new(addr, world, operators, broadcast_tx, config);
                         connection.handle(stream, broadcast_rx).await;

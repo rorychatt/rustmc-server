@@ -19,10 +19,14 @@ impl BlockRegistry {
             if state.properties.len() != properties.len() {
                 return None;
             }
-            let matches = properties.iter().all(|(k, v)| {
-                state.properties.iter().any(|(sk, sv)| sk == k && sv == v)
-            });
-            if matches { Some(state.id) } else { None }
+            let matches = properties
+                .iter()
+                .all(|(k, v)| state.properties.iter().any(|(sk, sv)| sk == k && sv == v));
+            if matches {
+                Some(state.id)
+            } else {
+                None
+            }
         })
     }
 

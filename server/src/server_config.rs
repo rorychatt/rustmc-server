@@ -35,7 +35,8 @@ impl Default for ServerConfig {
             last_modified: None,
             config_path: Self::default_path(),
         }
-    }}
+    }
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ServerSection {
@@ -375,7 +376,8 @@ mod tests {
         assert_eq!(config.server.plugins_directory, "plugins");
         assert_eq!(config.network.non_play_timeout_secs, 30);
         assert!(config.transfer.secret.is_none());
-        assert!(config.last_modified.is_none());    }
+        assert!(config.last_modified.is_none());
+    }
 
     #[test]
     fn test_load_from_toml() {
@@ -456,7 +458,11 @@ invalid_packet_threshold = 8
         config.config_path = config_path.clone();
 
         thread::sleep(Duration::from_millis(50));
-        std::fs::write(&config_path, "[rate_limit]\ninvalid_packet_threshold = 99\n").unwrap();
+        std::fs::write(
+            &config_path,
+            "[rate_limit]\ninvalid_packet_threshold = 99\n",
+        )
+        .unwrap();
 
         assert!(config.has_file_changed());
 

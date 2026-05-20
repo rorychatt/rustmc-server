@@ -6,8 +6,7 @@ fn get_protocol_id(json: &Value, phase: &str, direction: &str, name: &str) -> i3
     let key = format!("minecraft:{name}");
     json[phase][direction][&key]["protocol_id"]
         .as_i64()
-        .unwrap_or_else(|| panic!("Missing packet: {phase}/{direction}/{key}"))
-        as i32
+        .unwrap_or_else(|| panic!("Missing packet: {phase}/{direction}/{key}")) as i32
 }
 
 #[test]
@@ -115,12 +114,7 @@ fn validate_packet_ids_against_official_report() {
     );
     assert_eq!(
         configuration::clientbound::KNOWN_PACKS,
-        get_protocol_id(
-            &json,
-            "configuration",
-            "clientbound",
-            "select_known_packs"
-        ),
+        get_protocol_id(&json, "configuration", "clientbound", "select_known_packs"),
         "configuration/clientbound/select_known_packs mismatch"
     );
 
@@ -142,12 +136,7 @@ fn validate_packet_ids_against_official_report() {
     );
     assert_eq!(
         configuration::serverbound::KNOWN_PACKS,
-        get_protocol_id(
-            &json,
-            "configuration",
-            "serverbound",
-            "select_known_packs"
-        ),
+        get_protocol_id(&json, "configuration", "serverbound", "select_known_packs"),
         "configuration/serverbound/select_known_packs mismatch"
     );
 
