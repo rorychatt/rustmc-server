@@ -41,6 +41,10 @@ pub struct StatusDescription {
 
 impl StatusResponse {
     pub fn default_response(online_count: i32, max_players: i32) -> Self {
+        Self::new(online_count, max_players, "RustMC Server - A Rust-powered Minecraft server")
+    }
+
+    pub fn new(online_count: i32, max_players: i32, motd: &str) -> Self {
         Self {
             version: StatusVersion {
                 name: VERSION_NAME.to_string(),
@@ -52,7 +56,7 @@ impl StatusResponse {
                 sample: Vec::new(),
             },
             description: StatusDescription {
-                text: "RustMC Server - A Rust-powered Minecraft server".to_string(),
+                text: motd.to_string(),
             },
             enforces_secure_chat: false,
         }

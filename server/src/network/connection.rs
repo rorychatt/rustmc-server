@@ -27,7 +27,7 @@ use crate::world::chunk::ChunkPos;
 use crate::world::World;
 use uuid::Uuid;
 
-use crate::server_config::RateLimitSection;
+use crate::server_config::ServerConfig;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionState {
@@ -63,6 +63,8 @@ pub struct Connection {
     invalid_packet_window: Duration,
     invalid_packet_count: u32,
     invalid_packet_window_start: Option<Instant>,
+
+    config: ServerConfig,
 }
 
 impl Connection {
@@ -71,9 +73,10 @@ impl Connection {
         world: Arc<RwLock<World>>,
         operators: Arc<RwLock<Operators>>,
         broadcast_tx: broadcast::Sender<BroadcastEvent>,
-        rate_limit: &RateLimitSection,
-        view_distance: i32,
+        config: ServerConfig,
     ) -> Self {
+        let view_distance = config.server.view_distance;
+        let rate_limit = &config.rate_limit;
         Self {
             addr,
             state: ConnectionState::Handshake,
@@ -99,6 +102,8 @@ impl Connection {
             invalid_packet_window: Duration::from_secs(rate_limit.invalid_packet_window_secs),
             invalid_packet_count: 0,
             invalid_packet_window_start: None,
+
+            config,
         }
     }
 
@@ -422,7 +427,11 @@ impl Connection {
             STATUS_REQUEST => {
                 decode_status_request(data)?;
                 let world = self.world.read().await;
-                let response = StatusResponse::default_response(world.player_count() as i32, 20);
+                let response = StatusResponse::new(
+                    world.player_count() as i32,
+                    self.config.gameplay.max_players,
+                    &self.config.gameplay.motd,
+                );
                 let packet = response.to_packet()?;
                 self.write_packet(writer, &packet).await?;
                 Ok(true)
@@ -627,7 +636,15 @@ impl Connection {
         };
 
         // 1. Login (Play) packet
-        let login_play = play::encode_login_play(entity_id, self.view_distance)?;
+        let login_play = play::encode_login_play(
+            entity_id,
+            self.view_distance,
+            self.config.gameplay.simulation_distance,
+            self.config.gameplay.max_players,
+            self.config.gameplay.hardcore,
+            self.config.gameplay.gamemode_id(),
+            self.config.gameplay.sea_level,
+        )?;
         self.write_packet(writer, &login_play).await?;
 
         // Request transfer token cookie if secret is configured
@@ -637,7 +654,7 @@ impl Connection {
         }
 
         // 2. Player Info Update (required for client to finalize join)
-        let player_info = play::encode_player_info_update(uuid, &name, 1); // game_mode=1 (creative)
+        let player_info = play::encode_player_info_update(uuid, &name, self.config.gameplay.gamemode_id());
         self.write_packet(writer, &player_info).await?;
 
         // 3. Synchronize Player Position
@@ -1209,19 +1226,15 @@ mod tests {
     const TEST_THRESHOLD: u32 = 16;
     const TEST_WINDOW_SECS: u64 = 10;
 
-    fn test_rate_limit() -> RateLimitSection {
-        RateLimitSection {
-            invalid_packet_threshold: TEST_THRESHOLD,
-            invalid_packet_window_secs: TEST_WINDOW_SECS,
-        }
-    }
-
     fn make_connection() -> Connection {
         let world = Arc::new(RwLock::new(World::new()));
         let operators = Arc::new(RwLock::new(Operators::empty()));
         let addr: SocketAddr = "127.0.0.1:25565".parse().unwrap();
         let (broadcast_tx, _broadcast_rx) = broadcast::channel(16);
-        Connection::new(addr, world, operators, broadcast_tx, &test_rate_limit(), 8)
+        let mut config = ServerConfig::default();
+        config.rate_limit.invalid_packet_threshold = TEST_THRESHOLD;
+        config.rate_limit.invalid_packet_window_secs = TEST_WINDOW_SECS;
+        Connection::new(addr, world, operators, broadcast_tx, config)
     }
 
     #[test]
