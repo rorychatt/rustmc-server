@@ -1,7 +1,7 @@
 use super::nbt_encoder::json_to_nbt;
 use crate::protocol::configuration::{encode_registry_data, RegistryEntry};
 use crate::protocol::packet::Packet;
-use crate::protocol::version::SUPPORTED_VERSIONS;
+use crate::protocol::version::{ProtocolVersionError, SUPPORTED_VERSIONS};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io;
@@ -77,10 +77,11 @@ impl RegistrySet {
                     format!("unknown registry: {registry_id}"),
                 )),
             },
-            _ => Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("unsupported protocol version: {}", self.version),
-            )),
+            _ => Err(ProtocolVersionError::UnsupportedVersion {
+                requested: self.version,
+                supported: SUPPORTED_VERSIONS,
+            }
+            .into()),
         }
     }
 }
@@ -93,12 +94,11 @@ pub fn registry_set_for(protocol_version: i32) -> io::Result<&'static RegistrySe
 
     match protocol_version {
         775 => Ok(&V775_SET),
-        _ => Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            format!(
-                "unsupported protocol version {protocol_version} (supported: {SUPPORTED_VERSIONS:?})"
-            ),
-        )),
+        _ => Err(ProtocolVersionError::UnsupportedVersion {
+            requested: protocol_version,
+            supported: SUPPORTED_VERSIONS,
+        }
+        .into()),
     }
 }
 
@@ -179,7 +179,7 @@ fn parse_registry_json(json_str: &str) -> io::Result<Vec<RegistryEntry>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::version::{PROTOCOL_VERSION, SUPPORTED_VERSIONS};
+    use crate::protocol::version::{ProtocolVersionError, PROTOCOL_VERSION, SUPPORTED_VERSIONS};
 
     #[test]
     fn test_load_registry_with_protocol_version() {
@@ -333,5 +333,20 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_registry_set_for_error_downcast() {
+        let result = registry_set_for(999);
+        let err = result.unwrap_err();
+        let source = err.get_ref().unwrap();
+        let pve = source.downcast_ref::<ProtocolVersionError>().unwrap();
+        assert_eq!(
+            *pve,
+            ProtocolVersionError::UnsupportedVersion {
+                requested: 999,
+                supported: SUPPORTED_VERSIONS,
+            }
+        );
     }
 }

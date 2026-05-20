@@ -3,6 +3,8 @@ use std::process::{Child, Command};
 use std::time::Duration;
 use tokio::time::sleep;
 
+static FILE_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 pub struct TestServer {
     process: Child,
     port: u16,
@@ -16,8 +18,9 @@ impl TestServer {
 
     pub async fn spawn_with_ops(ops_content: Option<&str>) -> anyhow::Result<Self> {
         let ops_file = if let Some(content) = ops_content {
+            let count = FILE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let path = std::env::temp_dir().join(format!(
-                "rustmc_ops_{}_{:?}.toml",
+                "rustmc_ops_{}_{:?}_{count}.toml",
                 std::process::id(),
                 std::thread::current().id()
             ));
@@ -49,8 +52,9 @@ impl TestServer {
         ops_content: Option<&str>,
     ) -> anyhow::Result<Self> {
         let ops_file = if let Some(content) = ops_content {
+            let count = FILE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let path = std::env::temp_dir().join(format!(
-                "rustmc_ops_{}_{:?}.toml",
+                "rustmc_ops_{}_{:?}_{count}.toml",
                 std::process::id(),
                 std::thread::current().id()
             ));
@@ -77,8 +81,9 @@ impl TestServer {
         extra_env: &[(&str, &str)],
         ops_file: Option<PathBuf>,
     ) -> anyhow::Result<Self> {
+        let count = FILE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let port_file = std::env::temp_dir().join(format!(
-            "rustmc_port_{}_{}",
+            "rustmc_port_{}_{}_{count}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -86,24 +91,13 @@ impl TestServer {
                 .subsec_nanos()
         ));
 
-        let build_status = Command::new("cargo")
-            .args(["build", "--bin", "rustmc-server"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::piped())
-            .status()?;
-
-        if !build_status.success() {
-            return Err(anyhow::anyhow!("Failed to build rustmc-server binary"));
-        }
-
         let timeout_secs: u64 = std::env::var("RUSTMC_TEST_TIMEOUT_SECS")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(30);
 
-        let mut cmd = Command::new("cargo");
-        cmd.args(["run", "--bin", "rustmc-server"])
-            .env("RUSTMC_BIND", "127.0.0.1:0")
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_rustmc-server"));
+        cmd.env("RUSTMC_BIND", "127.0.0.1:0")
             .env("RUSTMC_PORT_FILE", &port_file)
             .env("RUSTMC_PLUGINS", "")
             .env("RUST_LOG", "rustmc_server=warn")

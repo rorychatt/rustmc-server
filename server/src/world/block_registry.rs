@@ -43,24 +43,11 @@ impl BlockRegistry {
         BLOCKS.get(block).map(|b| b.default_state_id)
     }
 
-    pub fn get_block_from_state(&self, state_id: u16) -> Option<(&str, &HashMap<String, String>)> {
-        use std::sync::OnceLock;
-        type StateCache = HashMap<u16, (String, HashMap<String, String>)>;
-        static CACHE: OnceLock<StateCache> = OnceLock::new();
-        let cache = CACHE.get_or_init(|| {
-            let mut map = HashMap::new();
-            for (id, (name, props)) in &STATES {
-                let props_map: HashMap<String, String> = props
-                    .iter()
-                    .map(|(k, v)| (k.to_string(), v.to_string()))
-                    .collect();
-                map.insert(*id, (name.to_string(), props_map));
-            }
-            map
-        });
-        cache
-            .get(&state_id)
-            .map(|(name, props)| (name.as_str(), props))
+    pub fn get_block_from_state(
+        &self,
+        state_id: u16,
+    ) -> Option<(&'static str, &'static [(&'static str, &'static str)])> {
+        STATES.get(&state_id).copied()
     }
 
     pub fn block_count(&self) -> usize {
@@ -130,7 +117,8 @@ mod tests {
         let default_id = registry.get_default_state_id("minecraft:oak_log").unwrap();
         let (name, props) = registry.get_block_from_state(default_id).unwrap();
         assert_eq!(name, "minecraft:oak_log");
-        assert_eq!(props.get("axis").unwrap(), "y");
+        let axis_value = props.iter().find(|(k, _)| *k == "axis").map(|(_, v)| *v);
+        assert_eq!(axis_value, Some("y"));
     }
 
     #[test]
