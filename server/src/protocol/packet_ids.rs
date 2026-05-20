@@ -20,7 +20,6 @@ pub mod login {
         pub const LOGIN_SUCCESS: i32 = 0x02;
         pub const SET_COMPRESSION: i32 = 0x03;
         pub const COOKIE_REQUEST: i32 = 0x05;
-        pub const STORE_COOKIE: i32 = 0x06;
     }
     pub mod serverbound {
         pub const LOGIN_START: i32 = 0x00;
