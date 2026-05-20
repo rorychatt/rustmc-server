@@ -27,12 +27,18 @@ rand = { workspace = true }
 plugin-bridge = { path = "../plugin-bridge" }
 flate2 = { workspace = true }
 toml = { workspace = true }
+hmac = "0.12"
+sha2 = "0.10"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
 proptest = { workspace = true }
 criterion = { workspace = true }
 rustmc-test-utils = { path = "../test-utils" }
+
+[[test]]
+name = "capture_vanilla_registries"
+path = "tests/tools/capture_vanilla_registries.rs"
 
 [[bench]]
 name = "protocol_bench"

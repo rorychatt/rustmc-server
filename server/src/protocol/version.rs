@@ -3,6 +3,7 @@ use tracing::warn;
 pub const PROTOCOL_VERSION: i32 = 775;
 pub const VERSION_NAME: &str = "26.1.2";
 pub const DATA_PACK_VERSION: &str = "1.21";
+pub const SUPPORTED_VERSIONS: &[i32] = &[775];
 
 pub fn data_pack_version_for(protocol_version: i32) -> &'static str {
     match protocol_version {

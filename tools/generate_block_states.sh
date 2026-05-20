@@ -42,7 +42,11 @@ fi
 
 OUTPUT="$PROJECT_ROOT/server/data/block_states.json"
 
+PROTOCOL_VERSION=$(grep 'PROTOCOL_VERSION' "$PROJECT_ROOT/server/src/protocol/version.rs" \
+  | head -1 | grep -oP '\d+')
+
 echo "Generating block_states.json from: $BLOCKS_JSON"
+echo "Protocol version: $PROTOCOL_VERSION"
 echo "Output: $OUTPUT"
 
 # Extract each block's default state ID from the server JAR report.
@@ -51,7 +55,7 @@ echo "Output: $OUTPUT"
 #
 # For each block, find the state with "default": true and extract its "id".
 jq '{
-  protocol_version: 775,
+  protocol_version: '"$PROTOCOL_VERSION"',
   blocks: (
     [to_entries[] | {
       key: .key,
