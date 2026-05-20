@@ -136,15 +136,15 @@ pub fn encode_game_event(event: u8, value: f32) -> Packet {
     Packet::new(ids::GAME_EVENT, data)
 }
 
-pub fn encode_login_play(entity_id: i32) -> io::Result<Packet> {
+pub fn encode_login_play(entity_id: i32, view_distance: i32) -> io::Result<Packet> {
     let mut data = Vec::new();
     data.extend_from_slice(&entity_id.to_be_bytes()); // Entity ID
     data.push(0); // Is hardcore: false
     VarInt(1).write(&mut data)?; // Dimension count
     write_string(&mut data, "minecraft:overworld")?; // Dimension name
     VarInt(20).write(&mut data)?; // Max players
-    VarInt(8).write(&mut data)?; // View distance
-    VarInt(8).write(&mut data)?; // Simulation distance
+    VarInt(view_distance).write(&mut data)?; // View distance
+    VarInt(view_distance).write(&mut data)?; // Simulation distance
     data.push(0); // Reduced debug info
     data.push(1); // Enable respawn screen
     data.push(0); // Do limited crafting
@@ -472,7 +472,7 @@ mod tests {
 
     #[test]
     fn test_login_play_protocol_775() {
-        let packet = encode_login_play(1).unwrap();
+        let packet = encode_login_play(1, 8).unwrap();
         assert_eq!(packet.id, ids::LOGIN_PLAY);
         assert!(!packet.data.is_empty());
     }

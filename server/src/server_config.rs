@@ -14,6 +14,8 @@ pub struct ServerConfig {
 pub struct ServerSection {
     #[serde(default = "default_bind")]
     pub bind: String,
+    #[serde(default = "default_view_distance")]
+    pub view_distance: i32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -28,6 +30,10 @@ fn default_bind() -> String {
     "0.0.0.0:25565".to_string()
 }
 
+fn default_view_distance() -> i32 {
+    8
+}
+
 fn default_invalid_packet_threshold() -> u32 {
     16
 }
@@ -40,6 +46,7 @@ impl Default for ServerSection {
     fn default() -> Self {
         Self {
             bind: default_bind(),
+            view_distance: default_view_distance(),
         }
     }
 }
@@ -96,6 +103,7 @@ mod tests {
         assert_eq!(config.rate_limit.invalid_packet_threshold, 16);
         assert_eq!(config.rate_limit.invalid_packet_window_secs, 10);
         assert_eq!(config.server.bind, "0.0.0.0:25565");
+        assert_eq!(config.server.view_distance, 8);
     }
 
     #[test]
@@ -103,6 +111,7 @@ mod tests {
         let toml_str = r#"
 [server]
 bind = "127.0.0.1:25566"
+view_distance = 16
 
 [rate_limit]
 invalid_packet_threshold = 32
@@ -110,6 +119,7 @@ invalid_packet_window_secs = 20
 "#;
         let config: ServerConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.server.bind, "127.0.0.1:25566");
+        assert_eq!(config.server.view_distance, 16);
         assert_eq!(config.rate_limit.invalid_packet_threshold, 32);
         assert_eq!(config.rate_limit.invalid_packet_window_secs, 20);
     }
@@ -122,6 +132,7 @@ bind = "0.0.0.0:25567"
 "#;
         let config: ServerConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.server.bind, "0.0.0.0:25567");
+        assert_eq!(config.server.view_distance, 8);
         assert_eq!(config.rate_limit.invalid_packet_threshold, 16);
         assert_eq!(config.rate_limit.invalid_packet_window_secs, 10);
     }
