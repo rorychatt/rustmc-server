@@ -389,7 +389,7 @@ pub fn encode_entity_animation(entity_id: i32, animation: u8) -> Packet {
     let mut data = Vec::new();
     VarInt(entity_id).write(&mut data).unwrap();
     data.push(animation);
-    Packet::new(0x03, data)
+    Packet::new(ids::ENTITY_ANIMATION, data)
 }
 
 pub fn encode_set_entity_metadata(entity_id: i32, metadata: &[u8]) -> Packet {
@@ -397,7 +397,7 @@ pub fn encode_set_entity_metadata(entity_id: i32, metadata: &[u8]) -> Packet {
     VarInt(entity_id).write(&mut data).unwrap();
     data.extend_from_slice(metadata);
     data.push(0xFF);
-    Packet::new(0x60, data)
+    Packet::new(ids::SET_ENTITY_METADATA, data)
 }
 
 pub fn encode_entity_base_flags_metadata(flags: u8) -> Vec<u8> {
@@ -692,7 +692,7 @@ mod tests {
     #[test]
     fn test_encode_entity_animation_main_hand() {
         let packet = encode_entity_animation(42, 0);
-        assert_eq!(packet.id, 0x03);
+        assert_eq!(packet.id, ids::ENTITY_ANIMATION);
         let mut cursor = Cursor::new(&packet.data);
         let eid = VarInt::read(&mut cursor).unwrap().0;
         assert_eq!(eid, 42);
@@ -703,7 +703,7 @@ mod tests {
     #[test]
     fn test_encode_entity_animation_offhand() {
         let packet = encode_entity_animation(7, 3);
-        assert_eq!(packet.id, 0x03);
+        assert_eq!(packet.id, ids::ENTITY_ANIMATION);
         let mut cursor = Cursor::new(&packet.data);
         let eid = VarInt::read(&mut cursor).unwrap().0;
         assert_eq!(eid, 7);
@@ -715,7 +715,7 @@ mod tests {
     fn test_encode_set_entity_metadata() {
         let metadata = vec![0x00, 0x00, 0x02];
         let packet = encode_set_entity_metadata(99, &metadata);
-        assert_eq!(packet.id, 0x60);
+        assert_eq!(packet.id, ids::SET_ENTITY_METADATA);
         let mut cursor = Cursor::new(&packet.data);
         let eid = VarInt::read(&mut cursor).unwrap().0;
         assert_eq!(eid, 99);
