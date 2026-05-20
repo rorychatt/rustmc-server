@@ -46,6 +46,8 @@ pub struct ServerSection {
     pub plugins_directory: String,
     #[serde(default = "default_view_distance")]
     pub view_distance: i32,
+    #[serde(default)]
+    pub port_file: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -172,6 +174,7 @@ impl Default for ServerSection {
             bind: default_bind(),
             plugins_directory: default_plugins_directory(),
             view_distance: default_view_distance(),
+            port_file: None,
         }
     }
 }
@@ -232,6 +235,13 @@ impl GameplaySection {
 }
 
 impl ServerConfig {
+    pub fn port_file(&self) -> Option<String> {
+        self.server
+            .port_file
+            .clone()
+            .or_else(|| std::env::var("RUSTMC_PORT_FILE").ok())
+    }
+
     fn default_path() -> PathBuf {
         if let Ok(env_path) = std::env::var("RUSTMC_CONFIG") {
             PathBuf::from(env_path)
@@ -593,5 +603,47 @@ gameplay:
         assert!(config.gameplay.hardcore);
         assert_eq!(config.gameplay.simulation_distance, 6);
         assert_eq!(config.gameplay.sea_level, 60);
+    }
+
+    #[test]
+    fn test_port_file_returns_none_when_unset() {
+        std::env::remove_var("RUSTMC_PORT_FILE");
+        let config = ServerConfig::default();
+        assert_eq!(config.port_file(), None);
+    }
+
+    #[test]
+    fn test_port_file_returns_config_value() {
+        std::env::remove_var("RUSTMC_PORT_FILE");
+        let mut config = ServerConfig::default();
+        config.server.port_file = Some("/tmp/port".to_string());
+        assert_eq!(config.port_file(), Some("/tmp/port".to_string()));
+    }
+
+    #[test]
+    fn test_port_file_falls_back_to_env_var() {
+        let config = ServerConfig::default();
+        std::env::set_var("RUSTMC_PORT_FILE", "/tmp/env_port");
+        assert_eq!(config.port_file(), Some("/tmp/env_port".to_string()));
+        std::env::remove_var("RUSTMC_PORT_FILE");
+    }
+
+    #[test]
+    fn test_port_file_config_takes_precedence_over_env() {
+        std::env::set_var("RUSTMC_PORT_FILE", "/tmp/env_port");
+        let mut config = ServerConfig::default();
+        config.server.port_file = Some("/tmp/config_port".to_string());
+        assert_eq!(config.port_file(), Some("/tmp/config_port".to_string()));
+        std::env::remove_var("RUSTMC_PORT_FILE");
+    }
+
+    #[test]
+    fn test_port_file_from_toml() {
+        let toml_str = r#"
+[server]
+port_file = "/tmp/test_port"
+"#;
+        let config: ServerConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.server.port_file, Some("/tmp/test_port".to_string()));
     }
 }
