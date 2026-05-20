@@ -1,3 +1,4 @@
+pub mod error;
 mod loader;
 pub mod nbt_encoder;
 
@@ -6,6 +7,7 @@ use crate::protocol::packet::Packet;
 use crate::protocol::version::PROTOCOL_VERSION;
 use std::io;
 
+pub use error::RegistryError;
 pub use loader::RegistrySet;
 
 pub const ALL_REGISTRY_IDS: &[&str] = loader::v775::REGISTRY_IDS;
