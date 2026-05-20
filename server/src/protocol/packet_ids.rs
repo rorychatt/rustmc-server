@@ -46,6 +46,7 @@ pub mod configuration {
 
 pub mod play {
     pub mod clientbound {
+        pub const ENTITY_ANIMATION: i32 = 0x03;
         pub const CHUNK_BATCH_FINISHED: i32 = 0x0B;
         pub const CHUNK_BATCH_START: i32 = 0x0C;
         pub const COOKIE_REQUEST: i32 = 0x15;
@@ -57,6 +58,7 @@ pub mod play {
         pub const PLAYER_INFO_UPDATE: i32 = 0x46;
         pub const SYNCHRONIZE_PLAYER_POSITION: i32 = 0x48;
         pub const SET_CENTER_CHUNK: i32 = 0x5E;
+        pub const SET_ENTITY_METADATA: i32 = 0x60;
         pub const STORE_COOKIE: i32 = 0x78;
         pub const SYSTEM_CHAT_MESSAGE: i32 = 0x79;
         pub const TRANSFER: i32 = 0x81;
