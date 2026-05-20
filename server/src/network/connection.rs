@@ -8,7 +8,7 @@ use tokio::net::TcpStream;
 use tokio::sync::{broadcast, RwLock};
 use tracing::{debug, error, info, warn};
 
-use super::broadcast::BroadcastEvent;
+use super::broadcast::{is_within_render_distance, BroadcastEvent};
 use crate::config::Operators;
 use crate::protocol::chunk_data;
 use crate::protocol::configuration;
@@ -21,6 +21,7 @@ use crate::protocol::status::{
     decode_ping_request, decode_status_request, encode_pong_response, StatusResponse,
 };
 use crate::protocol::types::VarInt;
+use crate::network::transfer_token;
 use crate::registry;
 use crate::world::chunk::ChunkPos;
 use crate::world::World;
@@ -51,6 +52,7 @@ pub struct Connection {
     last_keep_alive_response: Option<Instant>,
     pending_chunks: Vec<ChunkPos>,
     cookies: HashMap<String, Vec<u8>>,
+    pub transferred_from: Option<String>,
 
     broadcast_tx: broadcast::Sender<BroadcastEvent>,
 }
@@ -78,6 +80,7 @@ impl Connection {
             last_keep_alive_response: None,
             pending_chunks: Vec::new(),
             cookies: HashMap::new(),
+            transferred_from: None,
 
             broadcast_tx,
         }
@@ -148,21 +151,49 @@ impl Connection {
                     }
                     event = broadcast_rx.recv() => {
                         match event {
-                            Ok(BroadcastEvent::EntityAnimation { exclude_uuid, entity_id, animation }) => {
+                            Ok(BroadcastEvent::EntityAnimation { exclude_uuid, entity_id, animation, source_chunk_x, source_chunk_z }) => {
                                 if self.player_uuid != Some(exclude_uuid) {
-                                    let packet = play::encode_entity_animation(entity_id, animation);
-                                    if let Err(e) = self.write_packet(&mut writer, &packet).await {
-                                        error!("Failed to send entity animation to {}: {}", self.addr, e);
-                                        break;
+                                    let in_range = if let Some(ref my_uuid) = self.player_uuid {
+                                        let world = self.world.read().await;
+                                        if let Some(me) = world.players.get(my_uuid) {
+                                            let my_chunk_x = me.x as i32 >> 4;
+                                            let my_chunk_z = me.z as i32 >> 4;
+                                            is_within_render_distance(source_chunk_x, source_chunk_z, my_chunk_x, my_chunk_z)
+                                        } else {
+                                            false
+                                        }
+                                    } else {
+                                        false
+                                    };
+                                    if in_range {
+                                        let packet = play::encode_entity_animation(entity_id, animation);
+                                        if let Err(e) = self.write_packet(&mut writer, &packet).await {
+                                            error!("Failed to send entity animation to {}: {}", self.addr, e);
+                                            break;
+                                        }
                                     }
                                 }
                             }
-                            Ok(BroadcastEvent::EntityMetadata { exclude_uuid, entity_id, metadata_bytes }) => {
+                            Ok(BroadcastEvent::EntityMetadata { exclude_uuid, entity_id, metadata_bytes, source_chunk_x, source_chunk_z }) => {
                                 if self.player_uuid != Some(exclude_uuid) {
-                                    let packet = play::encode_set_entity_metadata(entity_id, &metadata_bytes);
-                                    if let Err(e) = self.write_packet(&mut writer, &packet).await {
-                                        error!("Failed to send entity metadata to {}: {}", self.addr, e);
-                                        break;
+                                    let in_range = if let Some(ref my_uuid) = self.player_uuid {
+                                        let world = self.world.read().await;
+                                        if let Some(me) = world.players.get(my_uuid) {
+                                            let my_chunk_x = me.x as i32 >> 4;
+                                            let my_chunk_z = me.z as i32 >> 4;
+                                            is_within_render_distance(source_chunk_x, source_chunk_z, my_chunk_x, my_chunk_z)
+                                        } else {
+                                            false
+                                        }
+                                    } else {
+                                        false
+                                    };
+                                    if in_range {
+                                        let packet = play::encode_set_entity_metadata(entity_id, &metadata_bytes);
+                                        if let Err(e) = self.write_packet(&mut writer, &packet).await {
+                                            error!("Failed to send entity metadata to {}: {}", self.addr, e);
+                                            break;
+                                        }
                                     }
                                 }
                             }
@@ -543,6 +574,13 @@ impl Connection {
         let login_play = play::encode_login_play(entity_id)?;
         self.write_packet(writer, &login_play).await?;
 
+        // Request transfer token cookie if secret is configured
+        if std::env::var("RUSTMC_TRANSFER_SECRET").is_ok() {
+            let cookie_request =
+                play::encode_play_cookie_request("rustmc:transfer_token")?;
+            self.write_packet(writer, &cookie_request).await?;
+        }
+
         // 2. Player Info Update (required for client to finalize join)
         let player_info = play::encode_player_info_update(uuid, &name, 1); // game_mode=1 (creative)
         self.write_packet(writer, &player_info).await?;
@@ -642,6 +680,15 @@ impl Connection {
         let mut world = self.world.write().await;
         let view_distance = 8;
         if let Some(update) = world.compute_chunk_updates(uuid, view_distance) {
+            if !update.to_load.is_empty() || !update.to_unload.is_empty() {
+                if let Some(player) = world.players.get(uuid) {
+                    let chunk_x = (player.x as i32) >> 4;
+                    let chunk_z = (player.z as i32) >> 4;
+                    let center_chunk = play::encode_set_center_chunk(chunk_x, chunk_z);
+                    self.write_packet(writer, &center_chunk).await?;
+                }
+            }
+
             for chunk_pos in &update.to_unload {
                 let unload_packet = play::encode_unload_chunk(chunk_pos.x, chunk_pos.z);
                 self.write_packet(writer, &unload_packet).await?;
@@ -700,6 +747,25 @@ impl Connection {
                         let parts: Vec<&str> = command.command.splitn(3, ' ').collect();
                         if parts.len() == 3 {
                             if let Ok(port) = parts[2].parse::<i32>() {
+                                if let Ok(secret) = std::env::var("RUSTMC_TRANSFER_SECRET") {
+                                    if let (Some(uuid), Some(name)) =
+                                        (self.player_uuid, self.player_name.as_ref())
+                                    {
+                                        let token = transfer_token::TransferToken {
+                                            origin: self.addr.to_string(),
+                                            player_uuid: uuid,
+                                            player_name: name.clone(),
+                                            timestamp: transfer_token::current_timestamp(),
+                                        };
+                                        let payload =
+                                            transfer_token::generate_token(secret.as_bytes(), &token);
+                                        let cookie_packet = play::encode_play_store_cookie(
+                                            "rustmc:transfer_token",
+                                            &payload,
+                                        )?;
+                                        self.write_packet(writer, &cookie_packet).await?;
+                                    }
+                                }
                                 let packet = play::encode_transfer(parts[1], port)?;
                                 self.write_packet(writer, &packet).await?;
                                 return Ok(false);
@@ -730,6 +796,23 @@ impl Connection {
             COOKIE_RESPONSE => {
                 let response = play::PlayCookieResponse::decode(data)?;
                 debug!("Received play cookie response: key={}", response.key);
+                if response.key == "rustmc:transfer_token" {
+                    if let Some(ref payload) = response.payload {
+                        if let Ok(secret) = std::env::var("RUSTMC_TRANSFER_SECRET") {
+                            if let Some(token) =
+                                transfer_token::validate_token(secret.as_bytes(), payload)
+                            {
+                                info!(
+                                    "Valid transfer token from origin={} for player={}",
+                                    token.origin, token.player_name
+                                );
+                                self.transferred_from = Some(token.origin);
+                            } else {
+                                debug!("Invalid or expired transfer token received");
+                            }
+                        }
+                    }
+                }
                 if let Some(payload) = response.payload {
                     self.cookies.insert(response.key, payload);
                 } else {
@@ -821,10 +904,14 @@ impl Connection {
                         let flags: u8 = (if player.is_sneaking { 0x02 } else { 0 })
                             | (if player.is_sprinting { 0x08 } else { 0 });
                         let metadata_bytes = play::encode_entity_base_flags_metadata(flags);
+                        let source_chunk_x = player.x as i32 >> 4;
+                        let source_chunk_z = player.z as i32 >> 4;
                         let _ = self.broadcast_tx.send(BroadcastEvent::EntityMetadata {
                             exclude_uuid: uuid,
                             entity_id: player.entity_id,
                             metadata_bytes,
+                            source_chunk_x,
+                            source_chunk_z,
                         });
                     }
                 }
@@ -851,15 +938,17 @@ impl Connection {
                     if swing.hand == 0 { "main" } else { "off" }
                 );
                 if let Some(uuid) = self.player_uuid {
-                    let entity_id = {
+                    let player_info = {
                         let world = self.world.read().await;
-                        world.players.get(&uuid).map(|p| p.entity_id)
+                        world.players.get(&uuid).map(|p| (p.entity_id, p.x as i32 >> 4, p.z as i32 >> 4))
                     };
-                    if let Some(eid) = entity_id {
+                    if let Some((eid, source_chunk_x, source_chunk_z)) = player_info {
                         let _ = self.broadcast_tx.send(BroadcastEvent::EntityAnimation {
                             exclude_uuid: uuid,
                             entity_id: eid,
                             animation,
+                            source_chunk_x,
+                            source_chunk_z,
                         });
                     }
                 }

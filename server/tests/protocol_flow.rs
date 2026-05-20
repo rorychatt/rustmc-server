@@ -551,7 +551,7 @@ async fn test_chunk_throttling_via_batch_received() {
                     batch_size += 1;
                 } else if inner.id == 0x0B {
                     break;
-                } else if inner.id == 0x25 {
+                } else if inner.id == 0x25 || inner.id == 0x2C {
                     continue;
                 } else {
                     panic!("Unexpected packet in batch: {:#04x}", inner.id);
@@ -567,6 +567,8 @@ async fn test_chunk_throttling_via_batch_received() {
             client.send_chunk_batch_received(3.0).await.unwrap();
         } else if packet.id == 0x25 {
             // Unload Chunk packets may arrive before the batch start
+            continue;
+        } else if packet.id == 0x58 {
             continue;
         } else {
             // No more batch starts — we're done
@@ -642,9 +644,9 @@ async fn test_client_tick_end_drains_chunks() {
                 .expect("Failed to read position response packet");
 
         match packet.id {
-            0x25 => {} // Unload chunk - skip
+            0x25 | 0x58 => {} // Unload chunk or Set Center Chunk - skip
+            0x2C => {} // Keep Alive - skip
             0x0C => {} // Chunk Batch Start
-            0x2C => {} // Keep-alive - skip
             0x2D => position_chunks += 1,
             0x0B => {
                 break; // Batch finished
@@ -681,6 +683,8 @@ async fn test_client_tick_end_drains_chunks() {
             chunk_count += 1;
         } else if packet.id == 0x0B {
             break;
+        } else if packet.id == 0x2C {
+            continue;
         } else {
             panic!("Unexpected packet during chunk batch: {:#04x}", packet.id);
         }
