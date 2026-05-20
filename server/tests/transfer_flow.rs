@@ -1,7 +1,11 @@
 mod common;
 
 use common::{TestClient, TestServer};
+use rustmc_server::protocol::packet_ids;
 use uuid::Uuid;
+
+use packet_ids::configuration::clientbound as config_cb;
+use packet_ids::play::clientbound as play_cb;
 
 const OP_UUID: &str = "069a79f4-44e9-4726-a5be-fca90e38aaf5";
 
@@ -37,7 +41,7 @@ async fn test_transfer_packet_sent() {
         .read_packet()
         .await
         .expect("Failed to read transfer packet");
-    assert_eq!(packet.id, 0x73, "Expected transfer packet");
+    assert_eq!(packet.id, play_cb::TRANSFER, "Expected transfer packet");
 
     let (host, port) = packet.read_transfer().unwrap();
     assert_eq!(host, target_host);
@@ -69,8 +73,10 @@ async fn test_transfer_denied_without_permission() {
         .read_packet()
         .await
         .expect("Failed to read response packet");
-    // System Chat Message packet (0x79)
-    assert_eq!(packet.id, 0x79, "Expected system chat message packet");
+    assert_eq!(
+        packet.id, play_cb::SYSTEM_CHAT_MESSAGE,
+        "Expected system chat message packet"
+    );
 
     let json = packet.read_system_chat().unwrap();
     assert!(
@@ -166,7 +172,7 @@ async fn complete_login_flow_with_uuid(client: &mut TestClient, uuid: Uuid) {
             .read_packet()
             .await
             .expect("Failed to read config packet");
-        if packet.id == 0x03 {
+        if packet.id == config_cb::FINISH_CONFIGURATION {
             break;
         }
     }
@@ -177,19 +183,19 @@ async fn complete_login_flow_with_uuid(client: &mut TestClient, uuid: Uuid) {
         .await
         .expect("Failed to send acknowledge finish configuration");
 
-    // Read join game (0x31)
+    // Read join game
     let _join_game = client
         .read_packet()
         .await
         .expect("Failed to read join game");
 
-    // Read player info update (0x40)
+    // Read player info update
     let _player_info = client
         .read_packet()
         .await
         .expect("Failed to read player info update");
 
-    // Read sync position (0x48)
+    // Read sync position
     let _sync_pos = client
         .read_packet()
         .await
@@ -197,34 +203,37 @@ async fn complete_login_flow_with_uuid(client: &mut TestClient, uuid: Uuid) {
 }
 
 async fn drain_initial_play_packets(client: &mut TestClient) {
-    // Read Game Event (0x26)
+    // Read Game Event
     let game_event = client
         .read_packet()
         .await
         .expect("Failed to read game event");
-    assert_eq!(game_event.id, 0x26, "Expected game event packet");
+    assert_eq!(game_event.id, play_cb::GAME_EVENT, "Expected game event packet");
 
-    // Read Set Center Chunk (0x58)
+    // Read Set Center Chunk
     let center_chunk = client
         .read_packet()
         .await
         .expect("Failed to read set center chunk");
-    assert_eq!(center_chunk.id, 0x58, "Expected set center chunk packet");
+    assert_eq!(
+        center_chunk.id, play_cb::SET_CENTER_CHUNK,
+        "Expected set center chunk packet"
+    );
 
-    // Read Chunk Batch Start (0x0C)
+    // Read Chunk Batch Start
     let batch_start = client
         .read_packet()
         .await
         .expect("Failed to read chunk batch start");
-    assert_eq!(batch_start.id, 0x0C, "Expected chunk batch start");
+    assert_eq!(batch_start.id, play_cb::CHUNK_BATCH_START, "Expected chunk batch start");
 
-    // Read chunk data packets until Chunk Batch Finished (0x0B)
+    // Read chunk data packets until Chunk Batch Finished
     loop {
         let packet = client
             .read_packet()
             .await
             .expect("Failed to read chunk packet");
-        if packet.id == 0x0B {
+        if packet.id == play_cb::CHUNK_BATCH_FINISHED {
             break;
         }
     }

@@ -1,8 +1,14 @@
 mod common;
 
 use common::{TestClient, TestServer};
+use rustmc_server::protocol::packet_ids;
 use std::io::{Cursor, Read};
 use uuid::Uuid;
+
+use packet_ids::configuration::clientbound as config_cb;
+use packet_ids::login::clientbound as login_cb;
+use packet_ids::play::clientbound as play_cb;
+use packet_ids::status::clientbound as status_cb;
 
 #[tokio::test]
 async fn test_status_flow() {
@@ -28,7 +34,10 @@ async fn test_status_flow() {
         .read_packet()
         .await
         .expect("Failed to read status response");
-    assert_eq!(response.id, 0x00, "Expected status response packet");
+    assert_eq!(
+        response.id, status_cb::STATUS_RESPONSE,
+        "Expected status response packet"
+    );
 
     // Parse JSON response
     let mut cursor = Cursor::new(&response.data);
@@ -65,7 +74,7 @@ async fn test_status_flow() {
     // Read pong
     let pong = client.read_packet().await.expect("Failed to read pong");
     let elapsed = ping_time.elapsed();
-    assert_eq!(pong.id, 0x01, "Expected pong packet");
+    assert_eq!(pong.id, status_cb::PONG_RESPONSE, "Expected pong packet");
     assert!(elapsed.as_millis() < 100, "Ping should be under 100ms");
 
     // Verify payload matches
@@ -97,12 +106,15 @@ async fn test_login_flow() {
         .await
         .expect("Failed to send login start");
 
-    // Read set compression packet (0x03)
+    // Read set compression packet
     let compression = client
         .read_packet()
         .await
         .expect("Failed to read compression packet");
-    assert_eq!(compression.id, 0x03, "Expected set compression packet");
+    assert_eq!(
+        compression.id, login_cb::SET_COMPRESSION,
+        "Expected set compression packet"
+    );
 
     // Enable compression on client side
     client.enable_compression(256);
@@ -112,7 +124,10 @@ async fn test_login_flow() {
         .read_packet()
         .await
         .expect("Failed to read login success");
-    assert_eq!(login_success.id, 0x02, "Expected login success packet");
+    assert_eq!(
+        login_success.id, login_cb::LOGIN_SUCCESS,
+        "Expected login success packet"
+    );
 
     // Parse login success
     let mut cursor = Cursor::new(&login_success.data);
@@ -133,12 +148,15 @@ async fn test_login_flow() {
         .await
         .expect("Failed to send login acknowledged");
 
-    // Read Known Packs packet (0x0E)
+    // Read Known Packs packet
     let known_packs = client
         .read_packet()
         .await
         .expect("Failed to read known packs");
-    assert_eq!(known_packs.id, 0x0E, "Expected known packs packet");
+    assert_eq!(
+        known_packs.id, config_cb::KNOWN_PACKS,
+        "Expected known packs packet"
+    );
 
     // Send Known Packs response
     client
@@ -154,14 +172,9 @@ async fn test_login_flow() {
             .await
             .expect("Failed to read config packet");
         match packet.id {
-            0x07 => {
-                // Registry Data
-            }
-            0x0D => {
-                // Update Tags
-            }
-            0x03 => {
-                // Finish Configuration
+            id if id == config_cb::REGISTRY_DATA => {}
+            id if id == config_cb::UPDATE_TAGS => {}
+            id if id == config_cb::FINISH_CONFIGURATION => {
                 got_finish = true;
                 break;
             }
@@ -172,38 +185,37 @@ async fn test_login_flow() {
     }
     assert!(got_finish, "Should receive Finish Configuration");
 
-
     // Send Acknowledge Finish Configuration to transition to Play
     client
         .send_acknowledge_finish_configuration()
         .await
         .expect("Failed to send acknowledge finish configuration");
 
-    // Read join game packet (now 0x30 in protocol 775)
-
+    // Read join game packet
     let join_game = client
         .read_packet()
         .await
         .expect("Failed to read join game");
-    assert_eq!(join_game.id, 0x31, "Expected join game packet (0x31)");
+    assert_eq!(join_game.id, play_cb::LOGIN_PLAY, "Expected join game packet");
     assert!(!join_game.data.is_empty(), "Join game should have data");
 
-
-    // Read Player Info Update (0x40)
+    // Read Player Info Update
     let player_info = client
         .read_packet()
         .await
         .expect("Failed to read player info update");
-    assert_eq!(player_info.id, 0x40, "Expected player info update packet");
+    assert_eq!(
+        player_info.id, play_cb::PLAYER_INFO_UPDATE,
+        "Expected player info update packet"
+    );
 
-    // Read synchronize player position (0x46 in protocol 775)
-
+    // Read synchronize player position
     let sync_pos = client
         .read_packet()
         .await
         .expect("Failed to read sync position");
     assert_eq!(
-        sync_pos.id, 0x48,
+        sync_pos.id, play_cb::SYNCHRONIZE_PLAYER_POSITION,
         "Expected synchronize player position packet"
     );
 }
@@ -218,7 +230,7 @@ async fn test_play_basic() {
     // Complete login + configuration flow
     complete_login_flow(&mut client).await;
 
-    // Send player position (0x1E in protocol 775)
+    // Send player position
     client
         .send_player_position(100.0, 64.0, 200.0, true)
         .await
@@ -362,7 +374,7 @@ async fn test_configuration_phase() {
         .read_packet()
         .await
         .expect("Failed to read compression");
-    assert_eq!(compression.id, 0x03);
+    assert_eq!(compression.id, login_cb::SET_COMPRESSION);
     client.enable_compression(256);
 
     // Login Success
@@ -370,7 +382,7 @@ async fn test_configuration_phase() {
         .read_packet()
         .await
         .expect("Failed to read login success");
-    assert_eq!(login_success.id, 0x02);
+    assert_eq!(login_success.id, login_cb::LOGIN_SUCCESS);
 
     // Send Login Acknowledged
     client
@@ -383,7 +395,7 @@ async fn test_configuration_phase() {
         .read_packet()
         .await
         .expect("Failed to read known packs");
-    assert_eq!(known_packs.id, 0x0E, "Expected Known Packs");
+    assert_eq!(known_packs.id, config_cb::KNOWN_PACKS, "Expected Known Packs");
 
     // Send Known Packs response
     client
@@ -400,9 +412,9 @@ async fn test_configuration_phase() {
             .await
             .expect("Failed to read config packet");
         match packet.id {
-            0x07 => registry_count += 1,
-            0x0D => got_tags = true,
-            0x03 => break, // Finish Configuration
+            id if id == config_cb::REGISTRY_DATA => registry_count += 1,
+            id if id == config_cb::UPDATE_TAGS => got_tags = true,
+            id if id == config_cb::FINISH_CONFIGURATION => break,
             other => panic!("Unexpected config packet: {other:#04x}"),
         }
     }
@@ -423,47 +435,43 @@ async fn test_chunk_batching() {
 
     complete_login_flow(&mut client).await;
 
-
     // After login, we should have received Game Event, Set Center Chunk, Chunk Batch Start,
     // chunks, and Chunk Batch Finished.
-    // The login flow helper already consumes join_game, player_info, and sync_pos.
 
-    // Read Game Event (0x23)
-
+    // Read Game Event
     let game_event = client
         .read_packet()
         .await
         .expect("Failed to read game event");
-    assert_eq!(game_event.id, 0x26, "Expected game event packet");
+    assert_eq!(game_event.id, play_cb::GAME_EVENT, "Expected game event packet");
 
-    // Read Set Center Chunk (0x58)
+    // Read Set Center Chunk
     let center_chunk = client
         .read_packet()
         .await
         .expect("Failed to read set center chunk");
     assert_eq!(
-        center_chunk.id, 0x58,
+        center_chunk.id, play_cb::SET_CENTER_CHUNK,
         "Expected set center chunk packet before chunk data"
     );
 
-    // Read Chunk Batch Start (0x0C)
+    // Read Chunk Batch Start
     let batch_start = client
         .read_packet()
         .await
         .expect("Failed to read chunk batch start");
-    assert_eq!(batch_start.id, 0x0C, "Expected chunk batch start");
+    assert_eq!(batch_start.id, play_cb::CHUNK_BATCH_START, "Expected chunk batch start");
 
-    // Read chunk data packets (0x2D)
+    // Read chunk data packets
     let mut chunk_count = 0;
     loop {
         let packet = client
             .read_packet()
             .await
             .expect("Failed to read chunk/batch packet");
-        if packet.id == 0x2D {
+        if packet.id == play_cb::LEVEL_CHUNK_WITH_LIGHT {
             chunk_count += 1;
-        } else if packet.id == 0x0B {
-            // Chunk Batch Finished
+        } else if packet.id == play_cb::CHUNK_BATCH_FINISHED {
             break;
         } else {
             panic!("Unexpected packet during chunk batch: {:#04x}", packet.id);
@@ -478,7 +486,6 @@ async fn test_chunk_batching() {
     assert_eq!(chunk_count, 289, "Should receive 17x17 chunks");
 }
 
-
 #[tokio::test]
 async fn test_chunk_throttling_via_batch_received() {
     use tokio::time::{timeout, Duration};
@@ -492,11 +499,11 @@ async fn test_chunk_throttling_via_batch_received() {
 
     // Consume the initial batch: Game Event, Set Center Chunk, Chunk Batch Start, chunks, Chunk Batch Finished
     let _game_event = client.read_packet().await.unwrap();
-    let _center_chunk = client.read_packet().await.unwrap(); // Set Center Chunk (0x58)
+    let _center_chunk = client.read_packet().await.unwrap();
     let _batch_start = client.read_packet().await.unwrap();
     loop {
         let packet = client.read_packet().await.unwrap();
-        if packet.id == 0x0B {
+        if packet.id == play_cb::CHUNK_BATCH_FINISHED {
             break;
         }
     }
@@ -521,16 +528,16 @@ async fn test_chunk_throttling_via_batch_received() {
             Ok(Ok(p)) => p,
             _ => break,
         };
-        if packet.id == 0x0C {
+        if packet.id == play_cb::CHUNK_BATCH_START {
             // Chunk Batch Start — read chunks until Chunk Batch Finished
             let mut batch_size = 0;
             loop {
                 let inner = client.read_packet().await.unwrap();
-                if inner.id == 0x2D {
+                if inner.id == play_cb::LEVEL_CHUNK_WITH_LIGHT {
                     batch_size += 1;
-                } else if inner.id == 0x0B {
+                } else if inner.id == play_cb::CHUNK_BATCH_FINISHED {
                     break;
-                } else if inner.id == 0x25 || inner.id == 0x2C {
+                } else if inner.id == play_cb::UNLOAD_CHUNK || inner.id == play_cb::KEEP_ALIVE {
                     continue;
                 } else {
                     panic!("Unexpected packet in batch: {:#04x}", inner.id);
@@ -544,14 +551,10 @@ async fn test_chunk_throttling_via_batch_received() {
 
             // Acknowledge this batch to trigger the next drain
             client.send_chunk_batch_received(3.0).await.unwrap();
-        } else if packet.id == 0x25 {
-            // Unload Chunk packets may arrive before the batch start
-            continue;
-        } else if packet.id == 0x2C {
-            // Keep Alive - skip
-            continue;
-        } else if packet.id == 0x58 {
-            // Set Center Chunk - skip
+        } else if packet.id == play_cb::UNLOAD_CHUNK
+            || packet.id == play_cb::KEEP_ALIVE
+            || packet.id == play_cb::SET_CENTER_CHUNK
+        {
             continue;
         } else {
             // No more batch starts — we're done
@@ -587,29 +590,35 @@ async fn test_client_tick_end_drains_chunks() {
         .read_packet()
         .await
         .expect("Failed to read game event");
-    assert_eq!(game_event.id, 0x26, "Expected game event packet");
+    assert_eq!(game_event.id, play_cb::GAME_EVENT, "Expected game event packet");
 
     let center_chunk = client
         .read_packet()
         .await
         .expect("Failed to read set center chunk");
-    assert_eq!(center_chunk.id, 0x58, "Expected set center chunk packet");
+    assert_eq!(
+        center_chunk.id, play_cb::SET_CENTER_CHUNK,
+        "Expected set center chunk packet"
+    );
 
     let batch_start = client
         .read_packet()
         .await
         .expect("Failed to read chunk batch start");
-    assert_eq!(batch_start.id, 0x0C, "Expected chunk batch start");
+    assert_eq!(batch_start.id, play_cb::CHUNK_BATCH_START, "Expected chunk batch start");
 
     loop {
         let packet = client
             .read_packet()
             .await
             .expect("Failed to read chunk/batch packet");
-        if packet.id == 0x0B {
+        if packet.id == play_cb::CHUNK_BATCH_FINISHED {
             break;
         }
-        assert_eq!(packet.id, 0x2D, "Expected chunk data or batch finished");
+        assert_eq!(
+            packet.id, play_cb::LEVEL_CHUNK_WITH_LIGHT,
+            "Expected chunk data or batch finished"
+        );
     }
 
     // Acknowledge the initial batch so the server knows we're ready
@@ -618,12 +627,7 @@ async fn test_client_tick_end_drains_chunks() {
         .await
         .expect("Failed to send chunk batch received");
 
-    // Move far away to queue new chunks. The 0x1E handler will:
-    // 1. Send unload packets (0x25) for old chunks
-    // 2. Queue new chunks into pending_chunks
-    // 3. Drain up to chunks_per_tick (25) immediately
-    // With view_distance=8 (17x17=289 chunks), moving far generates ~289 new chunks,
-    // so after draining 25, ~264 remain in pending_chunks.
+    // Move far away to queue new chunks
     client
         .send_player_position(1000.0, 64.0, 1000.0, true)
         .await
@@ -641,12 +645,12 @@ async fn test_client_tick_end_drains_chunks() {
         .expect("Failed to read position response packet");
 
         match packet.id {
-            0x25 | 0x58 => {} // Unload chunk or Set Center Chunk - skip
-            0x2C => {} // Keep Alive - skip
-            0x0C => {} // Chunk Batch Start
-            0x2D => position_chunks += 1,
-            0x0B => {
-                break; // Batch finished
+            id if id == play_cb::UNLOAD_CHUNK || id == play_cb::SET_CENTER_CHUNK => {}
+            id if id == play_cb::KEEP_ALIVE => {}
+            id if id == play_cb::CHUNK_BATCH_START => {}
+            id if id == play_cb::LEVEL_CHUNK_WITH_LIGHT => position_chunks += 1,
+            id if id == play_cb::CHUNK_BATCH_FINISHED => {
+                break;
             }
             other => panic!("Unexpected packet during position response: {other:#04x}"),
         }
@@ -671,13 +675,13 @@ async fn test_client_tick_end_drains_chunks() {
         .await
         .expect("Timed out waiting for chunk response after tick end")
         .expect("Failed to read packet after tick end");
-        if pkt.id != 0x2C {
+        if pkt.id != play_cb::KEEP_ALIVE {
             break pkt;
         }
     };
 
     assert_eq!(
-        response.id, 0x0C,
+        response.id, play_cb::CHUNK_BATCH_START,
         "Expected chunk batch start after client tick end"
     );
 
@@ -687,11 +691,11 @@ async fn test_client_tick_end_drains_chunks() {
             .read_packet()
             .await
             .expect("Failed to read chunk/batch packet");
-        if packet.id == 0x2D {
+        if packet.id == play_cb::LEVEL_CHUNK_WITH_LIGHT {
             chunk_count += 1;
-        } else if packet.id == 0x0B {
+        } else if packet.id == play_cb::CHUNK_BATCH_FINISHED {
             break;
-        } else if packet.id == 0x2C {
+        } else if packet.id == play_cb::KEEP_ALIVE {
             continue;
         } else {
             panic!(
@@ -729,7 +733,7 @@ async fn test_configuration_timeout() {
         .read_packet()
         .await
         .expect("Failed to read compression");
-    assert_eq!(compression.id, 0x03);
+    assert_eq!(compression.id, login_cb::SET_COMPRESSION);
     client.enable_compression(256);
 
     let _login_success = client
@@ -757,7 +761,7 @@ async fn test_configuration_timeout() {
             .read_packet()
             .await
             .expect("Failed to read config packet");
-        if packet.id == 0x03 {
+        if packet.id == config_cb::FINISH_CONFIGURATION {
             break;
         }
     }
@@ -777,7 +781,6 @@ async fn test_configuration_timeout() {
         elapsed.as_secs()
     );
 }
-
 
 /// Helper to complete the full login + configuration flow
 async fn complete_login_flow(client: &mut TestClient) {
@@ -832,11 +835,10 @@ async fn complete_login_flow_with_client(client: &mut TestClient, username: &str
             .read_packet()
             .await
             .expect("Failed to read config packet");
-        if packet.id == 0x03 {
-            break; // Finish Configuration
+        if packet.id == config_cb::FINISH_CONFIGURATION {
+            break;
         }
     }
-
 
     // Send Acknowledge Finish Configuration to transition to Play
     client
@@ -844,22 +846,19 @@ async fn complete_login_flow_with_client(client: &mut TestClient, username: &str
         .await
         .expect("Failed to send acknowledge finish configuration");
 
-    // Read join game (0x30)
-
+    // Read join game
     let _join_game = client
         .read_packet()
         .await
         .expect("Failed to read join game");
 
-
-    // Read Player Info Update (0x40)
+    // Read Player Info Update
     let _player_info = client
         .read_packet()
         .await
         .expect("Failed to read player info update");
 
-    // Read sync position (0x46)
-
+    // Read sync position
     let _sync_pos = client
         .read_packet()
         .await
