@@ -2,6 +2,7 @@ mod common;
 
 use common::{TestClient, TestServer};
 use rustmc_server::protocol::packet_ids;
+use serial_test::serial;
 use std::io::{Cursor, Read};
 use uuid::Uuid;
 
@@ -11,6 +12,7 @@ use packet_ids::play::clientbound as play_cb;
 use packet_ids::status::clientbound as status_cb;
 
 #[tokio::test]
+#[serial]
 async fn test_status_flow() {
     let server = TestServer::spawn().await.expect("Failed to spawn server");
     let mut client = TestClient::connect(server.port())
@@ -87,6 +89,7 @@ async fn test_status_flow() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_login_flow() {
     let server = TestServer::spawn().await.expect("Failed to spawn server");
     let mut client = TestClient::connect(server.port())
@@ -231,6 +234,7 @@ async fn test_login_flow() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_play_basic() {
     let server = TestServer::spawn().await.expect("Failed to spawn server");
     let mut client = TestClient::connect(server.port())
@@ -251,6 +255,7 @@ async fn test_play_basic() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_full_protocol_sequence() {
     let server = TestServer::spawn().await.expect("Failed to spawn server");
 
@@ -294,6 +299,7 @@ async fn test_full_protocol_sequence() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_concurrent_clients() {
     let server = TestServer::spawn().await.expect("Failed to spawn server");
 
@@ -316,6 +322,7 @@ async fn test_concurrent_clients() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_error_handling() {
     let server = TestServer::spawn().await.expect("Failed to spawn server");
 
@@ -362,6 +369,7 @@ async fn test_error_handling() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_configuration_phase() {
     let server = TestServer::spawn().await.expect("Failed to spawn server");
     let mut client = TestClient::connect(server.port())
@@ -459,6 +467,7 @@ async fn test_configuration_phase() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_chunk_batching() {
     let server = TestServer::spawn().await.expect("Failed to spawn server");
     let mut client = TestClient::connect(server.port())
@@ -528,6 +537,7 @@ async fn test_chunk_batching() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_chunk_throttling_via_batch_received() {
     use tokio::time::{timeout, Duration};
 
@@ -618,6 +628,7 @@ async fn test_chunk_throttling_via_batch_received() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_client_tick_end_drains_chunks() {
     let server = TestServer::spawn().await.expect("Failed to spawn server");
     let mut client = TestClient::connect(server.port())
@@ -755,6 +766,7 @@ async fn test_client_tick_end_drains_chunks() {
     );
 }
 #[tokio::test]
+#[serial]
 async fn test_configuration_timeout() {
     let server = TestServer::spawn_with_env(&[("RUSTMC_NON_PLAY_TIMEOUT", "3")])
         .await
@@ -910,6 +922,7 @@ async fn complete_login_flow_with_client(client: &mut TestClient, username: &str
 }
 
 #[tokio::test]
+#[serial]
 async fn test_custom_gameplay_configuration() {
     use rustmc_server::protocol::types::VarInt;
     use std::fs::File;

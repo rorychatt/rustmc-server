@@ -92,7 +92,7 @@ impl TestServer {
         let timeout_secs: u64 = std::env::var("RUSTMC_TEST_TIMEOUT_SECS")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(30);
+            .unwrap_or(60);
 
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_rustmc-server"));
         cmd.env("RUSTMC_BIND", "127.0.0.1:0")

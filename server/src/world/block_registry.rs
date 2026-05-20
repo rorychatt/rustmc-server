@@ -1,22 +1,9 @@
-use std::collections::HashMap;
-
 #[allow(clippy::type_complexity)]
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/block_states_generated.rs"));
 }
 
 pub use generated::{BlockDef, StateDef, BLOCKS, BLOCK_COUNT, STATES};
-
-pub struct BlockEntry {
-    pub default_state_id: u16,
-    pub properties: HashMap<String, Vec<String>>,
-    pub states: Vec<StateEntry>,
-}
-
-pub struct StateEntry {
-    pub id: u16,
-    pub properties: HashMap<String, String>,
-}
 
 pub struct BlockRegistry;
 
@@ -58,30 +45,8 @@ impl BlockRegistry {
         BLOCK_COUNT
     }
 
-    pub fn get_block_entry(&self, block: &str) -> Option<BlockEntry> {
-        let block_def = BLOCKS.get(block)?;
-        let properties: HashMap<String, Vec<String>> = block_def
-            .properties
-            .iter()
-            .map(|(k, vs)| (k.to_string(), vs.iter().map(|v| v.to_string()).collect()))
-            .collect();
-        let states: Vec<StateEntry> = block_def
-            .states
-            .iter()
-            .map(|s| StateEntry {
-                id: s.id,
-                properties: s
-                    .properties
-                    .iter()
-                    .map(|(k, v)| (k.to_string(), v.to_string()))
-                    .collect(),
-            })
-            .collect();
-        Some(BlockEntry {
-            default_state_id: block_def.default_state_id,
-            properties,
-            states,
-        })
+    pub fn get_block_entry(&self, block: &str) -> Option<&'static BlockDef> {
+        BLOCKS.get(block).copied()
     }
 }
 

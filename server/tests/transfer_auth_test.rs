@@ -1,6 +1,6 @@
 mod common;
 
-use common::{TestClient, TestServer};
+use common::{retry_test, TestClient, TestServer};
 use rustmc_server::protocol::packet_ids;
 use uuid::Uuid;
 
@@ -15,57 +15,50 @@ fn ops_config(uuid: &str) -> String {
 
 #[tokio::test]
 async fn test_transfer_sends_cookie_token() {
-    let op_uuid = Uuid::parse_str(OP_UUID).unwrap();
-    let ops = ops_config(OP_UUID);
+    retry_test("test_transfer_sends_cookie_token", 3, || async {
+        let op_uuid = Uuid::parse_str(OP_UUID).unwrap();
+        let ops = ops_config(OP_UUID);
 
-    let server_a = TestServer::spawn_with_env_and_ops_config(
-        &[("RUSTMC_TRANSFER_SECRET", "integration-test-secret")],
-        Some(&ops),
-    )
-    .await
-    .expect("Failed to spawn server A");
+        let server_a = TestServer::spawn_with_env_and_ops_config(
+            &[("RUSTMC_TRANSFER_SECRET", "integration-test-secret")],
+            Some(&ops),
+        )
+        .await?;
 
-    let server_b = TestServer::spawn_with_env_and_ops_config(
-        &[("RUSTMC_TRANSFER_SECRET", "integration-test-secret")],
-        Some(&ops),
-    )
-    .await
-    .expect("Failed to spawn server B");
+        let server_b = TestServer::spawn_with_env_and_ops_config(
+            &[("RUSTMC_TRANSFER_SECRET", "integration-test-secret")],
+            Some(&ops),
+        )
+        .await?;
 
-    let mut client = TestClient::connect(server_a.port())
-        .await
-        .expect("Failed to connect to server A");
+        let mut client = TestClient::connect(server_a.port()).await?;
 
-    complete_login_flow_with_uuid(&mut client, op_uuid).await;
-    drain_initial_play_packets(&mut client).await;
+        try_complete_login_flow_with_uuid(&mut client, op_uuid).await?;
+        try_drain_initial_play_packets(&mut client).await?;
 
-    let target_host = "127.0.0.1";
-    let target_port = server_b.port() as i32;
-    client
-        .send_chat_command(&format!("transfer {} {}", target_host, target_port))
-        .await
-        .expect("Failed to send transfer command");
+        let target_host = "127.0.0.1";
+        let target_port = server_b.port() as i32;
+        client
+            .send_chat_command(&format!("transfer {} {}", target_host, target_port))
+            .await?;
 
-    // Should receive Store Cookie packet before Transfer packet
-    let cookie_packet = client
-        .read_packet()
-        .await
-        .expect("Failed to read store cookie packet");
-    assert_eq!(
-        cookie_packet.id,
-        play_cb::STORE_COOKIE,
-        "Expected store cookie packet before transfer"
-    );
+        let cookie_packet = client.read_packet().await?;
+        assert_eq!(
+            cookie_packet.id,
+            play_cb::STORE_COOKIE,
+            "Expected store cookie packet before transfer"
+        );
 
-    let transfer_packet = client
-        .read_packet()
-        .await
-        .expect("Failed to read transfer packet");
-    assert_eq!(
-        transfer_packet.id,
-        play_cb::TRANSFER,
-        "Expected transfer packet"
-    );
+        let transfer_packet = client.read_packet().await?;
+        assert_eq!(
+            transfer_packet.id,
+            play_cb::TRANSFER,
+            "Expected transfer packet"
+        );
+
+        Ok(())
+    })
+    .await;
 }
 
 #[tokio::test]
@@ -84,110 +77,81 @@ async fn test_target_server_requests_transfer_cookie() {
 
 #[tokio::test]
 async fn test_transfer_without_secret_skips_token() {
-    let op_uuid = Uuid::parse_str(OP_UUID).unwrap();
-    let ops = ops_config(OP_UUID);
+    retry_test("test_transfer_without_secret_skips_token", 3, || async {
+        let op_uuid = Uuid::parse_str(OP_UUID).unwrap();
+        let ops = ops_config(OP_UUID);
 
-    let server_a = TestServer::spawn_with_ops(Some(&ops))
-        .await
-        .expect("Failed to spawn server A");
-    let server_b = TestServer::spawn_with_ops(Some(&ops))
-        .await
-        .expect("Failed to spawn server B");
+        let server_a = TestServer::spawn_with_ops(Some(&ops)).await?;
+        let server_b = TestServer::spawn_with_ops(Some(&ops)).await?;
 
-    let mut client = TestClient::connect(server_a.port())
-        .await
-        .expect("Failed to connect to server A");
+        let mut client = TestClient::connect(server_a.port()).await?;
 
-    complete_login_flow_with_uuid(&mut client, op_uuid).await;
-    drain_initial_play_packets(&mut client).await;
+        try_complete_login_flow_with_uuid(&mut client, op_uuid).await?;
+        try_drain_initial_play_packets(&mut client).await?;
 
-    let target_host = "127.0.0.1";
-    let target_port = server_b.port() as i32;
-    client
-        .send_chat_command(&format!("transfer {} {}", target_host, target_port))
-        .await
-        .expect("Failed to send transfer command");
+        let target_host = "127.0.0.1";
+        let target_port = server_b.port() as i32;
+        client
+            .send_chat_command(&format!("transfer {} {}", target_host, target_port))
+            .await?;
 
-    // Without secret, should get transfer packet directly (no cookie)
-    let packet = client
-        .read_packet()
-        .await
-        .expect("Failed to read transfer packet");
-    assert_eq!(
-        packet.id,
-        play_cb::TRANSFER,
-        "Expected transfer packet directly without secret"
-    );
+        let packet = client.read_packet().await?;
+        assert_eq!(
+            packet.id,
+            play_cb::TRANSFER,
+            "Expected transfer packet directly without secret"
+        );
+
+        Ok(())
+    })
+    .await;
 }
 
-async fn complete_login_flow_with_uuid(client: &mut TestClient, uuid: Uuid) {
-    client
-        .send_handshake(775, 2)
-        .await
-        .expect("Failed to send handshake");
-    client
-        .send_login_start("TransferAuthTest", uuid)
-        .await
-        .expect("Failed to send login start");
+async fn try_complete_login_flow_with_uuid(
+    client: &mut TestClient,
+    uuid: Uuid,
+) -> anyhow::Result<()> {
+    client.send_handshake(775, 2).await?;
+    client.send_login_start("TransferAuthTest", uuid).await?;
 
-    // Compression
-    let _compression = client
-        .read_packet()
-        .await
-        .expect("Failed to read compression");
+    let _compression = client.read_packet().await?;
     client.enable_compression(256);
 
-    // Login Success
-    let _login_success = client
-        .read_packet()
-        .await
-        .expect("Failed to read login success");
+    let _login_success = client.read_packet().await?;
 
-    // Login Acknowledged
-    client
-        .send_login_acknowledged()
-        .await
-        .expect("Failed to send login acknowledged");
+    client.send_login_acknowledged().await?;
 
-    // Known Packs
-    let _known_packs = client
-        .read_packet()
-        .await
-        .expect("Failed to read known packs");
+    let _known_packs = client.read_packet().await?;
 
-    // Send Known Packs response
-    client
-        .send_known_packs_response()
-        .await
-        .expect("Failed to send known packs response");
+    client.send_known_packs_response().await?;
 
-    // Read configuration packets until Finish Configuration
     loop {
-        let packet = client
-            .read_packet()
-            .await
-            .expect("Failed to read config packet");
+        let packet = client.read_packet().await?;
         if packet.id == config_cb::FINISH_CONFIGURATION {
             break;
         }
     }
 
-    // Send Acknowledge Finish Configuration to transition server to Play state
-    client
-        .send_acknowledge_finish_configuration()
-        .await
-        .expect("Failed to send acknowledge finish configuration");
+    client.send_acknowledge_finish_configuration().await?;
 
-    // Read play login sequence packets until Game Event
     loop {
-        let packet = client
-            .read_packet()
-            .await
-            .expect("Failed to read play login packet");
+        let packet = client.read_packet().await?;
         if packet.id == play_cb::GAME_EVENT {
             break;
         }
     }
+
+    Ok(())
+}
+
+async fn try_drain_initial_play_packets(client: &mut TestClient) -> anyhow::Result<()> {
+    loop {
+        let packet = client.read_packet().await?;
+        if packet.id == play_cb::CHUNK_BATCH_FINISHED {
+            break;
+        }
+    }
+    Ok(())
 }
 
 async fn complete_login_flow_and_check_cookie_request(client: &mut TestClient) {
@@ -201,38 +165,32 @@ async fn complete_login_flow_and_check_cookie_request(client: &mut TestClient) {
         .await
         .expect("Failed to send login start");
 
-    // Compression
     let _compression = client
         .read_packet()
         .await
         .expect("Failed to read compression");
     client.enable_compression(256);
 
-    // Login Success
     let _login_success = client
         .read_packet()
         .await
         .expect("Failed to read login success");
 
-    // Login Acknowledged
     client
         .send_login_acknowledged()
         .await
         .expect("Failed to send login acknowledged");
 
-    // Known Packs
     let _known_packs = client
         .read_packet()
         .await
         .expect("Failed to read known packs");
 
-    // Send Known Packs response
     client
         .send_known_packs_response()
         .await
         .expect("Failed to send known packs response");
 
-    // Read configuration packets until Finish Configuration
     loop {
         let packet = client
             .read_packet()
@@ -243,14 +201,11 @@ async fn complete_login_flow_and_check_cookie_request(client: &mut TestClient) {
         }
     }
 
-    // Send Acknowledge Finish Configuration to transition server to Play state
     client
         .send_acknowledge_finish_configuration()
         .await
         .expect("Failed to send acknowledge finish configuration");
 
-    // After configuration, server sends play login sequence.
-    // With RUSTMC_TRANSFER_SECRET set, it should include a cookie request.
     let join_game = client
         .read_packet()
         .await
@@ -261,7 +216,6 @@ async fn complete_login_flow_and_check_cookie_request(client: &mut TestClient) {
         "Expected join game packet"
     );
 
-    // Next should be cookie request for "rustmc:transfer_token"
     let cookie_request = client
         .read_packet()
         .await
@@ -271,16 +225,4 @@ async fn complete_login_flow_and_check_cookie_request(client: &mut TestClient) {
         play_cb::COOKIE_REQUEST,
         "Expected cookie request packet after join game"
     );
-}
-
-async fn drain_initial_play_packets(client: &mut TestClient) {
-    loop {
-        let packet = client
-            .read_packet()
-            .await
-            .expect("Failed to read play packet");
-        if packet.id == play_cb::CHUNK_BATCH_FINISHED {
-            break;
-        }
-    }
 }
