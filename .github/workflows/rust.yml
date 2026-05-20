@@ -46,3 +46,23 @@ jobs:
 
     - name: Format check
       run: cargo fmt --all -- --check
+
+  validate-block-states:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '21'
+    - name: Install jq
+      run: sudo apt-get install -y jq
+    - name: Regenerate block states
+      run: chmod +x ./tools/*.sh && ./tools/regenerate_block_states.sh
+    - name: Check for drift
+      run: |
+        if ! git diff --exit-code server/data/block_states.json; then
+          echo "ERROR: block_states.json is out of sync with the server JAR"
+          echo "Run ./tools/regenerate_block_states.sh and commit the result"
+          exit 1
+        fi
