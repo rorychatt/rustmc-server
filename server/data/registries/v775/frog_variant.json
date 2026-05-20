@@ -1,0 +1,5 @@
+[
+  {"id":"minecraft:cold","data":{"asset_id":"minecraft:cold"}},
+  {"id":"minecraft:temperate","data":{"asset_id":"minecraft:temperate"}},
+  {"id":"minecraft:warm","data":{"asset_id":"minecraft:warm"}}
+]

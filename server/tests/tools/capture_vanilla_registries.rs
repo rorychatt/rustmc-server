@@ -347,6 +347,28 @@ fn capture_vanilla_registry_ordering() {
         ("minecraft:trim_pattern", "trim_pattern.json"),
         ("minecraft:wolf_variant", "wolf_variant.json"),
         ("minecraft:worldgen/biome", "worldgen_biome.json"),
+        ("minecraft:cat_variant", "cat_variant.json"),
+        ("minecraft:pig_sound_variant", "pig_sound_variant.json"),
+        ("minecraft:wolf_sound_variant", "wolf_sound_variant.json"),
+        ("minecraft:frog_variant", "frog_variant.json"),
+        ("minecraft:pig_variant", "pig_variant.json"),
+        ("minecraft:cat_sound_variant", "cat_sound_variant.json"),
+        ("minecraft:cow_sound_variant", "cow_sound_variant.json"),
+        (
+            "minecraft:zombie_nautilus_variant",
+            "zombie_nautilus_variant.json",
+        ),
+        ("minecraft:chicken_variant", "chicken_variant.json"),
+        (
+            "minecraft:chicken_sound_variant",
+            "chicken_sound_variant.json",
+        ),
+        ("minecraft:cow_variant", "cow_variant.json"),
+        ("minecraft:dialog", "dialog.json"),
+        ("minecraft:world_clock", "world_clock.json"),
+        ("minecraft:timeline", "timeline.json"),
+        ("minecraft:test_environment", "test_environment.json"),
+        ("minecraft:test_instance", "test_instance.json"),
     ]
     .into_iter()
     .collect();
@@ -407,6 +429,28 @@ fn reorder_registry_files_to_match_vanilla() {
         ("minecraft:trim_pattern", "trim_pattern.json"),
         ("minecraft:wolf_variant", "wolf_variant.json"),
         ("minecraft:worldgen/biome", "worldgen_biome.json"),
+        ("minecraft:cat_variant", "cat_variant.json"),
+        ("minecraft:pig_sound_variant", "pig_sound_variant.json"),
+        ("minecraft:wolf_sound_variant", "wolf_sound_variant.json"),
+        ("minecraft:frog_variant", "frog_variant.json"),
+        ("minecraft:pig_variant", "pig_variant.json"),
+        ("minecraft:cat_sound_variant", "cat_sound_variant.json"),
+        ("minecraft:cow_sound_variant", "cow_sound_variant.json"),
+        (
+            "minecraft:zombie_nautilus_variant",
+            "zombie_nautilus_variant.json",
+        ),
+        ("minecraft:chicken_variant", "chicken_variant.json"),
+        (
+            "minecraft:chicken_sound_variant",
+            "chicken_sound_variant.json",
+        ),
+        ("minecraft:cow_variant", "cow_variant.json"),
+        ("minecraft:dialog", "dialog.json"),
+        ("minecraft:world_clock", "world_clock.json"),
+        ("minecraft:timeline", "timeline.json"),
+        ("minecraft:test_environment", "test_environment.json"),
+        ("minecraft:test_instance", "test_instance.json"),
     ]
     .into_iter()
     .collect();
