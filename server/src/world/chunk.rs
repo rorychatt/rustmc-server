@@ -168,7 +168,9 @@ mod block_state_tests {
         );
         assert_eq!(
             BlockState::GRASS_BLOCK.0,
-            registry.get_default_state_id("minecraft:grass_block").unwrap()
+            registry
+                .get_default_state_id("minecraft:grass_block")
+                .unwrap()
         );
         assert_eq!(
             BlockState::DIRT.0,
@@ -176,11 +178,15 @@ mod block_state_tests {
         );
         assert_eq!(
             BlockState::COBBLESTONE.0,
-            registry.get_default_state_id("minecraft:cobblestone").unwrap()
+            registry
+                .get_default_state_id("minecraft:cobblestone")
+                .unwrap()
         );
         assert_eq!(
             BlockState::OAK_PLANKS.0,
-            registry.get_default_state_id("minecraft:oak_planks").unwrap()
+            registry
+                .get_default_state_id("minecraft:oak_planks")
+                .unwrap()
         );
         assert_eq!(
             BlockState::BEDROCK.0,
@@ -211,10 +217,7 @@ mod block_state_tests {
     #[test]
     fn test_all_default_states_in_states_list() {
         for (name, block_def) in &BLOCKS {
-            assert!(
-                !block_def.states.is_empty(),
-                "Block {name} has no states"
-            );
+            assert!(!block_def.states.is_empty(), "Block {name} has no states");
             let has_default = block_def
                 .states
                 .iter()
@@ -235,7 +238,8 @@ mod block_state_tests {
                 assert!(
                     seen.insert(state.id),
                     "Duplicate state ID {} in block {}",
-                    state.id, name
+                    state.id,
+                    name
                 );
             }
         }

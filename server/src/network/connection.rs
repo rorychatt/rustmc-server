@@ -445,7 +445,10 @@ impl Connection {
             _ => {
                 warn!("Unknown status packet: {packet_id:#04x}");
                 if self.record_invalid_packet() {
-                    warn!("Disconnecting {} for excessive invalid packets ({} in window)", self.addr, self.invalid_packet_count);
+                    warn!(
+                        "Disconnecting {} for excessive invalid packets ({} in window)",
+                        self.addr, self.invalid_packet_count
+                    );
                     return Ok(false);
                 }
                 Ok(true)
@@ -497,7 +500,10 @@ impl Connection {
             _ => {
                 warn!("Unknown login packet: {packet_id:#04x}");
                 if self.record_invalid_packet() {
-                    warn!("Disconnecting {} for excessive invalid packets ({} in window)", self.addr, self.invalid_packet_count);
+                    warn!(
+                        "Disconnecting {} for excessive invalid packets ({} in window)",
+                        self.addr, self.invalid_packet_count
+                    );
                     return Ok(false);
                 }
                 Ok(true)
@@ -659,7 +665,8 @@ impl Connection {
         }
 
         // 2. Player Info Update (required for client to finalize join)
-        let player_info = play::encode_player_info_update(uuid, &name, self.config.gameplay.gamemode_id());
+        let player_info =
+            play::encode_player_info_update(uuid, &name, self.config.gameplay.gamemode_id());
         self.write_packet(writer, &player_info).await?;
 
         // 3. Synchronize Player Position
@@ -1041,7 +1048,10 @@ impl Connection {
                         pos.x, pos.y, pos.z
                     );
                     if self.record_invalid_packet() {
-                        warn!("Disconnecting {} for excessive invalid packets ({} in window)", self.addr, self.invalid_packet_count);
+                        warn!(
+                            "Disconnecting {} for excessive invalid packets ({} in window)",
+                            self.addr, self.invalid_packet_count
+                        );
                         return Ok(false);
                     }
                     return Ok(true);
@@ -1064,7 +1074,10 @@ impl Connection {
                         pos_rot.x, pos_rot.y, pos_rot.z, pos_rot.pitch
                     );
                     if self.record_invalid_packet() {
-                        warn!("Disconnecting {} for excessive invalid packets ({} in window)", self.addr, self.invalid_packet_count);
+                        warn!(
+                            "Disconnecting {} for excessive invalid packets ({} in window)",
+                            self.addr, self.invalid_packet_count
+                        );
                         return Ok(false);
                     }
                     return Ok(true);
@@ -1093,7 +1106,10 @@ impl Connection {
                         rot.yaw, rot.pitch
                     );
                     if self.record_invalid_packet() {
-                        warn!("Disconnecting {} for excessive invalid packets ({} in window)", self.addr, self.invalid_packet_count);
+                        warn!(
+                            "Disconnecting {} for excessive invalid packets ({} in window)",
+                            self.addr, self.invalid_packet_count
+                        );
                         return Ok(false);
                     }
                     return Ok(true);
@@ -1124,7 +1140,10 @@ impl Connection {
                         cmd.action_id, cmd.jump_boost
                     );
                     if self.record_invalid_packet() {
-                        warn!("Disconnecting {} for excessive invalid packets ({} in window)", self.addr, self.invalid_packet_count);
+                        warn!(
+                            "Disconnecting {} for excessive invalid packets ({} in window)",
+                            self.addr, self.invalid_packet_count
+                        );
                         return Ok(false);
                     }
                     return Ok(true);
@@ -1163,7 +1182,10 @@ impl Connection {
                 if !item.is_valid_slot() {
                     warn!("Invalid carried item slot {} from client", item.slot);
                     if self.record_invalid_packet() {
-                        warn!("Disconnecting {} for excessive invalid packets ({} in window)", self.addr, self.invalid_packet_count);
+                        warn!(
+                            "Disconnecting {} for excessive invalid packets ({} in window)",
+                            self.addr, self.invalid_packet_count
+                        );
                         return Ok(false);
                     }
                     return Ok(true);
@@ -1181,7 +1203,10 @@ impl Connection {
                 if !swing.is_valid() {
                     warn!("Invalid swing hand from client: {}", swing.hand);
                     if self.record_invalid_packet() {
-                        warn!("Disconnecting {} for excessive invalid packets ({} in window)", self.addr, self.invalid_packet_count);
+                        warn!(
+                            "Disconnecting {} for excessive invalid packets ({} in window)",
+                            self.addr, self.invalid_packet_count
+                        );
                         return Ok(false);
                     }
                     return Ok(true);

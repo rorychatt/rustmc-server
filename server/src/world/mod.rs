@@ -48,7 +48,13 @@ impl World {
         self.add_player_with_op_level(uuid, name, 0, view_distance)
     }
 
-    pub fn add_player_with_op_level(&mut self, uuid: Uuid, name: String, op_level: u8, view_distance: i32) -> i32 {
+    pub fn add_player_with_op_level(
+        &mut self,
+        uuid: Uuid,
+        name: String,
+        op_level: u8,
+        view_distance: i32,
+    ) -> i32 {
         let entity_id = self.next_entity_id;
         self.next_entity_id += 1;
         self.players.insert(

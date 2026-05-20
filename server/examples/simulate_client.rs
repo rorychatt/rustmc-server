@@ -47,14 +47,21 @@ impl SimulatorClient {
         self.compression_threshold = Some(threshold);
     }
 
-    pub async fn send_handshake(&mut self, protocol_version: i32, next_state: u8) -> anyhow::Result<()> {
+    pub async fn send_handshake(
+        &mut self,
+        protocol_version: i32,
+        next_state: u8,
+    ) -> anyhow::Result<()> {
         let mut data = Vec::new();
         write_varint(&mut data, protocol_version)?;
         write_string(&mut data, "localhost")?;
         data.extend_from_slice(&25565u16.to_be_bytes());
         write_varint(&mut data, next_state as i32)?;
 
-        println!("Sending Handshake (protocol_version={}, next_state={})", protocol_version, next_state);
+        println!(
+            "Sending Handshake (protocol_version={}, next_state={})",
+            protocol_version, next_state
+        );
         self.send_packet(handshake_sb::HANDSHAKE, &data).await
     }
 
@@ -73,7 +80,10 @@ impl SimulatorClient {
         let mut data = Vec::new();
         write_string(&mut data, username)?;
         data.extend_from_slice(uuid.as_bytes());
-        println!("Sending Login Start (username='{}', uuid={})", username, uuid);
+        println!(
+            "Sending Login Start (username='{}', uuid={})",
+            username, uuid
+        );
         self.send_packet(login_sb::LOGIN_START, &data).await
     }
 
@@ -94,13 +104,22 @@ impl SimulatorClient {
         self.send_packet(config_sb::ACKNOWLEDGE_FINISH, &[]).await
     }
 
-    pub async fn send_player_position(&mut self, x: f64, y: f64, z: f64, on_ground: bool) -> anyhow::Result<()> {
+    pub async fn send_player_position(
+        &mut self,
+        x: f64,
+        y: f64,
+        z: f64,
+        on_ground: bool,
+    ) -> anyhow::Result<()> {
         let mut data = Vec::new();
         data.extend_from_slice(&x.to_be_bytes());
         data.extend_from_slice(&y.to_be_bytes());
         data.extend_from_slice(&z.to_be_bytes());
         data.push(if on_ground { 1 } else { 0 });
-        println!("Sending Player Position (x={:.2}, y={:.2}, z={:.2}, on_ground={})", x, y, z, on_ground);
+        println!(
+            "Sending Player Position (x={:.2}, y={:.2}, z={:.2}, on_ground={})",
+            x, y, z, on_ground
+        );
         self.send_packet(play_sb::SET_PLAYER_POSITION, &data).await
     }
 
@@ -296,12 +315,27 @@ async fn main() -> anyhow::Result<()> {
         let json_str = read_string(&mut cursor)?;
         let json: serde_json::Value = serde_json::from_str(&json_str)?;
         println!("Server List Status Response:");
-        println!("  MOTD: {}", json["description"]["text"].as_str().unwrap_or("N/A"));
-        println!("  Version Name: {}", json["version"]["name"].as_str().unwrap_or("N/A"));
-        println!("  Protocol: {}", json["version"]["protocol"].as_i64().unwrap_or(0));
-        println!("  Online Players: {} / {}", json["players"]["online"], json["players"]["max"]);
+        println!(
+            "  MOTD: {}",
+            json["description"]["text"].as_str().unwrap_or("N/A")
+        );
+        println!(
+            "  Version Name: {}",
+            json["version"]["name"].as_str().unwrap_or("N/A")
+        );
+        println!(
+            "  Protocol: {}",
+            json["version"]["protocol"].as_i64().unwrap_or(0)
+        );
+        println!(
+            "  Online Players: {} / {}",
+            json["players"]["online"], json["players"]["max"]
+        );
     } else {
-        println!("Expected status response, got packet ID: {:#04x}", status_pkt.id);
+        println!(
+            "Expected status response, got packet ID: {:#04x}",
+            status_pkt.id
+        );
     }
 
     client.send_ping(9999).await?;
@@ -310,7 +344,10 @@ async fn main() -> anyhow::Result<()> {
         let pong_payload = i64::from_be_bytes(pong_pkt.data.try_into().unwrap());
         println!("Received Pong with payload: {}", pong_payload);
     } else {
-        println!("Expected pong response, got packet ID: {:#04x}", pong_pkt.id);
+        println!(
+            "Expected pong response, got packet ID: {:#04x}",
+            pong_pkt.id
+        );
     }
 
     // --- PHASE 2: Login Flow ---
@@ -329,7 +366,10 @@ async fn main() -> anyhow::Result<()> {
         println!("Server requested compression with threshold {}", threshold);
         client.enable_compression(threshold);
     } else {
-        println!("Expected set compression packet, got: {:#04x}", login_flow_pkt.id);
+        println!(
+            "Expected set compression packet, got: {:#04x}",
+            login_flow_pkt.id
+        );
     }
 
     let success_pkt = client.read_packet().await?;
@@ -339,7 +379,10 @@ async fn main() -> anyhow::Result<()> {
         std::io::Read::read_exact(&mut cursor, &mut uuid_bytes)?;
         let ret_uuid = Uuid::from_bytes(uuid_bytes);
         let ret_username = read_string(&mut cursor)?;
-        println!("Successfully logged in! UUID: {}, Username: '{}'", ret_uuid, ret_username);
+        println!(
+            "Successfully logged in! UUID: {}, Username: '{}'",
+            ret_uuid, ret_username
+        );
     } else {
         println!("Expected login success, got: {:#04x}", success_pkt.id);
         return Ok(());
@@ -358,10 +401,16 @@ async fn main() -> anyhow::Result<()> {
                 client.send_known_packs_response().await?;
             }
             id if id == config_cb::REGISTRY_DATA => {
-                println!("Received Registry Data packet (size: {} bytes)", pkt.data.len());
+                println!(
+                    "Received Registry Data packet (size: {} bytes)",
+                    pkt.data.len()
+                );
             }
             id if id == config_cb::UPDATE_TAGS => {
-                println!("Received Update Tags packet (size: {} bytes)", pkt.data.len());
+                println!(
+                    "Received Update Tags packet (size: {} bytes)",
+                    pkt.data.len()
+                );
             }
             id if id == config_cb::FINISH_CONFIGURATION => {
                 println!("Received Finish Configuration from server. Acknowledging...");
@@ -399,11 +448,18 @@ async fn main() -> anyhow::Result<()> {
                 chunk_count += 1;
             }
             id if id == play_cb::CHUNK_BATCH_FINISHED => {
-                println!("Received Chunk Batch Finished packet! Successfully loaded {} spawn chunks.", chunk_count);
+                println!(
+                    "Received Chunk Batch Finished packet! Successfully loaded {} spawn chunks.",
+                    chunk_count
+                );
                 break;
             }
             other => {
-                println!("Received play packet ID: {:#04x} ({} bytes)", other, pkt.data.len());
+                println!(
+                    "Received play packet ID: {:#04x} ({} bytes)",
+                    other,
+                    pkt.data.len()
+                );
             }
         }
     }

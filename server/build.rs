@@ -69,11 +69,7 @@ fn main() {
 
         // Generate property values arrays
         for (pi, (_prop_name, values)) in props.iter().enumerate() {
-            write!(
-                w,
-                "static BLOCK_{i}_PROP_{pi}_VALUES: &[&str] = &[",
-            )
-            .unwrap();
+            write!(w, "static BLOCK_{i}_PROP_{pi}_VALUES: &[&str] = &[",).unwrap();
             for v in values.iter() {
                 write!(w, "\"{v}\", ").unwrap();
             }
@@ -81,11 +77,7 @@ fn main() {
         }
 
         // Generate properties array
-        writeln!(
-            w,
-            "static BLOCK_{i}_PROPERTIES: &[(&str, &[&str])] = &[",
-        )
-        .unwrap();
+        writeln!(w, "static BLOCK_{i}_PROPERTIES: &[(&str, &[&str])] = &[",).unwrap();
         for (pi, (prop_name, _)) in props.iter().enumerate() {
             writeln!(w, "    (\"{prop_name}\", BLOCK_{i}_PROP_{pi}_VALUES),").unwrap();
         }
@@ -100,11 +92,7 @@ fn main() {
             let mut state_props: Vec<_> = state.properties.iter().collect();
             state_props.sort_by_key(|(k, _)| *k);
 
-            write!(
-                w,
-                "static BLOCK_{i}_STATE_{si}_PROPS: &[(&str, &str)] = &[",
-            )
-            .unwrap();
+            write!(w, "static BLOCK_{i}_STATE_{si}_PROPS: &[(&str, &str)] = &[",).unwrap();
             for (k, v) in &state_props {
                 write!(w, "(\"{k}\", \"{v}\"), ").unwrap();
             }
@@ -123,11 +111,7 @@ fn main() {
         writeln!(w, "];").unwrap();
 
         // Generate BlockDef
-        writeln!(
-            w,
-            "static BLOCK_{i}_DEF: BlockDef = BlockDef {{",
-        )
-        .unwrap();
+        writeln!(w, "static BLOCK_{i}_DEF: BlockDef = BlockDef {{",).unwrap();
         writeln!(w, "    name: \"{name}\",").unwrap();
         writeln!(w, "    default_state_id: {},", block.default_state_id).unwrap();
         writeln!(w, "    properties: BLOCK_{i}_PROPERTIES,").unwrap();
@@ -137,7 +121,11 @@ fn main() {
     }
 
     // Generate BLOCKS phf map (name -> &BlockDef)
-    write!(w, "pub static BLOCKS: phf::Map<&'static str, &'static BlockDef> = ").unwrap();
+    write!(
+        w,
+        "pub static BLOCKS: phf::Map<&'static str, &'static BlockDef> = "
+    )
+    .unwrap();
     let mut blocks_map = phf_codegen::Map::new();
     for (i, (name, _)) in blocks.iter().enumerate() {
         blocks_map.entry(name.as_str(), &format!("&BLOCK_{i}_DEF"));

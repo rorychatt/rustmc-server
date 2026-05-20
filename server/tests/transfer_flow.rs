@@ -74,7 +74,8 @@ async fn test_transfer_denied_without_permission() {
         .await
         .expect("Failed to read response packet");
     assert_eq!(
-        packet.id, play_cb::SYSTEM_CHAT_MESSAGE,
+        packet.id,
+        play_cb::SYSTEM_CHAT_MESSAGE,
         "Expected system chat message packet"
     );
 
@@ -208,7 +209,11 @@ async fn drain_initial_play_packets(client: &mut TestClient) {
         .read_packet()
         .await
         .expect("Failed to read game event");
-    assert_eq!(game_event.id, play_cb::GAME_EVENT, "Expected game event packet");
+    assert_eq!(
+        game_event.id,
+        play_cb::GAME_EVENT,
+        "Expected game event packet"
+    );
 
     // Read Set Center Chunk
     let center_chunk = client
@@ -216,7 +221,8 @@ async fn drain_initial_play_packets(client: &mut TestClient) {
         .await
         .expect("Failed to read set center chunk");
     assert_eq!(
-        center_chunk.id, play_cb::SET_CENTER_CHUNK,
+        center_chunk.id,
+        play_cb::SET_CENTER_CHUNK,
         "Expected set center chunk packet"
     );
 
@@ -225,7 +231,11 @@ async fn drain_initial_play_packets(client: &mut TestClient) {
         .read_packet()
         .await
         .expect("Failed to read chunk batch start");
-    assert_eq!(batch_start.id, play_cb::CHUNK_BATCH_START, "Expected chunk batch start");
+    assert_eq!(
+        batch_start.id,
+        play_cb::CHUNK_BATCH_START,
+        "Expected chunk batch start"
+    );
 
     // Read chunk data packets until Chunk Batch Finished
     loop {

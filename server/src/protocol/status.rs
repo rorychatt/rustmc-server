@@ -41,7 +41,11 @@ pub struct StatusDescription {
 
 impl StatusResponse {
     pub fn default_response(online_count: i32, max_players: i32) -> Self {
-        Self::new(online_count, max_players, "RustMC Server - A Rust-powered Minecraft server")
+        Self::new(
+            online_count,
+            max_players,
+            "RustMC Server - A Rust-powered Minecraft server",
+        )
     }
 
     pub fn new(online_count: i32, max_players: i32, motd: &str) -> Self {

@@ -177,10 +177,7 @@ impl ServerConfig {
         };
 
         if !path.exists() {
-            info!(
-                "No config file at {}, using defaults",
-                path.display()
-            );
+            info!("No config file at {}, using defaults", path.display());
             return Self::default();
         }
 
@@ -199,7 +196,11 @@ impl ServerConfig {
                             config
                         }
                         Err(e) => {
-                            tracing::warn!("Failed to parse YAML {}: {}, using defaults", path.display(), e);
+                            tracing::warn!(
+                                "Failed to parse YAML {}: {}, using defaults",
+                                path.display(),
+                                e
+                            );
                             Self::default()
                         }
                     }
@@ -210,7 +211,11 @@ impl ServerConfig {
                             config
                         }
                         Err(e) => {
-                            tracing::warn!("Failed to parse TOML {}: {}, using defaults", path.display(), e);
+                            tracing::warn!(
+                                "Failed to parse TOML {}: {}, using defaults",
+                                path.display(),
+                                e
+                            );
                             Self::default()
                         }
                     }

@@ -64,10 +64,8 @@ impl TestServer {
             None
         };
 
-        let mut all_env: Vec<(&str, String)> = extra_env
-            .iter()
-            .map(|(k, v)| (*k, v.to_string()))
-            .collect();
+        let mut all_env: Vec<(&str, String)> =
+            extra_env.iter().map(|(k, v)| (*k, v.to_string())).collect();
 
         if let Some(ref path) = ops_file {
             all_env.push(("RUSTMC_OPS", path.to_string_lossy().into_owned()));

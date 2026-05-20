@@ -52,7 +52,8 @@ async fn test_transfer_sends_cookie_token() {
         .await
         .expect("Failed to read store cookie packet");
     assert_eq!(
-        cookie_packet.id, play_cb::STORE_COOKIE,
+        cookie_packet.id,
+        play_cb::STORE_COOKIE,
         "Expected store cookie packet before transfer"
     );
 
@@ -60,7 +61,11 @@ async fn test_transfer_sends_cookie_token() {
         .read_packet()
         .await
         .expect("Failed to read transfer packet");
-    assert_eq!(transfer_packet.id, play_cb::TRANSFER, "Expected transfer packet");
+    assert_eq!(
+        transfer_packet.id,
+        play_cb::TRANSFER,
+        "Expected transfer packet"
+    );
 }
 
 #[tokio::test]
@@ -109,7 +114,8 @@ async fn test_transfer_without_secret_skips_token() {
         .await
         .expect("Failed to read transfer packet");
     assert_eq!(
-        packet.id, play_cb::TRANSFER,
+        packet.id,
+        play_cb::TRANSFER,
         "Expected transfer packet directly without secret"
     );
 }
@@ -249,7 +255,11 @@ async fn complete_login_flow_and_check_cookie_request(client: &mut TestClient) {
         .read_packet()
         .await
         .expect("Failed to read join game");
-    assert_eq!(join_game.id, play_cb::LOGIN_PLAY, "Expected join game packet");
+    assert_eq!(
+        join_game.id,
+        play_cb::LOGIN_PLAY,
+        "Expected join game packet"
+    );
 
     // Next should be cookie request for "rustmc:transfer_token"
     let cookie_request = client
@@ -257,7 +267,8 @@ async fn complete_login_flow_and_check_cookie_request(client: &mut TestClient) {
         .await
         .expect("Failed to read cookie request");
     assert_eq!(
-        cookie_request.id, play_cb::COOKIE_REQUEST,
+        cookie_request.id,
+        play_cb::COOKIE_REQUEST,
         "Expected cookie request packet after join game"
     );
 }

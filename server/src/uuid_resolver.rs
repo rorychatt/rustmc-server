@@ -92,9 +92,7 @@ mod tests {
             cache.insert(
                 key.clone(),
                 CacheEntry {
-                    uuid: Some(
-                        Uuid::parse_str("12345678-1234-1234-1234-123456789abc").unwrap(),
-                    ),
+                    uuid: Some(Uuid::parse_str("12345678-1234-1234-1234-123456789abc").unwrap()),
                     expires_at: Instant::now() + CACHE_TTL,
                 },
             );
@@ -116,9 +114,7 @@ mod tests {
             cache.insert(
                 key.clone(),
                 CacheEntry {
-                    uuid: Some(
-                        Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").unwrap(),
-                    ),
+                    uuid: Some(Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").unwrap()),
                     expires_at: Instant::now() - Duration::from_secs(1),
                 },
             );
@@ -142,9 +138,7 @@ mod tests {
             cache.insert(
                 key.clone(),
                 CacheEntry {
-                    uuid: Some(
-                        Uuid::parse_str("abcdefab-cdef-abcd-efab-cdefabcdefab").unwrap(),
-                    ),
+                    uuid: Some(Uuid::parse_str("abcdefab-cdef-abcd-efab-cdefabcdefab").unwrap()),
                     expires_at: Instant::now() + CACHE_TTL,
                 },
             );
@@ -154,8 +148,7 @@ mod tests {
         let result_upper = resolve_uuid_from_mojang("CASE_TEST_PLAYER").await;
         let result_mixed = resolve_uuid_from_mojang("Case_Test_Player").await;
 
-        let expected =
-            Some(Uuid::parse_str("abcdefab-cdef-abcd-efab-cdefabcdefab").unwrap());
+        let expected = Some(Uuid::parse_str("abcdefab-cdef-abcd-efab-cdefabcdefab").unwrap());
         assert_eq!(result_lower, expected);
         assert_eq!(result_upper, expected);
         assert_eq!(result_mixed, expected);
