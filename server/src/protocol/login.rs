@@ -1,7 +1,7 @@
 use super::packet::Packet;
 use super::packet_ids::login::clientbound as ids;
 use super::types::{read_string, write_string, VarInt};
-use std::io::{self, Cursor, Read, Write};
+use std::io::{self, Cursor, Read};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -51,13 +51,6 @@ pub fn encode_login_cookie_request(key: &str) -> io::Result<Packet> {
     let mut data = Vec::new();
     write_string(&mut data, key)?;
     Ok(Packet::new(ids::COOKIE_REQUEST, data))
-}
-
-pub fn encode_login_store_cookie(key: &str, payload: &[u8]) -> io::Result<Packet> {
-    let mut data = Vec::new();
-    write_string(&mut data, key)?;
-    data.write_all(payload)?;
-    Ok(Packet::new(ids::STORE_COOKIE, data))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,14 +114,6 @@ mod tests {
     fn test_encode_login_cookie_request() {
         let packet = encode_login_cookie_request("minecraft:auth_token").unwrap();
         assert_eq!(packet.id, ids::COOKIE_REQUEST);
-        assert!(!packet.data.is_empty());
-    }
-
-    #[test]
-    fn test_encode_login_store_cookie() {
-        let payload = b"session_data_here";
-        let packet = encode_login_store_cookie("minecraft:session", payload).unwrap();
-        assert_eq!(packet.id, ids::STORE_COOKIE);
         assert!(!packet.data.is_empty());
     }
 

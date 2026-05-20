@@ -27,7 +27,7 @@ use crate::world::chunk::ChunkPos;
 use crate::world::World;
 use uuid::Uuid;
 
-use crate::server_config::RateLimitSection;
+use crate::server_config::ServerConfig;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionState {
@@ -47,6 +47,7 @@ pub struct Connection {
     player_name: Option<String>,
     compression_enabled: bool,
     protocol_version: i32,
+    view_distance: i32,
 
     configuration_finish_sent: bool,
     last_keep_alive_sent: Option<Instant>,
@@ -62,6 +63,8 @@ pub struct Connection {
     invalid_packet_window: Duration,
     invalid_packet_count: u32,
     invalid_packet_window_start: Option<Instant>,
+
+    config: ServerConfig,
 }
 
 impl Connection {
@@ -70,8 +73,10 @@ impl Connection {
         world: Arc<RwLock<World>>,
         operators: Arc<RwLock<Operators>>,
         broadcast_tx: broadcast::Sender<BroadcastEvent>,
-        rate_limit: &RateLimitSection,
+        config: ServerConfig,
     ) -> Self {
+        let view_distance = config.server.view_distance;
+        let rate_limit = &config.rate_limit;
         Self {
             addr,
             state: ConnectionState::Handshake,
@@ -81,6 +86,7 @@ impl Connection {
             player_name: None,
             compression_enabled: false,
             protocol_version: 0,
+            view_distance,
 
             configuration_finish_sent: false,
             last_keep_alive_sent: None,
@@ -96,6 +102,8 @@ impl Connection {
             invalid_packet_window: Duration::from_secs(rate_limit.invalid_packet_window_secs),
             invalid_packet_count: 0,
             invalid_packet_window_start: None,
+
+            config,
         }
     }
 
@@ -136,6 +144,7 @@ impl Connection {
                     source_chunk_z,
                     my_chunk_x,
                     my_chunk_z,
+                    self.view_distance,
                 );
             }
         }
@@ -291,10 +300,35 @@ impl Connection {
         let mut payload = vec![0u8; length as usize];
         reader.read_exact(&mut payload).await?;
 
-        let mut cursor = Cursor::new(&payload);
-        let packet_id = VarInt::read(&mut cursor)?.0;
-        let data_start = cursor.position() as usize;
-        let data = payload[data_start..].to_vec();
+        let (packet_id, data) = if self.compression_enabled {
+            let mut cursor = Cursor::new(&payload);
+            let data_length = VarInt::read(&mut cursor)?.0;
+            let data_start = cursor.position() as usize;
+
+            let decompressed_payload = if data_length == 0 {
+                // Below threshold - uncompressed
+                payload[data_start..].to_vec()
+            } else {
+                // Above threshold - decompress
+                use std::io::Read;
+                let mut decoder = flate2::read::ZlibDecoder::new(&payload[data_start..]);
+                let mut decompressed = Vec::new();
+                decoder.read_to_end(&mut decompressed)?;
+                decompressed
+            };
+
+            let mut decompressed_cursor = Cursor::new(&decompressed_payload);
+            let packet_id = VarInt::read(&mut decompressed_cursor)?.0;
+            let payload_start = decompressed_cursor.position() as usize;
+            let data = decompressed_payload[payload_start..].to_vec();
+            (packet_id, data)
+        } else {
+            let mut cursor = Cursor::new(&payload);
+            let packet_id = VarInt::read(&mut cursor)?.0;
+            let data_start = cursor.position() as usize;
+            let data = payload[data_start..].to_vec();
+            (packet_id, data)
+        };
 
         match self.state {
             ConnectionState::Handshake => self.handle_handshake(packet_id, &data, writer).await,
@@ -393,7 +427,11 @@ impl Connection {
             STATUS_REQUEST => {
                 decode_status_request(data)?;
                 let world = self.world.read().await;
-                let response = StatusResponse::default_response(world.player_count() as i32, 20);
+                let response = StatusResponse::new(
+                    world.player_count() as i32,
+                    self.config.gameplay.max_players,
+                    &self.config.gameplay.motd,
+                );
                 let packet = response.to_packet()?;
                 self.write_packet(writer, &packet).await?;
                 Ok(true)
@@ -474,6 +512,11 @@ impl Connection {
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<bool> {
         use packet_ids::configuration::serverbound::*;
+
+        debug!(
+            "Configuration serverbound packet: {packet_id:#04x} ({} bytes)",
+            _data.len()
+        );
 
         match packet_id {
             COOKIE_RESPONSE => {
@@ -594,11 +637,19 @@ impl Connection {
 
         let entity_id = {
             let mut world = self.world.write().await;
-            world.add_player_with_op_level(uuid, name.clone(), op_level)
+            world.add_player_with_op_level(uuid, name.clone(), op_level, self.view_distance)
         };
 
         // 1. Login (Play) packet
-        let login_play = play::encode_login_play(entity_id)?;
+        let login_play = play::encode_login_play(
+            entity_id,
+            self.view_distance,
+            self.config.gameplay.simulation_distance,
+            self.config.gameplay.max_players,
+            self.config.gameplay.hardcore,
+            self.config.gameplay.gamemode_id(),
+            self.config.gameplay.sea_level,
+        )?;
         self.write_packet(writer, &login_play).await?;
 
         // Request transfer token cookie if secret is configured
@@ -608,7 +659,7 @@ impl Connection {
         }
 
         // 2. Player Info Update (required for client to finalize join)
-        let player_info = play::encode_player_info_update(uuid, &name, 1); // game_mode=1 (creative)
+        let player_info = play::encode_player_info_update(uuid, &name, self.config.gameplay.gamemode_id());
         self.write_packet(writer, &player_info).await?;
 
         // 3. Synchronize Player Position
@@ -630,7 +681,7 @@ impl Connection {
         self.write_packet(writer, &batch_start).await?;
 
         // 7. Send initial chunks around spawn
-        let view_distance = 8;
+        let view_distance = self.view_distance;
 
         let mut initial_chunks = std::collections::HashSet::new();
         let mut chunk_count = 0;
@@ -705,7 +756,7 @@ impl Connection {
         uuid: &Uuid,
     ) -> std::io::Result<()> {
         let mut world = self.world.write().await;
-        let view_distance = 8;
+        let view_distance = self.view_distance;
         if let Some(update) = world.compute_chunk_updates(uuid, view_distance) {
             if !update.to_load.is_empty() || !update.to_unload.is_empty() {
                 if let Some(player) = world.players.get(uuid) {
@@ -1180,19 +1231,15 @@ mod tests {
     const TEST_THRESHOLD: u32 = 16;
     const TEST_WINDOW_SECS: u64 = 10;
 
-    fn test_rate_limit() -> RateLimitSection {
-        RateLimitSection {
-            invalid_packet_threshold: TEST_THRESHOLD,
-            invalid_packet_window_secs: TEST_WINDOW_SECS,
-        }
-    }
-
     fn make_connection() -> Connection {
         let world = Arc::new(RwLock::new(World::new()));
         let operators = Arc::new(RwLock::new(Operators::empty()));
         let addr: SocketAddr = "127.0.0.1:25565".parse().unwrap();
         let (broadcast_tx, _broadcast_rx) = broadcast::channel(16);
-        Connection::new(addr, world, operators, broadcast_tx, &test_rate_limit())
+        let mut config = ServerConfig::default();
+        config.rate_limit.invalid_packet_threshold = TEST_THRESHOLD;
+        config.rate_limit.invalid_packet_window_secs = TEST_WINDOW_SECS;
+        Connection::new(addr, world, operators, broadcast_tx, config)
     }
 
     #[test]

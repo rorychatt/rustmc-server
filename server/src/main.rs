@@ -11,9 +11,12 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("Starting RustMC Server v{}", env!("CARGO_PKG_VERSION"));
 
-    let config = ServerConfig::load();
+    let mut config = ServerConfig::load();
 
     let addr = std::env::var("RUSTMC_BIND").unwrap_or_else(|_| config.server.bind.clone());
+    if let Some(vd) = std::env::var("RUSTMC_VIEW_DISTANCE").ok().and_then(|v| v.parse().ok()) {
+        config.server.view_distance = vd;
+    }
 
     let mut bridge = plugin_bridge::PluginBridge::new();
     let plugins_dir = std::env::var("RUSTMC_PLUGINS").unwrap_or_else(|_| "plugins".to_string());

@@ -134,8 +134,33 @@ impl TestClient {
         packet_buf.extend_from_slice(data);
 
         let mut full_packet = Vec::new();
-        write_varint(&mut full_packet, packet_buf.len() as i32)?;
-        full_packet.extend_from_slice(&packet_buf);
+
+        match self.compression_threshold {
+            None => {
+                write_varint(&mut full_packet, packet_buf.len() as i32)?;
+                full_packet.extend_from_slice(&packet_buf);
+            }
+            Some(threshold) if packet_buf.len() < threshold as usize => {
+                let data_len_varint_size = varint_size(0);
+                let packet_length = data_len_varint_size + packet_buf.len() as i32;
+                write_varint(&mut full_packet, packet_length)?;
+                write_varint(&mut full_packet, 0)?;
+                full_packet.extend_from_slice(&packet_buf);
+            }
+            Some(_) => {
+                use flate2::write::ZlibEncoder;
+                use flate2::Compression;
+                let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+                encoder.write_all(&packet_buf)?;
+                let compressed = encoder.finish()?;
+
+                let uncompressed_len = packet_buf.len() as i32;
+                let packet_length = varint_size(uncompressed_len) + compressed.len() as i32;
+                write_varint(&mut full_packet, packet_length)?;
+                write_varint(&mut full_packet, uncompressed_len)?;
+                full_packet.extend_from_slice(&compressed);
+            }
+        }
 
         self.stream.write_all(&full_packet).await?;
         self.stream.flush().await?;
