@@ -27,6 +27,9 @@ use crate::world::chunk::ChunkPos;
 use crate::world::World;
 use uuid::Uuid;
 
+const INVALID_PACKET_THRESHOLD: u32 = 16;
+const INVALID_PACKET_WINDOW: Duration = Duration::from_secs(10);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionState {
     Handshake,
@@ -55,6 +58,9 @@ pub struct Connection {
     pub transferred_from: Option<String>,
 
     broadcast_tx: broadcast::Sender<BroadcastEvent>,
+
+    invalid_packet_count: u32,
+    invalid_packet_window_start: Option<Instant>,
 }
 
 impl Connection {
@@ -83,7 +89,24 @@ impl Connection {
             transferred_from: None,
 
             broadcast_tx,
+
+            invalid_packet_count: 0,
+            invalid_packet_window_start: None,
         }
+    }
+
+    fn record_invalid_packet(&mut self) -> bool {
+        let now = Instant::now();
+        match self.invalid_packet_window_start {
+            Some(start) if now.duration_since(start) < INVALID_PACKET_WINDOW => {
+                self.invalid_packet_count += 1;
+            }
+            _ => {
+                self.invalid_packet_window_start = Some(now);
+                self.invalid_packet_count = 1;
+            }
+        }
+        self.invalid_packet_count >= INVALID_PACKET_THRESHOLD
     }
 
     pub fn get_cookie(&self, key: &str) -> Option<&Vec<u8>> {
@@ -379,6 +402,10 @@ impl Connection {
             }
             _ => {
                 warn!("Unknown status packet: {packet_id:#04x}");
+                if self.record_invalid_packet() {
+                    warn!("Disconnecting {} for excessive invalid packets ({} in window)", self.addr, self.invalid_packet_count);
+                    return Ok(false);
+                }
                 Ok(true)
             }
         }
@@ -427,6 +454,10 @@ impl Connection {
             }
             _ => {
                 warn!("Unknown login packet: {packet_id:#04x}");
+                if self.record_invalid_packet() {
+                    warn!("Disconnecting {} for excessive invalid packets ({} in window)", self.addr, self.invalid_packet_count);
+                    return Ok(false);
+                }
                 Ok(true)
             }
         }
@@ -954,6 +985,10 @@ impl Connection {
                         "Invalid player position from client: ({}, {}, {})",
                         pos.x, pos.y, pos.z
                     );
+                    if self.record_invalid_packet() {
+                        warn!("Disconnecting {} for excessive invalid packets ({} in window)", self.addr, self.invalid_packet_count);
+                        return Ok(false);
+                    }
                     return Ok(true);
                 }
                 debug!("Player position: ({}, {}, {})", pos.x, pos.y, pos.z);
@@ -973,6 +1008,10 @@ impl Connection {
                         "Invalid player position+rotation from client: ({}, {}, {}) pitch={}",
                         pos_rot.x, pos_rot.y, pos_rot.z, pos_rot.pitch
                     );
+                    if self.record_invalid_packet() {
+                        warn!("Disconnecting {} for excessive invalid packets ({} in window)", self.addr, self.invalid_packet_count);
+                        return Ok(false);
+                    }
                     return Ok(true);
                 }
                 debug!(
@@ -998,6 +1037,10 @@ impl Connection {
                         "Invalid player rotation from client: yaw={} pitch={}",
                         rot.yaw, rot.pitch
                     );
+                    if self.record_invalid_packet() {
+                        warn!("Disconnecting {} for excessive invalid packets ({} in window)", self.addr, self.invalid_packet_count);
+                        return Ok(false);
+                    }
                     return Ok(true);
                 }
                 debug!("Player rotation: yaw={} pitch={}", rot.yaw, rot.pitch);
@@ -1025,6 +1068,10 @@ impl Connection {
                         "Invalid player command from client: action={} jump_boost={}",
                         cmd.action_id, cmd.jump_boost
                     );
+                    if self.record_invalid_packet() {
+                        warn!("Disconnecting {} for excessive invalid packets ({} in window)", self.addr, self.invalid_packet_count);
+                        return Ok(false);
+                    }
                     return Ok(true);
                 }
                 debug!(
@@ -1060,6 +1107,10 @@ impl Connection {
                 let item = play::SetCarriedItem::decode(data)?;
                 if !item.is_valid_slot() {
                     warn!("Invalid carried item slot {} from client", item.slot);
+                    if self.record_invalid_packet() {
+                        warn!("Disconnecting {} for excessive invalid packets ({} in window)", self.addr, self.invalid_packet_count);
+                        return Ok(false);
+                    }
                     return Ok(true);
                 }
                 debug!("Set carried item: slot={}", item.slot);
@@ -1074,6 +1125,10 @@ impl Connection {
                 let swing = play::Swing::decode(data)?;
                 if !swing.is_valid() {
                     warn!("Invalid swing hand from client: {}", swing.hand);
+                    if self.record_invalid_packet() {
+                        warn!("Disconnecting {} for excessive invalid packets ({} in window)", self.addr, self.invalid_packet_count);
+                        return Ok(false);
+                    }
                     return Ok(true);
                 }
                 let animation = if swing.hand == 0 { 0u8 } else { 3u8 };
@@ -1178,5 +1233,36 @@ mod tests {
         }
 
         assert_eq!(conn.get_cookie("minecraft:transfer"), None);
+    }
+
+    #[test]
+    fn test_record_invalid_packet_below_threshold() {
+        let mut conn = make_connection();
+        for _ in 0..(INVALID_PACKET_THRESHOLD - 1) {
+            assert!(!conn.record_invalid_packet());
+        }
+    }
+
+    #[test]
+    fn test_record_invalid_packet_exceeds_threshold() {
+        let mut conn = make_connection();
+        for _ in 0..(INVALID_PACKET_THRESHOLD - 1) {
+            assert!(!conn.record_invalid_packet());
+        }
+        assert!(conn.record_invalid_packet());
+    }
+
+    #[test]
+    fn test_record_invalid_packet_window_reset() {
+        let mut conn = make_connection();
+        for _ in 0..(INVALID_PACKET_THRESHOLD - 1) {
+            conn.record_invalid_packet();
+        }
+        // Simulate window expiry by backdating the start
+        conn.invalid_packet_window_start =
+            Some(Instant::now() - INVALID_PACKET_WINDOW - Duration::from_secs(1));
+        // After window reset, counter restarts at 1
+        assert!(!conn.record_invalid_packet());
+        assert_eq!(conn.invalid_packet_count, 1);
     }
 }
