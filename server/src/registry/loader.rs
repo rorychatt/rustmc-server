@@ -29,6 +29,32 @@ pub(crate) mod v775 {
     pub const JUKEBOX_SONG_JSON: &str =
         include_str!("../../data/registries/v775/jukebox_song.json");
     pub const INSTRUMENT_JSON: &str = include_str!("../../data/registries/v775/instrument.json");
+    pub const CAT_VARIANT_JSON: &str = include_str!("../../data/registries/v775/cat_variant.json");
+    pub const PIG_SOUND_VARIANT_JSON: &str =
+        include_str!("../../data/registries/v775/pig_sound_variant.json");
+    pub const WOLF_SOUND_VARIANT_JSON: &str =
+        include_str!("../../data/registries/v775/wolf_sound_variant.json");
+    pub const FROG_VARIANT_JSON: &str =
+        include_str!("../../data/registries/v775/frog_variant.json");
+    pub const PIG_VARIANT_JSON: &str = include_str!("../../data/registries/v775/pig_variant.json");
+    pub const CAT_SOUND_VARIANT_JSON: &str =
+        include_str!("../../data/registries/v775/cat_sound_variant.json");
+    pub const COW_SOUND_VARIANT_JSON: &str =
+        include_str!("../../data/registries/v775/cow_sound_variant.json");
+    pub const ZOMBIE_NAUTILUS_VARIANT_JSON: &str =
+        include_str!("../../data/registries/v775/zombie_nautilus_variant.json");
+    pub const CHICKEN_VARIANT_JSON: &str =
+        include_str!("../../data/registries/v775/chicken_variant.json");
+    pub const CHICKEN_SOUND_VARIANT_JSON: &str =
+        include_str!("../../data/registries/v775/chicken_sound_variant.json");
+    pub const COW_VARIANT_JSON: &str = include_str!("../../data/registries/v775/cow_variant.json");
+    pub const DIALOG_JSON: &str = include_str!("../../data/registries/v775/dialog.json");
+    pub const WORLD_CLOCK_JSON: &str = include_str!("../../data/registries/v775/world_clock.json");
+    pub const TIMELINE_JSON: &str = include_str!("../../data/registries/v775/timeline.json");
+    pub const TEST_ENVIRONMENT_JSON: &str =
+        include_str!("../../data/registries/v775/test_environment.json");
+    pub const TEST_INSTANCE_JSON: &str =
+        include_str!("../../data/registries/v775/test_instance.json");
 
     pub const REGISTRY_IDS: &[&str] = &[
         "minecraft:dimension_type",
@@ -43,6 +69,22 @@ pub(crate) mod v775 {
         "minecraft:enchantment",
         "minecraft:jukebox_song",
         "minecraft:instrument",
+        "minecraft:cat_variant",
+        "minecraft:pig_sound_variant",
+        "minecraft:wolf_sound_variant",
+        "minecraft:frog_variant",
+        "minecraft:pig_variant",
+        "minecraft:cat_sound_variant",
+        "minecraft:cow_sound_variant",
+        "minecraft:zombie_nautilus_variant",
+        "minecraft:chicken_variant",
+        "minecraft:chicken_sound_variant",
+        "minecraft:cow_variant",
+        "minecraft:dialog",
+        "minecraft:world_clock",
+        "minecraft:timeline",
+        "minecraft:test_environment",
+        "minecraft:test_instance",
     ];
 }
 
@@ -73,6 +115,22 @@ impl RegistrySet {
                 "minecraft:enchantment" => Ok(v775::ENCHANTMENT_JSON),
                 "minecraft:jukebox_song" => Ok(v775::JUKEBOX_SONG_JSON),
                 "minecraft:instrument" => Ok(v775::INSTRUMENT_JSON),
+                "minecraft:cat_variant" => Ok(v775::CAT_VARIANT_JSON),
+                "minecraft:pig_sound_variant" => Ok(v775::PIG_SOUND_VARIANT_JSON),
+                "minecraft:wolf_sound_variant" => Ok(v775::WOLF_SOUND_VARIANT_JSON),
+                "minecraft:frog_variant" => Ok(v775::FROG_VARIANT_JSON),
+                "minecraft:pig_variant" => Ok(v775::PIG_VARIANT_JSON),
+                "minecraft:cat_sound_variant" => Ok(v775::CAT_SOUND_VARIANT_JSON),
+                "minecraft:cow_sound_variant" => Ok(v775::COW_SOUND_VARIANT_JSON),
+                "minecraft:zombie_nautilus_variant" => Ok(v775::ZOMBIE_NAUTILUS_VARIANT_JSON),
+                "minecraft:chicken_variant" => Ok(v775::CHICKEN_VARIANT_JSON),
+                "minecraft:chicken_sound_variant" => Ok(v775::CHICKEN_SOUND_VARIANT_JSON),
+                "minecraft:cow_variant" => Ok(v775::COW_VARIANT_JSON),
+                "minecraft:dialog" => Ok(v775::DIALOG_JSON),
+                "minecraft:world_clock" => Ok(v775::WORLD_CLOCK_JSON),
+                "minecraft:timeline" => Ok(v775::TIMELINE_JSON),
+                "minecraft:test_environment" => Ok(v775::TEST_ENVIRONMENT_JSON),
+                "minecraft:test_instance" => Ok(v775::TEST_INSTANCE_JSON),
                 _ => Err(RegistryError::UnknownRegistry {
                     registry_id: registry_id.to_owned(),
                     protocol_version: self.version,
@@ -201,23 +259,22 @@ mod tests {
     #[test]
     fn test_registry_ids_for_775() {
         let set = registry_set_for(775).unwrap();
-        assert_eq!(set.registry_ids.len(), 12);
+        assert_eq!(set.registry_ids.len(), 28);
         assert!(set.registry_ids.contains(&"minecraft:dimension_type"));
         assert!(set.registry_ids.contains(&"minecraft:worldgen/biome"));
         assert!(set.registry_ids.contains(&"minecraft:instrument"));
+        assert!(set.registry_ids.contains(&"minecraft:cat_variant"));
+        assert!(set.registry_ids.contains(&"minecraft:pig_sound_variant"));
+        assert!(set.registry_ids.contains(&"minecraft:test_instance"));
     }
 
     #[test]
     fn test_load_all_registries() {
         let set = registry_set_for(PROTOCOL_VERSION).unwrap();
         for registry_id in set.registry_ids {
-            let entries = load_registry(registry_id, PROTOCOL_VERSION).unwrap_or_else(|e| {
+            load_registry(registry_id, PROTOCOL_VERSION).unwrap_or_else(|e| {
                 panic!("Failed to load {registry_id}: {e}");
             });
-            assert!(
-                !entries.is_empty(),
-                "{registry_id} should have at least one entry"
-            );
         }
     }
 
@@ -273,6 +330,80 @@ mod tests {
             19
         );
         assert_eq!(load_registry("minecraft:instrument", 775).unwrap().len(), 8);
+        assert_eq!(
+            load_registry("minecraft:cat_variant", 775).unwrap().len(),
+            11
+        );
+        assert_eq!(
+            load_registry("minecraft:pig_sound_variant", 775)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            load_registry("minecraft:wolf_sound_variant", 775)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            load_registry("minecraft:frog_variant", 775).unwrap().len(),
+            3
+        );
+        assert_eq!(
+            load_registry("minecraft:pig_variant", 775).unwrap().len(),
+            3
+        );
+        assert_eq!(
+            load_registry("minecraft:cat_sound_variant", 775)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            load_registry("minecraft:cow_sound_variant", 775)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            load_registry("minecraft:zombie_nautilus_variant", 775)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            load_registry("minecraft:chicken_variant", 775)
+                .unwrap()
+                .len(),
+            3
+        );
+        assert_eq!(
+            load_registry("minecraft:chicken_sound_variant", 775)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            load_registry("minecraft:cow_variant", 775).unwrap().len(),
+            3
+        );
+        assert_eq!(load_registry("minecraft:dialog", 775).unwrap().len(), 0);
+        assert_eq!(
+            load_registry("minecraft:world_clock", 775).unwrap().len(),
+            0
+        );
+        assert_eq!(load_registry("minecraft:timeline", 775).unwrap().len(), 0);
+        assert_eq!(
+            load_registry("minecraft:test_environment", 775)
+                .unwrap()
+                .len(),
+            0
+        );
+        assert_eq!(
+            load_registry("minecraft:test_instance", 775).unwrap().len(),
+            0
+        );
     }
 
     #[test]
@@ -330,13 +461,9 @@ mod tests {
         for &version in SUPPORTED_VERSIONS {
             let set = registry_set_for(version).unwrap();
             for &reg_id in set.registry_ids {
-                let entries = ENTRY_CACHE.get(&(version, reg_id)).unwrap_or_else(|| {
+                ENTRY_CACHE.get(&(version, reg_id)).unwrap_or_else(|| {
                     panic!("ENTRY_CACHE missing ({version}, {reg_id})");
                 });
-                assert!(
-                    !entries.is_empty(),
-                    "({version}, {reg_id}) should have cached entries"
-                );
             }
         }
     }

@@ -1,0 +1,13 @@
+[
+  {"id":"minecraft:all_black","data":{"asset_id":"minecraft:all_black","spawn_conditions":[{"context":{"min_light":0,"max_light":15},"chance":0.0625}]}},
+  {"id":"minecraft:black","data":{"asset_id":"minecraft:black","spawn_conditions":[{"context":{"min_light":0,"max_light":15},"chance":0.0625}]}},
+  {"id":"minecraft:british_shorthair","data":{"asset_id":"minecraft:british_shorthair","spawn_conditions":[{"context":{"min_light":0,"max_light":15},"chance":0.0625}]}},
+  {"id":"minecraft:calico","data":{"asset_id":"minecraft:calico","spawn_conditions":[{"context":{"min_light":0,"max_light":15},"chance":0.0625}]}},
+  {"id":"minecraft:jellie","data":{"asset_id":"minecraft:jellie","spawn_conditions":[{"context":{"min_light":0,"max_light":15},"chance":0.0625}]}},
+  {"id":"minecraft:persian","data":{"asset_id":"minecraft:persian","spawn_conditions":[{"context":{"min_light":0,"max_light":15},"chance":0.0625}]}},
+  {"id":"minecraft:ragdoll","data":{"asset_id":"minecraft:ragdoll","spawn_conditions":[{"context":{"min_light":0,"max_light":15},"chance":0.0625}]}},
+  {"id":"minecraft:red","data":{"asset_id":"minecraft:red","spawn_conditions":[{"context":{"min_light":0,"max_light":15},"chance":0.0625}]}},
+  {"id":"minecraft:siamese","data":{"asset_id":"minecraft:siamese","spawn_conditions":[{"context":{"min_light":0,"max_light":15},"chance":0.0625}]}},
+  {"id":"minecraft:tabby","data":{"asset_id":"minecraft:tabby","spawn_conditions":[{"context":{"min_light":0,"max_light":15},"chance":0.0625}]}},
+  {"id":"minecraft:white","data":{"asset_id":"minecraft:white","spawn_conditions":[{"context":{"min_light":0,"max_light":15},"chance":0.0625}]}}
+]

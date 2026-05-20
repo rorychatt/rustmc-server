@@ -1,0 +1,5 @@
+[
+  {"id":"minecraft:cold","data":{"asset_id":"minecraft:cold","spawn_conditions":[{"context":{"min_light":0,"max_light":15},"chance":0.0625}]}},
+  {"id":"minecraft:default","data":{"asset_id":"minecraft:default","spawn_conditions":[{"context":{"min_light":0,"max_light":15},"chance":0.9375}]}},
+  {"id":"minecraft:warm","data":{"asset_id":"minecraft:warm","spawn_conditions":[{"context":{"min_light":0,"max_light":15},"chance":0.0625}]}}
+]

@@ -347,5 +347,61 @@
     "minecraft:quartz",
     "minecraft:redstone",
     "minecraft:resin"
-  ]
+  ],
+  "minecraft:cat_variant": [
+    "minecraft:all_black",
+    "minecraft:black",
+    "minecraft:british_shorthair",
+    "minecraft:calico",
+    "minecraft:jellie",
+    "minecraft:persian",
+    "minecraft:ragdoll",
+    "minecraft:red",
+    "minecraft:siamese",
+    "minecraft:tabby",
+    "minecraft:white"
+  ],
+  "minecraft:pig_sound_variant": [
+    "minecraft:classic"
+  ],
+  "minecraft:wolf_sound_variant": [
+    "minecraft:classic"
+  ],
+  "minecraft:frog_variant": [
+    "minecraft:cold",
+    "minecraft:temperate",
+    "minecraft:warm"
+  ],
+  "minecraft:pig_variant": [
+    "minecraft:cold",
+    "minecraft:default",
+    "minecraft:warm"
+  ],
+  "minecraft:cat_sound_variant": [
+    "minecraft:classic"
+  ],
+  "minecraft:cow_sound_variant": [
+    "minecraft:classic"
+  ],
+  "minecraft:zombie_nautilus_variant": [
+    "minecraft:default"
+  ],
+  "minecraft:chicken_variant": [
+    "minecraft:cold",
+    "minecraft:default",
+    "minecraft:warm"
+  ],
+  "minecraft:chicken_sound_variant": [
+    "minecraft:classic"
+  ],
+  "minecraft:cow_variant": [
+    "minecraft:cold",
+    "minecraft:default",
+    "minecraft:warm"
+  ],
+  "minecraft:dialog": [],
+  "minecraft:world_clock": [],
+  "minecraft:timeline": [],
+  "minecraft:test_environment": [],
+  "minecraft:test_instance": []
 }

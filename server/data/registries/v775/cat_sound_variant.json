@@ -1,0 +1,3 @@
+[
+  {"id":"minecraft:classic","data":{"ambient_sound":"minecraft:entity.cat.ambient","death_sound":"minecraft:entity.cat.death","eat_sound":"minecraft:entity.cat.eat","hiss_sound":"minecraft:entity.cat.hiss","hurt_sound":"minecraft:entity.cat.hurt","purr_sound":"minecraft:entity.cat.purr","purreow_sound":"minecraft:entity.cat.purreow","stray_ambient_sound":"minecraft:entity.cat.stray_ambient"}}
+]

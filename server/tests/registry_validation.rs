@@ -16,6 +16,22 @@ const EXPECTED_COUNTS: &[(&str, usize)] = &[
     ("minecraft:enchantment", 42),
     ("minecraft:jukebox_song", 19),
     ("minecraft:instrument", 8),
+    ("minecraft:cat_variant", 11),
+    ("minecraft:pig_sound_variant", 1),
+    ("minecraft:wolf_sound_variant", 1),
+    ("minecraft:frog_variant", 3),
+    ("minecraft:pig_variant", 3),
+    ("minecraft:cat_sound_variant", 1),
+    ("minecraft:cow_sound_variant", 1),
+    ("minecraft:zombie_nautilus_variant", 1),
+    ("minecraft:chicken_variant", 3),
+    ("minecraft:chicken_sound_variant", 1),
+    ("minecraft:cow_variant", 3),
+    ("minecraft:dialog", 0),
+    ("minecraft:world_clock", 0),
+    ("minecraft:timeline", 0),
+    ("minecraft:test_environment", 0),
+    ("minecraft:test_instance", 0),
 ];
 
 #[test]
