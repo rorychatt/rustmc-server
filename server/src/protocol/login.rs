@@ -1,7 +1,7 @@
 use super::packet::Packet;
 use super::packet_ids::login::clientbound as ids;
 use super::types::{read_string, write_string, VarInt};
-use std::io::{self, Cursor, Read, Write};
+use std::io::{self, Cursor, Read};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
