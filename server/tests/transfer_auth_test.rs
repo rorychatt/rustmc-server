@@ -5,13 +5,15 @@ use uuid::Uuid;
 
 #[tokio::test]
 async fn test_transfer_sends_cookie_token() {
-    let server_a = TestServer::spawn_with_env(&[("RUSTMC_TRANSFER_SECRET", "integration-test-secret")])
-        .await
-        .expect("Failed to spawn server A");
+    let server_a =
+        TestServer::spawn_with_env(&[("RUSTMC_TRANSFER_SECRET", "integration-test-secret")])
+            .await
+            .expect("Failed to spawn server A");
 
-    let server_b = TestServer::spawn_with_env(&[("RUSTMC_TRANSFER_SECRET", "integration-test-secret")])
-        .await
-        .expect("Failed to spawn server B");
+    let server_b =
+        TestServer::spawn_with_env(&[("RUSTMC_TRANSFER_SECRET", "integration-test-secret")])
+            .await
+            .expect("Failed to spawn server B");
 
     let mut client = TestClient::connect(server_a.port())
         .await
@@ -46,9 +48,10 @@ async fn test_transfer_sends_cookie_token() {
 
 #[tokio::test]
 async fn test_target_server_requests_transfer_cookie() {
-    let server = TestServer::spawn_with_env(&[("RUSTMC_TRANSFER_SECRET", "integration-test-secret")])
-        .await
-        .expect("Failed to spawn server");
+    let server =
+        TestServer::spawn_with_env(&[("RUSTMC_TRANSFER_SECRET", "integration-test-secret")])
+            .await
+            .expect("Failed to spawn server");
 
     let mut client = TestClient::connect(server.port())
         .await

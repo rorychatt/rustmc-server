@@ -19,8 +19,7 @@ pub fn generate_token(secret: &[u8], token: &TransferToken) -> Vec<u8> {
         "{}|{}|{}|{}",
         token.origin, token.player_uuid, token.player_name, token.timestamp
     );
-    let mut mac =
-        HmacSha256::new_from_slice(secret).expect("HMAC can take key of any size");
+    let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC can take key of any size");
     mac.update(message.as_bytes());
     let signature = mac.finalize().into_bytes();
 
@@ -43,8 +42,7 @@ pub fn validate_token(secret: &[u8], payload: &[u8]) -> Option<TransferToken> {
     let message = &payload[..sig_separator];
     let signature = &payload[sig_separator + 1..];
 
-    let mut mac =
-        HmacSha256::new_from_slice(secret).expect("HMAC can take key of any size");
+    let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC can take key of any size");
     mac.update(message);
     if mac.verify_slice(signature).is_err() {
         return None;
