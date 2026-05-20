@@ -1,3 +1,4 @@
+use super::error::RegistryError;
 use super::nbt_encoder::json_to_nbt;
 use crate::protocol::configuration::{encode_registry_data, RegistryEntry};
 use crate::protocol::packet::Packet;
@@ -72,10 +73,11 @@ impl RegistrySet {
                 "minecraft:enchantment" => Ok(v775::ENCHANTMENT_JSON),
                 "minecraft:jukebox_song" => Ok(v775::JUKEBOX_SONG_JSON),
                 "minecraft:instrument" => Ok(v775::INSTRUMENT_JSON),
-                _ => Err(io::Error::new(
-                    io::ErrorKind::NotFound,
-                    format!("unknown registry: {registry_id}"),
-                )),
+                _ => Err(RegistryError::UnknownRegistry {
+                    registry_id: registry_id.to_owned(),
+                    protocol_version: self.version,
+                }
+                .into()),
             },
             _ => Err(ProtocolVersionError::UnsupportedVersion {
                 requested: self.version,
@@ -180,6 +182,7 @@ fn parse_registry_json(json_str: &str) -> io::Result<Vec<RegistryEntry>> {
 mod tests {
     use super::*;
     use crate::protocol::version::{ProtocolVersionError, PROTOCOL_VERSION, SUPPORTED_VERSIONS};
+    use crate::registry::RegistryError;
 
     #[test]
     fn test_load_registry_with_protocol_version() {
@@ -274,7 +277,10 @@ mod tests {
 
     #[test]
     fn test_unknown_registry_returns_error() {
-        assert!(load_registry("minecraft:nonexistent", 775).is_err());
+        let result = load_registry("minecraft:nonexistent", 775);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
     }
 
     #[test]
@@ -346,6 +352,21 @@ mod tests {
             ProtocolVersionError::UnsupportedVersion {
                 requested: 999,
                 supported: SUPPORTED_VERSIONS,
+            }
+        );
+    }
+
+    #[test]
+    fn test_unknown_registry_error_downcast() {
+        let result = load_registry("minecraft:nonexistent", 775);
+        let err = result.unwrap_err();
+        let source = err.get_ref().unwrap();
+        let re = source.downcast_ref::<RegistryError>().unwrap();
+        assert_eq!(
+            *re,
+            RegistryError::UnknownRegistry {
+                registry_id: "minecraft:nonexistent".to_owned(),
+                protocol_version: 775,
             }
         );
     }
