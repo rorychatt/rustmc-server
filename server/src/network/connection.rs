@@ -10,6 +10,7 @@ use tracing::{debug, error, info, warn};
 
 use super::broadcast::{is_within_render_distance, BroadcastEvent};
 use crate::config::Operators;
+use crate::network::transfer_token;
 use crate::protocol::chunk_data;
 use crate::protocol::configuration;
 use crate::protocol::handshake::{Handshake, NextState};
@@ -21,11 +22,13 @@ use crate::protocol::status::{
     decode_ping_request, decode_status_request, encode_pong_response, StatusResponse,
 };
 use crate::protocol::types::VarInt;
-use crate::network::transfer_token;
 use crate::registry;
 use crate::world::chunk::ChunkPos;
 use crate::world::World;
 use uuid::Uuid;
+
+const INVALID_PACKET_THRESHOLD: u32 = 16;
+const INVALID_PACKET_WINDOW: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionState {
@@ -55,6 +58,9 @@ pub struct Connection {
     pub transferred_from: Option<String>,
 
     broadcast_tx: broadcast::Sender<BroadcastEvent>,
+
+    invalid_packet_count: u32,
+    invalid_packet_window_start: Option<Instant>,
 }
 
 impl Connection {
@@ -83,7 +89,24 @@ impl Connection {
             transferred_from: None,
 
             broadcast_tx,
+
+            invalid_packet_count: 0,
+            invalid_packet_window_start: None,
         }
+    }
+
+    fn record_invalid_packet(&mut self) -> bool {
+        let now = Instant::now();
+        match self.invalid_packet_window_start {
+            Some(start) if now.duration_since(start) < INVALID_PACKET_WINDOW => {
+                self.invalid_packet_count += 1;
+            }
+            _ => {
+                self.invalid_packet_window_start = Some(now);
+                self.invalid_packet_count = 1;
+            }
+        }
+        self.invalid_packet_count >= INVALID_PACKET_THRESHOLD
     }
 
     pub fn get_cookie(&self, key: &str) -> Option<&Vec<u8>> {
@@ -96,6 +119,23 @@ impl Connection {
 
     pub fn remove_cookie(&mut self, key: &str) -> Option<Vec<u8>> {
         self.cookies.remove(key)
+    }
+
+    async fn is_source_in_range(&self, source_chunk_x: i32, source_chunk_z: i32) -> bool {
+        if let Some(ref my_uuid) = self.player_uuid {
+            let world = self.world.read().await;
+            if let Some(me) = world.players.get(my_uuid) {
+                let my_chunk_x = me.x as i32 >> 4;
+                let my_chunk_z = me.z as i32 >> 4;
+                return is_within_render_distance(
+                    source_chunk_x,
+                    source_chunk_z,
+                    my_chunk_x,
+                    my_chunk_z,
+                );
+            }
+        }
+        false
     }
 
     pub async fn handle(
@@ -152,48 +192,20 @@ impl Connection {
                     event = broadcast_rx.recv() => {
                         match event {
                             Ok(BroadcastEvent::EntityAnimation { exclude_uuid, entity_id, animation, source_chunk_x, source_chunk_z }) => {
-                                if self.player_uuid != Some(exclude_uuid) {
-                                    let in_range = if let Some(ref my_uuid) = self.player_uuid {
-                                        let world = self.world.read().await;
-                                        if let Some(me) = world.players.get(my_uuid) {
-                                            let my_chunk_x = me.x as i32 >> 4;
-                                            let my_chunk_z = me.z as i32 >> 4;
-                                            is_within_render_distance(source_chunk_x, source_chunk_z, my_chunk_x, my_chunk_z)
-                                        } else {
-                                            false
-                                        }
-                                    } else {
-                                        false
-                                    };
-                                    if in_range {
-                                        let packet = play::encode_entity_animation(entity_id, animation);
-                                        if let Err(e) = self.write_packet(&mut writer, &packet).await {
-                                            error!("Failed to send entity animation to {}: {}", self.addr, e);
-                                            break;
-                                        }
+                                if self.player_uuid != Some(exclude_uuid) && self.is_source_in_range(source_chunk_x, source_chunk_z).await {
+                                    let packet = play::encode_entity_animation(entity_id, animation);
+                                    if let Err(e) = self.write_packet(&mut writer, &packet).await {
+                                        error!("Failed to send entity animation to {}: {}", self.addr, e);
+                                        break;
                                     }
                                 }
                             }
                             Ok(BroadcastEvent::EntityMetadata { exclude_uuid, entity_id, metadata_bytes, source_chunk_x, source_chunk_z }) => {
-                                if self.player_uuid != Some(exclude_uuid) {
-                                    let in_range = if let Some(ref my_uuid) = self.player_uuid {
-                                        let world = self.world.read().await;
-                                        if let Some(me) = world.players.get(my_uuid) {
-                                            let my_chunk_x = me.x as i32 >> 4;
-                                            let my_chunk_z = me.z as i32 >> 4;
-                                            is_within_render_distance(source_chunk_x, source_chunk_z, my_chunk_x, my_chunk_z)
-                                        } else {
-                                            false
-                                        }
-                                    } else {
-                                        false
-                                    };
-                                    if in_range {
-                                        let packet = play::encode_set_entity_metadata(entity_id, &metadata_bytes);
-                                        if let Err(e) = self.write_packet(&mut writer, &packet).await {
-                                            error!("Failed to send entity metadata to {}: {}", self.addr, e);
-                                            break;
-                                        }
+                                if self.player_uuid != Some(exclude_uuid) && self.is_source_in_range(source_chunk_x, source_chunk_z).await {
+                                    let packet = play::encode_set_entity_metadata(entity_id, &metadata_bytes);
+                                    if let Err(e) = self.write_packet(&mut writer, &packet).await {
+                                        error!("Failed to send entity metadata to {}: {}", self.addr, e);
+                                        break;
                                     }
                                 }
                             }
@@ -390,6 +402,10 @@ impl Connection {
             }
             _ => {
                 warn!("Unknown status packet: {packet_id:#04x}");
+                if self.record_invalid_packet() {
+                    warn!("Disconnecting {} for excessive invalid packets ({} in window)", self.addr, self.invalid_packet_count);
+                    return Ok(false);
+                }
                 Ok(true)
             }
         }
@@ -438,6 +454,10 @@ impl Connection {
             }
             _ => {
                 warn!("Unknown login packet: {packet_id:#04x}");
+                if self.record_invalid_packet() {
+                    warn!("Disconnecting {} for excessive invalid packets ({} in window)", self.addr, self.invalid_packet_count);
+                    return Ok(false);
+                }
                 Ok(true)
             }
         }
@@ -579,8 +599,7 @@ impl Connection {
 
         // Request transfer token cookie if secret is configured
         if std::env::var("RUSTMC_TRANSFER_SECRET").is_ok() {
-            let cookie_request =
-                play::encode_play_cookie_request("rustmc:transfer_token")?;
+            let cookie_request = play::encode_play_cookie_request("rustmc:transfer_token")?;
             self.write_packet(writer, &cookie_request).await?;
         }
 
@@ -637,6 +656,7 @@ impl Connection {
         // Initialize keep-alive tracking
         self.last_keep_alive_sent = Some(Instant::now());
         self.last_keep_alive_response = Some(Instant::now());
+        self.last_keep_alive_sent = Some(Instant::now());
 
         info!("Sent play login sequence to player {}", name);
 
@@ -760,8 +780,10 @@ impl Connection {
                                             player_name: name.clone(),
                                             timestamp: transfer_token::current_timestamp(),
                                         };
-                                        let payload =
-                                            transfer_token::generate_token(secret.as_bytes(), &token);
+                                        let payload = transfer_token::generate_token(
+                                            secret.as_bytes(),
+                                            &token,
+                                        );
                                         let cookie_packet = play::encode_play_store_cookie(
                                             "rustmc:transfer_token",
                                             &payload,
@@ -784,10 +806,7 @@ impl Connection {
                     } else {
                         let parts: Vec<&str> = command.command.splitn(3, ' ').collect();
                         let target_name = parts[1];
-                        let level: u8 = parts
-                            .get(2)
-                            .and_then(|s| s.parse().ok())
-                            .unwrap_or(3);
+                        let level: u8 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(3);
 
                         let target_uuid = {
                             let world = self.world.read().await;
@@ -798,14 +817,25 @@ impl Connection {
                                 .map(|(uuid, _)| *uuid)
                         };
 
+                        let target_uuid = match target_uuid {
+                            Some(uuid) => Some(uuid),
+                            None => {
+                                let ops = self.operators.read().await;
+                                ops.find_uuid_by_name(target_name)
+                            }
+                        };
+
+                        let target_uuid = match target_uuid {
+                            Some(uuid) => Some(uuid),
+                            None => {
+                                crate::uuid_resolver::resolve_uuid_from_mojang(target_name).await
+                            }
+                        };
+
                         if let Some(target_uuid) = target_uuid {
                             {
                                 let mut ops = self.operators.write().await;
-                                ops.set_op_level(
-                                    target_uuid,
-                                    target_name.to_string(),
-                                    level,
-                                );
+                                ops.set_op_level(target_uuid, target_name.to_string(), level);
                                 ops.save();
                             }
                             {
@@ -821,7 +851,7 @@ impl Connection {
                             self.write_packet(writer, &msg).await?;
                         } else {
                             let msg = play::encode_system_chat_message(&format!(
-                                "Player '{}' is not online",
+                                "Could not resolve player '{}' (not online, not in ops.toml, and Mojang API lookup failed)",
                                 target_name
                             ))?;
                             self.write_packet(writer, &msg).await?;
@@ -845,6 +875,21 @@ impl Connection {
                                 .map(|(uuid, _)| *uuid)
                         };
 
+                        let target_uuid = match target_uuid {
+                            Some(uuid) => Some(uuid),
+                            None => {
+                                let ops = self.operators.read().await;
+                                ops.find_uuid_by_name(target_name)
+                            }
+                        };
+
+                        let target_uuid = match target_uuid {
+                            Some(uuid) => Some(uuid),
+                            None => {
+                                crate::uuid_resolver::resolve_uuid_from_mojang(target_name).await
+                            }
+                        };
+
                         if let Some(target_uuid) = target_uuid {
                             {
                                 let mut ops = self.operators.write().await;
@@ -864,7 +909,7 @@ impl Connection {
                             self.write_packet(writer, &msg).await?;
                         } else {
                             let msg = play::encode_system_chat_message(&format!(
-                                "Player '{}' is not online",
+                                "Could not resolve player '{}' (not online, not in ops.toml, and Mojang API lookup failed)",
                                 target_name
                             ))?;
                             self.write_packet(writer, &msg).await?;
@@ -935,6 +980,17 @@ impl Connection {
             }
             SET_PLAYER_POSITION => {
                 let pos = play::PlayerPosition::decode(data)?;
+                if !pos.is_valid() {
+                    warn!(
+                        "Invalid player position from client: ({}, {}, {})",
+                        pos.x, pos.y, pos.z
+                    );
+                    if self.record_invalid_packet() {
+                        warn!("Disconnecting {} for excessive invalid packets ({} in window)", self.addr, self.invalid_packet_count);
+                        return Ok(false);
+                    }
+                    return Ok(true);
+                }
                 debug!("Player position: ({}, {}, {})", pos.x, pos.y, pos.z);
 
                 if let Some(uuid) = self.player_uuid {
@@ -947,6 +1003,17 @@ impl Connection {
             }
             SET_PLAYER_POSITION_AND_ROTATION => {
                 let pos_rot = play::PlayerPositionAndRotation::decode(data)?;
+                if !pos_rot.is_valid() {
+                    warn!(
+                        "Invalid player position+rotation from client: ({}, {}, {}) pitch={}",
+                        pos_rot.x, pos_rot.y, pos_rot.z, pos_rot.pitch
+                    );
+                    if self.record_invalid_packet() {
+                        warn!("Disconnecting {} for excessive invalid packets ({} in window)", self.addr, self.invalid_packet_count);
+                        return Ok(false);
+                    }
+                    return Ok(true);
+                }
                 debug!(
                     "Player pos+rot: ({}, {}, {}) yaw={} pitch={}",
                     pos_rot.x, pos_rot.y, pos_rot.z, pos_rot.yaw, pos_rot.pitch
@@ -965,6 +1032,17 @@ impl Connection {
             }
             SET_PLAYER_ROTATION => {
                 let rot = play::PlayerRotation::decode(data)?;
+                if !rot.is_valid() {
+                    warn!(
+                        "Invalid player rotation from client: yaw={} pitch={}",
+                        rot.yaw, rot.pitch
+                    );
+                    if self.record_invalid_packet() {
+                        warn!("Disconnecting {} for excessive invalid packets ({} in window)", self.addr, self.invalid_packet_count);
+                        return Ok(false);
+                    }
+                    return Ok(true);
+                }
                 debug!("Player rotation: yaw={} pitch={}", rot.yaw, rot.pitch);
                 if let Some(uuid) = self.player_uuid {
                     let mut world = self.world.write().await;
@@ -985,6 +1063,17 @@ impl Connection {
             }
             PLAYER_COMMAND => {
                 let cmd = play::PlayerCommand::decode(data)?;
+                if !cmd.is_valid() {
+                    warn!(
+                        "Invalid player command from client: action={} jump_boost={}",
+                        cmd.action_id, cmd.jump_boost
+                    );
+                    if self.record_invalid_packet() {
+                        warn!("Disconnecting {} for excessive invalid packets ({} in window)", self.addr, self.invalid_packet_count);
+                        return Ok(false);
+                    }
+                    return Ok(true);
+                }
                 debug!(
                     "Player command: action={} jump_boost={}",
                     cmd.action_id, cmd.jump_boost
@@ -1018,6 +1107,10 @@ impl Connection {
                 let item = play::SetCarriedItem::decode(data)?;
                 if !item.is_valid_slot() {
                     warn!("Invalid carried item slot {} from client", item.slot);
+                    if self.record_invalid_packet() {
+                        warn!("Disconnecting {} for excessive invalid packets ({} in window)", self.addr, self.invalid_packet_count);
+                        return Ok(false);
+                    }
                     return Ok(true);
                 }
                 debug!("Set carried item: slot={}", item.slot);
@@ -1030,6 +1123,14 @@ impl Connection {
             }
             SWING => {
                 let swing = play::Swing::decode(data)?;
+                if !swing.is_valid() {
+                    warn!("Invalid swing hand from client: {}", swing.hand);
+                    if self.record_invalid_packet() {
+                        warn!("Disconnecting {} for excessive invalid packets ({} in window)", self.addr, self.invalid_packet_count);
+                        return Ok(false);
+                    }
+                    return Ok(true);
+                }
                 let animation = if swing.hand == 0 { 0u8 } else { 3u8 };
                 debug!(
                     "Player swing: hand={}",
@@ -1038,7 +1139,10 @@ impl Connection {
                 if let Some(uuid) = self.player_uuid {
                     let player_info = {
                         let world = self.world.read().await;
-                        world.players.get(&uuid).map(|p| (p.entity_id, p.x as i32 >> 4, p.z as i32 >> 4))
+                        world
+                            .players
+                            .get(&uuid)
+                            .map(|p| (p.entity_id, p.x as i32 >> 4, p.z as i32 >> 4))
                     };
                     if let Some((eid, source_chunk_x, source_chunk_z)) = player_info {
                         let _ = self.broadcast_tx.send(BroadcastEvent::EntityAnimation {
@@ -1129,5 +1233,36 @@ mod tests {
         }
 
         assert_eq!(conn.get_cookie("minecraft:transfer"), None);
+    }
+
+    #[test]
+    fn test_record_invalid_packet_below_threshold() {
+        let mut conn = make_connection();
+        for _ in 0..(INVALID_PACKET_THRESHOLD - 1) {
+            assert!(!conn.record_invalid_packet());
+        }
+    }
+
+    #[test]
+    fn test_record_invalid_packet_exceeds_threshold() {
+        let mut conn = make_connection();
+        for _ in 0..(INVALID_PACKET_THRESHOLD - 1) {
+            assert!(!conn.record_invalid_packet());
+        }
+        assert!(conn.record_invalid_packet());
+    }
+
+    #[test]
+    fn test_record_invalid_packet_window_reset() {
+        let mut conn = make_connection();
+        for _ in 0..(INVALID_PACKET_THRESHOLD - 1) {
+            conn.record_invalid_packet();
+        }
+        // Simulate window expiry by backdating the start
+        conn.invalid_packet_window_start =
+            Some(Instant::now() - INVALID_PACKET_WINDOW - Duration::from_secs(1));
+        // After window reset, counter restarts at 1
+        assert!(!conn.record_invalid_packet());
+        assert_eq!(conn.invalid_packet_count, 1);
     }
 }

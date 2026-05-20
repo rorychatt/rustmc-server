@@ -18,17 +18,19 @@ async fn test_transfer_sends_cookie_token() {
     let op_uuid = Uuid::parse_str(OP_UUID).unwrap();
     let ops = ops_config(OP_UUID);
 
-    let server_a = TestServer::spawn_with_env_and_ops_content(
+    let server_a = TestServer::spawn_with_env_and_ops_config(
         &[("RUSTMC_TRANSFER_SECRET", "integration-test-secret")],
         Some(&ops),
     )
     .await
     .expect("Failed to spawn server A");
 
-    let server_b =
-        TestServer::spawn_with_env(&[("RUSTMC_TRANSFER_SECRET", "integration-test-secret")])
-            .await
-            .expect("Failed to spawn server B");
+    let server_b = TestServer::spawn_with_env_and_ops_config(
+        &[("RUSTMC_TRANSFER_SECRET", "integration-test-secret")],
+        Some(&ops),
+    )
+    .await
+    .expect("Failed to spawn server B");
 
     let mut client = TestClient::connect(server_a.port())
         .await
@@ -83,7 +85,9 @@ async fn test_transfer_without_secret_skips_token() {
     let server_a = TestServer::spawn_with_ops(Some(&ops))
         .await
         .expect("Failed to spawn server A");
-    let server_b = TestServer::spawn().await.expect("Failed to spawn server B");
+    let server_b = TestServer::spawn_with_ops(Some(&ops))
+        .await
+        .expect("Failed to spawn server B");
 
     let mut client = TestClient::connect(server_a.port())
         .await
