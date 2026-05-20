@@ -648,17 +648,15 @@ async fn test_client_tick_end_drains_chunks() {
     // Consume the position response: unload packets + first drain batch
     let mut position_chunks = 0;
     loop {
-        let packet = tokio::time::timeout(
-            tokio::time::Duration::from_secs(5),
-            client.read_packet(),
-        )
-        .await
-        .expect("Timed out reading position response")
-        .expect("Failed to read position response packet");
+        let packet =
+            tokio::time::timeout(tokio::time::Duration::from_secs(5), client.read_packet())
+                .await
+                .expect("Timed out reading position response")
+                .expect("Failed to read position response packet");
 
         match packet.id {
             0x25 | 0x58 | 0x2C => {} // Unload chunk, Set Center Chunk, or Keep-Alive - skip
-            0x0C => {} // Chunk Batch Start
+            0x0C => {}               // Chunk Batch Start
             0x2D => position_chunks += 1,
             0x0B => {
                 break; // Batch finished
@@ -679,13 +677,10 @@ async fn test_client_tick_end_drains_chunks() {
 
     // Read the chunk batch triggered by tick end (skip keep-alive/unload packets)
     let _response = loop {
-        let pkt = tokio::time::timeout(
-            tokio::time::Duration::from_secs(5),
-            client.read_packet(),
-        )
-        .await
-        .expect("Timed out waiting for chunk response after tick end")
-        .expect("Failed to read packet after tick end");
+        let pkt = tokio::time::timeout(tokio::time::Duration::from_secs(5), client.read_packet())
+            .await
+            .expect("Timed out waiting for chunk response after tick end")
+            .expect("Failed to read packet after tick end");
 
         if pkt.id == 0x0C {
             break pkt;
