@@ -38,7 +38,7 @@ impl Server {
         let bound_addr = listener.local_addr()?;
         info!("RustMC Server listening on {}", bound_addr);
 
-        if let Ok(port_file) = std::env::var("RUSTMC_PORT_FILE") {
+        if let Some(port_file) = self.config.read().await.port_file() {
             std::fs::write(&port_file, bound_addr.port().to_string())?;
         }
 
