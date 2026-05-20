@@ -93,8 +93,8 @@ impl LoginCookieResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::ids;
+    use super::*;
 
     #[test]
     fn test_login_start_decode() {
