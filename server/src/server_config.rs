@@ -62,9 +62,21 @@ impl Default for RateLimitSection {
 
 impl ServerConfig {
     pub fn load() -> Self {
-        let path = std::env::var("RUSTMC_CONFIG")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("server.toml"));
+        let path = if let Ok(env_path) = std::env::var("RUSTMC_CONFIG") {
+            PathBuf::from(env_path)
+        } else {
+            let yaml_path = PathBuf::from("server.yaml");
+            let yml_path = PathBuf::from("server.yml");
+            let toml_path = PathBuf::from("server.toml");
+
+            if yaml_path.exists() {
+                yaml_path
+            } else if yml_path.exists() {
+                yml_path
+            } else {
+                toml_path
+            }
+        };
 
         if !path.exists() {
             info!(
@@ -74,17 +86,38 @@ impl ServerConfig {
             return Self::default();
         }
 
+        let is_yaml = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"))
+            .unwrap_or(false);
+
         match std::fs::read_to_string(&path) {
-            Ok(content) => match toml::from_str(&content) {
-                Ok(config) => {
-                    info!("Loaded config from {}", path.display());
-                    config
+            Ok(content) => {
+                if is_yaml {
+                    match serde_yaml::from_str(&content) {
+                        Ok(config) => {
+                            info!("Loaded config from {}", path.display());
+                            config
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to parse YAML {}: {}, using defaults", path.display(), e);
+                            Self::default()
+                        }
+                    }
+                } else {
+                    match toml::from_str(&content) {
+                        Ok(config) => {
+                            info!("Loaded config from {}", path.display());
+                            config
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to parse TOML {}: {}, using defaults", path.display(), e);
+                            Self::default()
+                        }
+                    }
                 }
-                Err(e) => {
-                    tracing::warn!("Failed to parse {}: {}, using defaults", path.display(), e);
-                    Self::default()
-                }
-            },
+            }
             Err(e) => {
                 tracing::warn!("Failed to read {}: {}, using defaults", path.display(), e);
                 Self::default()
@@ -144,5 +177,22 @@ bind = "0.0.0.0:25567"
         assert_eq!(config.rate_limit.invalid_packet_threshold, 16);
         assert_eq!(config.rate_limit.invalid_packet_window_secs, 10);
         std::env::remove_var("RUSTMC_CONFIG");
+    }
+
+    #[test]
+    fn test_load_from_yaml() {
+        let yaml_str = r#"
+server:
+  bind: "127.0.0.1:25569"
+  view_distance: 12
+rate_limit:
+  invalid_packet_threshold: 40
+  invalid_packet_window_secs: 15
+"#;
+        let config: ServerConfig = serde_yaml::from_str(yaml_str).unwrap();
+        assert_eq!(config.server.bind, "127.0.0.1:25569");
+        assert_eq!(config.server.view_distance, 12);
+        assert_eq!(config.rate_limit.invalid_packet_threshold, 40);
+        assert_eq!(config.rate_limit.invalid_packet_window_secs, 15);
     }
 }
