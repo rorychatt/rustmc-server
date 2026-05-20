@@ -9,7 +9,12 @@ pub struct ServerConfig {
     pub server: ServerSection,
     #[serde(default)]
     pub rate_limit: RateLimitSection,
-<<<<<<< HEAD
+    #[serde(default)]
+    pub network: NetworkSection,
+    #[serde(default)]
+    pub transfer: TransferSection,
+    #[serde(default)]
+    pub gameplay: GameplaySection,
     #[serde(skip)]
     pub last_modified: Option<SystemTime>,
     #[serde(skip)]
@@ -21,22 +26,33 @@ impl Default for ServerConfig {
         Self {
             server: ServerSection::default(),
             rate_limit: RateLimitSection::default(),
+            network: NetworkSection::default(),
+            transfer: TransferSection::default(),
+            gameplay: GameplaySection::default(),
             last_modified: None,
             config_path: Self::default_path(),
         }
-    }
-=======
-    #[serde(default)]
-    pub gameplay: GameplaySection,
->>>>>>> origin/main
-}
+    }}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ServerSection {
     #[serde(default = "default_bind")]
     pub bind: String,
+    #[serde(default = "default_plugins_directory")]
+    pub plugins_directory: String,
     #[serde(default = "default_view_distance")]
     pub view_distance: i32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct NetworkSection {
+    #[serde(default = "default_non_play_timeout_secs")]
+    pub non_play_timeout_secs: u64,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct TransferSection {
+    pub secret: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -73,8 +89,16 @@ fn default_bind() -> String {
     "0.0.0.0:25565".to_string()
 }
 
+fn default_plugins_directory() -> String {
+    "plugins".to_string()
+}
+
 fn default_view_distance() -> i32 {
     8
+}
+
+fn default_non_play_timeout_secs() -> u64 {
+    30
 }
 
 fn default_invalid_packet_threshold() -> u32 {
@@ -125,7 +149,16 @@ impl Default for ServerSection {
     fn default() -> Self {
         Self {
             bind: default_bind(),
+            plugins_directory: default_plugins_directory(),
             view_distance: default_view_distance(),
+        }
+    }
+}
+
+impl Default for NetworkSection {
+    fn default() -> Self {
+        Self {
+            non_play_timeout_secs: default_non_play_timeout_secs(),
         }
     }
 }
@@ -178,18 +211,8 @@ impl GameplaySection {
 }
 
 impl ServerConfig {
-<<<<<<< HEAD
     fn default_path() -> PathBuf {
-        std::env::var("RUSTMC_CONFIG")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("server.toml"))
-    }
-
-    pub fn load() -> Self {
-        let path = Self::default_path();
-=======
-    pub fn load() -> Self {
-        let path = if let Ok(env_path) = std::env::var("RUSTMC_CONFIG") {
+        if let Ok(env_path) = std::env::var("RUSTMC_CONFIG") {
             PathBuf::from(env_path)
         } else {
             let yaml_path = PathBuf::from("server.yaml");
@@ -203,9 +226,18 @@ impl ServerConfig {
             } else {
                 toml_path
             }
-        };
->>>>>>> origin/main
+        }
+    }
 
+    fn is_yaml_path(path: &std::path::Path) -> bool {
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"))
+            .unwrap_or(false)
+    }
+
+    pub fn load() -> Self {
+        let path = Self::default_path();
         if !path.exists() {
             info!("No config file at {}, using defaults", path.display());
             return Self {
@@ -214,61 +246,35 @@ impl ServerConfig {
             };
         }
 
-<<<<<<< HEAD
         let last_modified = std::fs::metadata(&path)
             .ok()
             .and_then(|m| m.modified().ok());
 
-        match std::fs::read_to_string(&path) {
-            Ok(content) => match toml::from_str::<ServerConfig>(&content) {
-                Ok(mut config) => {
-                    config.last_modified = last_modified;
-                    config.config_path = path.clone();
-                    info!("Loaded config from {}", path.display());
-                    config
-                }
-                Err(e) => {
-                    warn!("Failed to parse {}: {}, using defaults", path.display(), e);
-                    Self {
-                        config_path: path,
-                        ..Self::default()
-                    }
-                }
-            },
-=======
-        let is_yaml = path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"))
-            .unwrap_or(false);
+        let is_yaml = Self::is_yaml_path(&path);
 
         match std::fs::read_to_string(&path) {
             Ok(content) => {
-                if is_yaml {
-                    match serde_yaml::from_str(&content) {
-                        Ok(config) => {
-                            info!("Loaded config from {}", path.display());
-                            config
-                        }
-                        Err(e) => {
-                            tracing::warn!("Failed to parse YAML {}: {}, using defaults", path.display(), e);
-                            Self::default()
-                        }
-                    }
+                let parse_result: Result<ServerConfig, String> = if is_yaml {
+                    serde_yaml::from_str(&content).map_err(|e| format!("YAML: {}", e))
                 } else {
-                    match toml::from_str(&content) {
-                        Ok(config) => {
-                            info!("Loaded config from {}", path.display());
-                            config
-                        }
-                        Err(e) => {
-                            tracing::warn!("Failed to parse TOML {}: {}, using defaults", path.display(), e);
-                            Self::default()
+                    toml::from_str(&content).map_err(|e| format!("TOML: {}", e))
+                };
+                match parse_result {
+                    Ok(mut config) => {
+                        config.last_modified = last_modified;
+                        config.config_path = path.clone();
+                        info!("Loaded config from {}", path.display());
+                        config
+                    }
+                    Err(e) => {
+                        warn!("Failed to parse {}: {}, using defaults", path.display(), e);
+                        Self {
+                            config_path: path,
+                            ..Self::default()
                         }
                     }
                 }
             }
->>>>>>> origin/main
             Err(e) => {
                 warn!("Failed to read {}: {}, using defaults", path.display(), e);
                 Self {
@@ -294,25 +300,37 @@ impl ServerConfig {
             .ok()
             .and_then(|m| m.modified().ok());
 
+        let is_yaml = Self::is_yaml_path(&self.config_path);
+
         match std::fs::read_to_string(&self.config_path) {
-            Ok(content) => match toml::from_str::<ServerConfig>(&content) {
-                Ok(new_config) => {
-                    let old_bind = self.server.bind.clone();
-                    self.server = new_config.server;
-                    self.rate_limit = new_config.rate_limit;
-                    self.last_modified = last_modified;
-                    if self.server.bind != old_bind {
-                        warn!(
-                            "server.bind changed to '{}' — restart required for this to take effect",
-                            self.server.bind
-                        );
+            Ok(content) => {
+                let parse_result: Result<ServerConfig, String> = if is_yaml {
+                    serde_yaml::from_str(&content).map_err(|e| format!("YAML: {}", e))
+                } else {
+                    toml::from_str(&content).map_err(|e| format!("TOML: {}", e))
+                };
+                match parse_result {
+                    Ok(new_config) => {
+                        let old_bind = self.server.bind.clone();
+                        self.server = new_config.server;
+                        self.rate_limit = new_config.rate_limit;
+                        self.network = new_config.network;
+                        self.transfer = new_config.transfer;
+                        self.gameplay = new_config.gameplay;
+                        self.last_modified = last_modified;
+                        if self.server.bind != old_bind {
+                            warn!(
+                                "server.bind changed to '{}' — restart required for this to take effect",
+                                self.server.bind
+                            );
+                        }
+                        info!("Reloaded server config");
                     }
-                    info!("Reloaded server config");
+                    Err(e) => {
+                        warn!("Failed to parse config during reload: {}", e);
+                    }
                 }
-                Err(e) => {
-                    warn!("Failed to parse config during reload: {}", e);
-                }
-            },
+            }
             Err(e) => {
                 warn!("Failed to read config during reload: {}", e);
             }
@@ -332,12 +350,11 @@ mod tests {
         assert_eq!(config.rate_limit.invalid_packet_threshold, 16);
         assert_eq!(config.rate_limit.invalid_packet_window_secs, 10);
         assert_eq!(config.server.bind, "0.0.0.0:25565");
-<<<<<<< HEAD
-        assert!(config.last_modified.is_none());
-=======
         assert_eq!(config.server.view_distance, 8);
->>>>>>> origin/main
-    }
+        assert_eq!(config.server.plugins_directory, "plugins");
+        assert_eq!(config.network.non_play_timeout_secs, 30);
+        assert!(config.transfer.secret.is_none());
+        assert!(config.last_modified.is_none());    }
 
     #[test]
     fn test_load_from_toml() {
@@ -464,6 +481,53 @@ invalid_packet_window_secs = 30
         assert_eq!(config.rate_limit.invalid_packet_window_secs, 30);
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_network_section_defaults() {
+        let toml_str = "";
+        let config: ServerConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.network.non_play_timeout_secs, 30);
+    }
+
+    #[test]
+    fn test_transfer_section_defaults() {
+        let toml_str = "";
+        let config: ServerConfig = toml::from_str(toml_str).unwrap();
+        assert!(config.transfer.secret.is_none());
+    }
+
+    #[test]
+    fn test_plugins_directory_default() {
+        let toml_str = "";
+        let config: ServerConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.server.plugins_directory, "plugins");
+    }
+
+    #[test]
+    fn test_full_config_with_new_sections() {
+        let toml_str = r#"
+[server]
+bind = "127.0.0.1:25566"
+plugins_directory = "my_plugins"
+
+[network]
+non_play_timeout_secs = 60
+
+[transfer]
+secret = "my-secret-key"
+
+[rate_limit]
+invalid_packet_threshold = 32
+invalid_packet_window_secs = 20
+"#;
+        let config: ServerConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.server.bind, "127.0.0.1:25566");
+        assert_eq!(config.server.plugins_directory, "my_plugins");
+        assert_eq!(config.network.non_play_timeout_secs, 60);
+        assert_eq!(config.transfer.secret, Some("my-secret-key".to_string()));
+        assert_eq!(config.rate_limit.invalid_packet_threshold, 32);
+        assert_eq!(config.rate_limit.invalid_packet_window_secs, 20);
     }
 
     #[test]
