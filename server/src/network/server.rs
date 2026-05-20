@@ -10,6 +10,7 @@ use crate::server_config::ServerConfig;
 use crate::world::World;
 
 pub struct Server {
+    #[allow(dead_code)]
     view_distance: i32,
     addr: String,
     config: ServerConfig,
