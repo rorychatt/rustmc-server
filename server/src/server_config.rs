@@ -2,7 +2,7 @@ use serde::Deserialize;
 use std::path::PathBuf;
 use tracing::info;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct ServerConfig {
     #[serde(default)]
     pub server: ServerSection,
@@ -34,15 +34,6 @@ fn default_invalid_packet_threshold() -> u32 {
 
 fn default_invalid_packet_window_secs() -> u64 {
     10
-}
-
-impl Default for ServerConfig {
-    fn default() -> Self {
-        Self {
-            server: ServerSection::default(),
-            rate_limit: RateLimitSection::default(),
-        }
-    }
 }
 
 impl Default for ServerSection {
