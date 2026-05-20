@@ -40,6 +40,32 @@ impl TestServer {
         Self::spawn_with_env_and_ops(extra_env, None).await
     }
 
+    #[allow(dead_code)]
+    pub async fn spawn_with_env_and_ops_config(
+        extra_env: &[(&str, &str)],
+        ops_content: Option<&str>,
+    ) -> anyhow::Result<Self> {
+        let ops_file = if let Some(content) = ops_content {
+            let path = std::env::temp_dir().join(format!("rustmc_ops_{}.toml", std::process::id()));
+            std::fs::write(&path, content)?;
+            Some(path)
+        } else {
+            None
+        };
+
+        let mut all_env: Vec<(&str, String)> = extra_env
+            .iter()
+            .map(|(k, v)| (*k, v.to_string()))
+            .collect();
+
+        if let Some(ref path) = ops_file {
+            all_env.push(("RUSTMC_OPS", path.to_string_lossy().into_owned()));
+        }
+
+        let all_refs: Vec<(&str, &str)> = all_env.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        Self::spawn_with_env_and_ops(&all_refs, ops_file).await
+    }
+
     async fn spawn_with_env_and_ops(
         extra_env: &[(&str, &str)],
         ops_file: Option<PathBuf>,
