@@ -41,7 +41,15 @@ SERVER_SHA1=$(echo "$PACKAGE" | jq -r '.downloads.server.sha1')
 echo "Downloading server JAR..."
 curl -fo "$JAR_PATH" "$SERVER_URL"
 
-ACTUAL_SHA1=$(sha1sum "$JAR_PATH" | awk '{print $1}')
+if command -v sha1sum >/dev/null 2>&1; then
+    ACTUAL_SHA1=$(sha1sum "$JAR_PATH" | awk '{print $1}')
+elif command -v shasum >/dev/null 2>&1; then
+    ACTUAL_SHA1=$(shasum "$JAR_PATH" | awk '{print $1}')
+else
+    echo "ERROR: Neither sha1sum nor shasum command found" >&2
+    exit 1
+fi
+
 if [[ "$ACTUAL_SHA1" != "$SERVER_SHA1" ]]; then
     rm -f "$JAR_PATH"
     echo "ERROR: SHA1 mismatch (expected $SERVER_SHA1, got $ACTUAL_SHA1)" >&2

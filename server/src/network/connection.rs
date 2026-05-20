@@ -295,10 +295,35 @@ impl Connection {
         let mut payload = vec![0u8; length as usize];
         reader.read_exact(&mut payload).await?;
 
-        let mut cursor = Cursor::new(&payload);
-        let packet_id = VarInt::read(&mut cursor)?.0;
-        let data_start = cursor.position() as usize;
-        let data = payload[data_start..].to_vec();
+        let (packet_id, data) = if self.compression_enabled {
+            let mut cursor = Cursor::new(&payload);
+            let data_length = VarInt::read(&mut cursor)?.0;
+            let data_start = cursor.position() as usize;
+
+            let decompressed_payload = if data_length == 0 {
+                // Below threshold - uncompressed
+                payload[data_start..].to_vec()
+            } else {
+                // Above threshold - decompress
+                use std::io::Read;
+                let mut decoder = flate2::read::ZlibDecoder::new(&payload[data_start..]);
+                let mut decompressed = Vec::new();
+                decoder.read_to_end(&mut decompressed)?;
+                decompressed
+            };
+
+            let mut decompressed_cursor = Cursor::new(&decompressed_payload);
+            let packet_id = VarInt::read(&mut decompressed_cursor)?.0;
+            let payload_start = decompressed_cursor.position() as usize;
+            let data = decompressed_payload[payload_start..].to_vec();
+            (packet_id, data)
+        } else {
+            let mut cursor = Cursor::new(&payload);
+            let packet_id = VarInt::read(&mut cursor)?.0;
+            let data_start = cursor.position() as usize;
+            let data = payload[data_start..].to_vec();
+            (packet_id, data)
+        };
 
         match self.state {
             ConnectionState::Handshake => self.handle_handshake(packet_id, &data, writer).await,
