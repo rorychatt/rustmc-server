@@ -10,7 +10,7 @@ pub use loader::RegistrySet;
 
 pub const ALL_REGISTRY_IDS: &[&str] = loader::v775::REGISTRY_IDS;
 
-pub fn registry_set_for(protocol_version: i32) -> &'static RegistrySet {
+pub fn registry_set_for(protocol_version: i32) -> io::Result<&'static RegistrySet> {
     loader::registry_set_for(protocol_version)
 }
 

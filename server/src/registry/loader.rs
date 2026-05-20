@@ -6,7 +6,6 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::io;
 use std::sync::LazyLock;
-use tracing::error;
 
 pub(crate) mod v775 {
     pub const DIMENSION_TYPE_JSON: &str =
@@ -46,6 +45,7 @@ pub(crate) mod v775 {
     ];
 }
 
+#[derive(Debug)]
 pub struct RegistrySet {
     pub registry_ids: &'static [&'static str],
     version: i32,
@@ -85,20 +85,20 @@ impl RegistrySet {
     }
 }
 
-pub fn registry_set_for(protocol_version: i32) -> &'static RegistrySet {
+pub fn registry_set_for(protocol_version: i32) -> io::Result<&'static RegistrySet> {
     static V775_SET: RegistrySet = RegistrySet {
         registry_ids: v775::REGISTRY_IDS,
         version: 775,
     };
 
     match protocol_version {
-        775 => &V775_SET,
-        _ => {
-            error!(
-                "Unsupported protocol version {protocol_version} (supported: {SUPPORTED_VERSIONS:?}), falling back to registry set for version 775"
-            );
-            &V775_SET
-        }
+        775 => Ok(&V775_SET),
+        _ => Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            format!(
+                "unsupported protocol version {protocol_version} (supported: {SUPPORTED_VERSIONS:?})"
+            ),
+        )),
     }
 }
 
@@ -106,7 +106,7 @@ static ENTRY_CACHE: LazyLock<HashMap<(i32, &'static str), Vec<RegistryEntry>>> =
     LazyLock::new(|| {
         let mut map = HashMap::new();
         for &version in SUPPORTED_VERSIONS {
-            let set = registry_set_for(version);
+            let set = registry_set_for(version).unwrap();
             for &reg_id in set.registry_ids {
                 let entries = set.load(reg_id).unwrap();
                 map.insert((version, reg_id), entries);
@@ -118,7 +118,7 @@ static ENTRY_CACHE: LazyLock<HashMap<(i32, &'static str), Vec<RegistryEntry>>> =
 static PACKET_CACHE: LazyLock<HashMap<i32, Vec<Packet>>> = LazyLock::new(|| {
     let mut map = HashMap::new();
     for &version in SUPPORTED_VERSIONS {
-        let set = registry_set_for(version);
+        let set = registry_set_for(version).unwrap();
         let mut packets = Vec::new();
         for &reg_id in set.registry_ids {
             let entries = load_registry(reg_id, version).unwrap();
@@ -131,7 +131,7 @@ static PACKET_CACHE: LazyLock<HashMap<i32, Vec<Packet>>> = LazyLock::new(|| {
 });
 
 pub fn load_registry(registry_id: &str, protocol_version: i32) -> io::Result<Vec<RegistryEntry>> {
-    let set = registry_set_for(protocol_version);
+    let set = registry_set_for(protocol_version)?;
     for &known_id in set.registry_ids {
         if known_id == registry_id {
             if let Some(entries) = ENTRY_CACHE.get(&(protocol_version, known_id)) {
@@ -143,7 +143,7 @@ pub fn load_registry(registry_id: &str, protocol_version: i32) -> io::Result<Vec
 }
 
 pub fn cached_registry_packets(protocol_version: i32) -> io::Result<&'static [Packet]> {
-    let _ = registry_set_for(protocol_version);
+    registry_set_for(protocol_version)?;
     PACKET_CACHE
         .get(&protocol_version)
         .map(|v| v.as_slice())
@@ -188,14 +188,16 @@ mod tests {
     }
 
     #[test]
-    fn test_registry_set_for_unknown_falls_back() {
-        let set = registry_set_for(999);
-        assert_eq!(set.registry_ids, registry_set_for(775).registry_ids);
+    fn test_registry_set_for_unknown_returns_error() {
+        let result = registry_set_for(999);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::Unsupported);
     }
 
     #[test]
     fn test_registry_ids_for_775() {
-        let set = registry_set_for(775);
+        let set = registry_set_for(775).unwrap();
         assert_eq!(set.registry_ids.len(), 12);
         assert!(set.registry_ids.contains(&"minecraft:dimension_type"));
         assert!(set.registry_ids.contains(&"minecraft:worldgen/biome"));
@@ -204,7 +206,7 @@ mod tests {
 
     #[test]
     fn test_load_all_registries() {
-        let set = registry_set_for(PROTOCOL_VERSION);
+        let set = registry_set_for(PROTOCOL_VERSION).unwrap();
         for registry_id in set.registry_ids {
             let entries = load_registry(registry_id, PROTOCOL_VERSION).unwrap_or_else(|e| {
                 panic!("Failed to load {registry_id}: {e}");
@@ -287,7 +289,7 @@ mod tests {
     #[test]
     fn test_cached_registry_packets_returns_correct_count() {
         let packets = cached_registry_packets(775).unwrap();
-        let set = registry_set_for(775);
+        let set = registry_set_for(775).unwrap();
         assert_eq!(packets.len(), set.registry_ids.len());
     }
 
@@ -320,7 +322,7 @@ mod tests {
     #[test]
     fn test_all_supported_versions_have_entry_cache() {
         for &version in SUPPORTED_VERSIONS {
-            let set = registry_set_for(version);
+            let set = registry_set_for(version).unwrap();
             for &reg_id in set.registry_ids {
                 let entries = ENTRY_CACHE.get(&(version, reg_id)).unwrap_or_else(|| {
                     panic!("ENTRY_CACHE missing ({version}, {reg_id})");

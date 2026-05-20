@@ -523,7 +523,7 @@ impl Connection {
         writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     ) -> std::io::Result<()> {
         let data_pack_version =
-            crate::protocol::version::data_pack_version_for(self.protocol_version);
+            crate::protocol::version::data_pack_version_for(self.protocol_version)?;
         let known_packs = configuration::encode_known_packs(data_pack_version)?;
         self.write_packet(writer, &known_packs).await?;
         Ok(())
