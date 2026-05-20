@@ -10,6 +10,8 @@ pub struct ServerConfig {
     pub rate_limit: RateLimitSection,
     #[serde(default)]
     pub gameplay: GameplaySection,
+    #[serde(default)]
+    pub cache: CacheSection,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -48,6 +50,24 @@ pub struct GameplaySection {
     pub simulation_distance: i32,
     #[serde(default = "default_sea_level")]
     pub sea_level: i32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CacheSection {
+    #[serde(default = "default_uuid_cache_max_entries")]
+    pub uuid_cache_max_entries: usize,
+}
+
+fn default_uuid_cache_max_entries() -> usize {
+    256
+}
+
+impl Default for CacheSection {
+    fn default() -> Self {
+        Self {
+            uuid_cache_max_entries: default_uuid_cache_max_entries(),
+        }
+    }
 }
 
 fn default_bind() -> String {
@@ -177,10 +197,7 @@ impl ServerConfig {
         };
 
         if !path.exists() {
-            info!(
-                "No config file at {}, using defaults",
-                path.display()
-            );
+            info!("No config file at {}, using defaults", path.display());
             return Self::default();
         }
 
@@ -199,7 +216,11 @@ impl ServerConfig {
                             config
                         }
                         Err(e) => {
-                            tracing::warn!("Failed to parse YAML {}: {}, using defaults", path.display(), e);
+                            tracing::warn!(
+                                "Failed to parse YAML {}: {}, using defaults",
+                                path.display(),
+                                e
+                            );
                             Self::default()
                         }
                     }
@@ -210,7 +231,11 @@ impl ServerConfig {
                             config
                         }
                         Err(e) => {
-                            tracing::warn!("Failed to parse TOML {}: {}, using defaults", path.display(), e);
+                            tracing::warn!(
+                                "Failed to parse TOML {}: {}, using defaults",
+                                path.display(),
+                                e
+                            );
                             Self::default()
                         }
                     }

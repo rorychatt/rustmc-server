@@ -1,5 +1,6 @@
 use rustmc_server::network;
 use rustmc_server::server_config::ServerConfig;
+use rustmc_server::uuid_resolver;
 
 use tracing_subscriber::EnvFilter;
 
@@ -13,8 +14,13 @@ async fn main() -> anyhow::Result<()> {
 
     let mut config = ServerConfig::load();
 
+    uuid_resolver::init(config.cache.uuid_cache_max_entries);
+
     let addr = std::env::var("RUSTMC_BIND").unwrap_or_else(|_| config.server.bind.clone());
-    if let Some(vd) = std::env::var("RUSTMC_VIEW_DISTANCE").ok().and_then(|v| v.parse().ok()) {
+    if let Some(vd) = std::env::var("RUSTMC_VIEW_DISTANCE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
         config.server.view_distance = vd;
     }
 
