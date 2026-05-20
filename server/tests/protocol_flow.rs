@@ -864,3 +864,167 @@ async fn complete_login_flow_with_client(client: &mut TestClient, username: &str
         .await
         .expect("Failed to read sync position");
 }
+
+#[tokio::test]
+async fn test_custom_gameplay_configuration() {
+    use std::fs::File;
+    use std::io::Write;
+    use rustmc_server::protocol::types::VarInt;
+
+    // Create a temporary server config file
+    let config_dir = std::env::temp_dir();
+    let config_path = config_dir.join(format!("test_config_{}.yaml", uuid::Uuid::new_v4()));
+    let mut config_file = File::create(&config_path).expect("Failed to create temp config file");
+
+    let yaml_content = r#"
+server:
+  bind: "127.0.0.1:0"
+  view_distance: 6
+
+rate_limit:
+  invalid_packet_threshold: 16
+  invalid_packet_window_secs: 10
+
+gameplay:
+  motd: "Configured Test MOTD"
+  max_players: 77
+  gamemode: "survival"
+  difficulty: "hard"
+  pvp: true
+  allow_flight: true
+  hardcore: true
+  simulation_distance: 5
+  sea_level: 60
+"#;
+    config_file.write_all(yaml_content.as_bytes()).expect("Failed to write temp config");
+
+    // Spawn server with RUSTMC_CONFIG env pointing to our config file
+    let config_path_str = config_path.to_string_lossy().into_owned();
+    let server = TestServer::spawn_with_env(&[("RUSTMC_CONFIG", &config_path_str)])
+        .await
+        .expect("Failed to spawn server with custom config");
+
+    // Step 1: Verify Status response MOTD and max players
+    let mut client = TestClient::connect(server.port())
+        .await
+        .expect("Failed to connect to server");
+
+    client.send_handshake(775, 1).await.expect("Failed to send handshake");
+    client.send_status_request().await.expect("Failed to send status request");
+
+    let response = client.read_packet().await.expect("Failed to read status response");
+    assert_eq!(response.id, status_cb::STATUS_RESPONSE);
+
+    let mut cursor = Cursor::new(&response.data);
+    let json_str = common::client::read_string(&mut cursor).expect("Failed to read JSON string");
+    let json: serde_json::Value = serde_json::from_str(&json_str).expect("Failed to parse JSON");
+
+    assert_eq!(json["description"]["text"].as_str().unwrap(), "Configured Test MOTD");
+    assert_eq!(json["players"]["max"].as_i64().unwrap(), 77);
+
+    // Clean up current client connection
+    drop(client);
+
+    // Step 2: Verify Login Play packet values
+    let mut client = TestClient::connect(server.port())
+        .await
+        .expect("Failed to connect to server for play");
+
+    client.send_handshake(775, 2).await.expect("Failed to send handshake for play");
+    client.send_login_start("TestConfigPlayer", Uuid::new_v4()).await.expect("Failed to send login start");
+
+    // Read compression
+    let comp_packet = client.read_packet().await.expect("Failed to read compression");
+    assert_eq!(comp_packet.id, login_cb::SET_COMPRESSION);
+    let mut comp_cursor = Cursor::new(&comp_packet.data);
+    let threshold = VarInt::read(&mut comp_cursor).unwrap().0;
+    client.enable_compression(threshold);
+
+    // Read Login Success
+    let success = client.read_packet().await.expect("Failed to read login success");
+    assert_eq!(success.id, login_cb::LOGIN_SUCCESS);
+
+    // Acknowledge Login
+    client.send_login_acknowledged().await.expect("Failed to send login ack");
+
+    // Read Known Packs
+    let packs = client.read_packet().await.expect("Failed to read known packs");
+    assert_eq!(packs.id, config_cb::KNOWN_PACKS);
+
+    // Respond Known Packs
+    client.send_known_packs_response().await.expect("Failed to send known packs response");
+
+    // Skip registry & config finish
+    loop {
+        let packet = client.read_packet().await.expect("Failed to read config packet");
+        if packet.id == config_cb::FINISH_CONFIGURATION {
+            break;
+        }
+    }
+
+    // Acknowledge Config Finish
+    client.send_acknowledge_finish_configuration().await.expect("Failed to send config ack");
+
+    // Read login play packet
+    let join_game = client.read_packet().await.expect("Failed to read join game packet");
+    assert_eq!(join_game.id, play_cb::LOGIN_PLAY);
+
+    // Decode and verify login play values
+    let mut play_cursor = Cursor::new(&join_game.data);
+    
+    // Read Entity ID (4 bytes)
+    let mut entity_id_bytes = [0u8; 4];
+    play_cursor.read_exact(&mut entity_id_bytes).unwrap();
+    
+    // Read Is Hardcore (1 byte)
+    let mut hardcore_bytes = [0u8; 1];
+    play_cursor.read_exact(&mut hardcore_bytes).unwrap();
+    let is_hardcore = hardcore_bytes[0] != 0;
+    assert!(is_hardcore, "Hardcore should be true");
+    
+    // Read Dimension count (VarInt)
+    let _dim_count = VarInt::read(&mut play_cursor).unwrap().0;
+    
+    // Read Dimension name (String)
+    let _dim_name = common::client::read_string(&mut play_cursor).unwrap();
+    
+    // Read Max players (VarInt)
+    let max_players_decoded = VarInt::read(&mut play_cursor).unwrap().0;
+    assert_eq!(max_players_decoded, 77);
+    
+    // Read View distance (VarInt)
+    let view_dist = VarInt::read(&mut play_cursor).unwrap().0;
+    assert_eq!(view_dist, 6);
+    
+    // Read Simulation distance (VarInt)
+    let sim_dist = VarInt::read(&mut play_cursor).unwrap().0;
+    assert_eq!(sim_dist, 5);
+    
+    // Read debug, respawn, crafting (3 bytes)
+    let mut flags = [0u8; 3];
+    play_cursor.read_exact(&mut flags).unwrap();
+    
+    // Read Dimension Type (VarInt)
+    let _dim_type = VarInt::read(&mut play_cursor).unwrap().0;
+    
+    // Read Dimension name (String)
+    let _dim_name_2 = common::client::read_string(&mut play_cursor).unwrap();
+    
+    // Read Hashed seed (8 bytes)
+    let mut seed = [0u8; 8];
+    play_cursor.read_exact(&mut seed).unwrap();
+    
+    // Read Game mode (1 byte)
+    let mut gm = [0u8; 1];
+    play_cursor.read_exact(&mut gm).unwrap();
+    let game_mode_decoded = gm[0];
+    assert_eq!(game_mode_decoded, 0, "Game mode should be survival (0)");
+
+    // Read player info update
+    let player_info = client.read_packet().await.expect("Failed to read player info update");
+    assert_eq!(player_info.id, play_cb::PLAYER_INFO_UPDATE);
+
+    // Clean up temporary config file
+    let _ = std::fs::remove_file(&config_path);
+}
+
