@@ -4,6 +4,8 @@
 //! captures all Registry Data packets (0x07), and writes the ordered entry IDs
 //! to `server/tests/data/vanilla_registry_order.json`.
 //!
+//! Supports servers with compression enabled (default `network-compression-threshold=256`).
+//!
 //! # Usage
 //!
 //! Start a vanilla 1.21.4 server with `online-mode=false`, then run:
@@ -17,9 +19,10 @@
 //! - `VANILLA_PORT` — server port (default: `25565`)
 
 use std::collections::HashMap;
-use std::io::{self, Read, Write};
+use std::io;
 use std::net::TcpStream;
 
+use rustmc_server::protocol::packet::{Packet, PacketReader, PacketWriter};
 use rustmc_server::registry::ALL_REGISTRY_IDS;
 
 const PROTOCOL_VERSION: i32 = 775;
@@ -35,27 +38,6 @@ fn write_varint(buf: &mut Vec<u8>, mut value: i32) {
         }
         buf.push(byte | 0x80);
     }
-}
-
-fn read_varint(stream: &mut TcpStream) -> io::Result<i32> {
-    let mut result: i32 = 0;
-    let mut shift = 0;
-    loop {
-        let mut byte = [0u8; 1];
-        stream.read_exact(&mut byte)?;
-        result |= ((byte[0] & 0x7F) as i32) << shift;
-        if byte[0] & 0x80 == 0 {
-            break;
-        }
-        shift += 7;
-        if shift >= 32 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "VarInt too long",
-            ));
-        }
-    }
-    Ok(result)
 }
 
 fn read_varint_from_buf(buf: &[u8], offset: &mut usize) -> io::Result<i32> {
@@ -102,29 +84,6 @@ fn read_string_from_buf(buf: &[u8], offset: &mut usize) -> io::Result<String> {
 fn write_string(buf: &mut Vec<u8>, s: &str) {
     write_varint(buf, s.len() as i32);
     buf.extend_from_slice(s.as_bytes());
-}
-
-fn send_packet(stream: &mut TcpStream, packet_id: i32, data: &[u8]) -> io::Result<()> {
-    let mut id_buf = Vec::new();
-    write_varint(&mut id_buf, packet_id);
-
-    let total_len = id_buf.len() + data.len();
-    let mut len_buf = Vec::new();
-    write_varint(&mut len_buf, total_len as i32);
-
-    stream.write_all(&len_buf)?;
-    stream.write_all(&id_buf)?;
-    stream.write_all(data)?;
-    stream.flush()
-}
-
-fn read_packet(stream: &mut TcpStream) -> io::Result<(i32, Vec<u8>)> {
-    let length = read_varint(stream)?;
-    let mut buf = vec![0u8; length as usize];
-    stream.read_exact(&mut buf)?;
-    let mut offset = 0;
-    let packet_id = read_varint_from_buf(&buf, &mut offset)?;
-    Ok((packet_id, buf[offset..].to_vec()))
 }
 
 fn skip_nbt(buf: &[u8], offset: &mut usize) -> io::Result<()> {
@@ -307,8 +266,10 @@ fn capture_vanilla_registry_ordering() {
         .parse()
         .expect("VANILLA_PORT must be a valid port number");
 
-    let mut stream =
+    let stream =
         TcpStream::connect(format!("{host}:{port}")).expect("Failed to connect to vanilla server");
+    let mut reader = PacketReader::new(stream.try_clone().unwrap());
+    let mut writer = PacketWriter::new(stream);
 
     // Handshake (state=2 for Login)
     let mut handshake_data = Vec::new();
@@ -316,27 +277,35 @@ fn capture_vanilla_registry_ordering() {
     write_string(&mut handshake_data, &host);
     handshake_data.extend_from_slice(&port.to_be_bytes());
     write_varint(&mut handshake_data, 2); // Next state: Login
-    send_packet(&mut stream, 0x00, &handshake_data).unwrap();
+    writer.write_packet(&Packet::new(0x00, handshake_data)).unwrap();
 
     // Login Start
     let mut login_data = Vec::new();
     write_string(&mut login_data, "RegistryCapture");
     login_data.extend_from_slice(&[0u8; 16]); // UUID (all zeros for offline)
-    send_packet(&mut stream, 0x00, &login_data).unwrap();
+    writer.write_packet(&Packet::new(0x00, login_data)).unwrap();
 
     let mut registries: HashMap<String, Vec<String>> = HashMap::new();
 
     // Read packets until we get all registry data
     loop {
-        let (packet_id, data) = read_packet(&mut stream).unwrap();
+        let packet = reader.read_packet().unwrap();
 
-        match packet_id {
+        match packet.id {
+            0x03 if registries.is_empty() => {
+                // Set Compression (login phase, before any registries captured)
+                let mut offset = 0;
+                let threshold = read_varint_from_buf(&packet.data, &mut offset).unwrap();
+                reader.set_compression_threshold(threshold);
+                writer.set_compression_threshold(threshold);
+                println!("Compression enabled with threshold {threshold}");
+            }
             0x02 => {
                 // Login Success — send Login Acknowledged
-                send_packet(&mut stream, 0x03, &[]).unwrap();
+                writer.write_packet(&Packet::new(0x03, vec![])).unwrap();
             }
             REGISTRY_DATA_PACKET_ID => {
-                let (reg_id, entries) = parse_registry_data_packet(&data).unwrap();
+                let (reg_id, entries) = parse_registry_data_packet(&packet.data).unwrap();
                 println!("Captured {}: {} entries", reg_id, entries.len());
                 registries.insert(reg_id, entries);
             }
@@ -348,11 +317,9 @@ fn capture_vanilla_registry_ordering() {
                 // Known Packs — respond with empty known packs
                 let mut response = Vec::new();
                 write_varint(&mut response, 0); // 0 known packs
-                send_packet(&mut stream, 0x07, &response).unwrap();
+                writer.write_packet(&Packet::new(0x07, response)).unwrap();
             }
-            _ => {
-                // Skip other packets
-            }
+            _ => {}
         }
     }
 
