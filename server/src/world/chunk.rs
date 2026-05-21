@@ -91,7 +91,7 @@ impl ChunkSection {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Chunk {
     pub pos: ChunkPos,
     pub sections: Vec<ChunkSection>,

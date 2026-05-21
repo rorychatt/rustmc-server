@@ -4,6 +4,10 @@ pub mod persistence;
 
 use chunk::{Chunk, ChunkPos, BlockState};
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
+use std::num::NonZeroUsize;
+use lru::LruCache;
+use tokio::sync::RwLock;
 use tracing::debug;
 use uuid::Uuid;
 
@@ -28,13 +32,15 @@ pub struct Player {
 
 pub struct World {
     pub players: HashMap<Uuid, Player>,
-    chunks: HashMap<ChunkPos, Chunk>,
+    chunks: Mutex<LruCache<ChunkPos, Arc<Chunk>>>,
+    dirty_chunks: Mutex<HashSet<ChunkPos>>,
     next_entity_id: i32,
     tick_count: u64,
     pub world_type: String,
     pub seed: u64,
     pub sea_level: i32,
     pub world_dir: Option<std::path::PathBuf>,
+    pub db: Option<Arc<redb::Database>>,
 }
 
 impl World {
@@ -52,15 +58,29 @@ impl World {
         sea_level: i32,
         world_dir: Option<std::path::PathBuf>,
     ) -> Self {
+        let db = if let Some(ref dir) = world_dir {
+            match persistence::open_database(dir) {
+                Ok(db) => Some(Arc::new(db)),
+                Err(e) => {
+                    tracing::error!("Failed to open world database: {:?}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         let mut world = Self {
             players: HashMap::new(),
-            chunks: HashMap::new(),
+            chunks: Mutex::new(LruCache::new(NonZeroUsize::new(2048).unwrap())),
+            dirty_chunks: Mutex::new(HashSet::new()),
             next_entity_id: 1,
             tick_count: 0,
             world_type,
             seed,
             sea_level,
             world_dir,
+            db,
         };
         // Load level metadata if it exists
         if let Some(ref dir) = world.world_dir {
@@ -163,7 +183,7 @@ impl World {
                 "World tick {}, {} players, {} chunks loaded",
                 self.tick_count,
                 self.players.len(),
-                self.chunks.len()
+                self.chunks.lock().unwrap().len()
             );
         }
     }
@@ -173,11 +193,14 @@ impl World {
         let world_type = self.world_type.clone();
         let seed = self.seed;
         let sea_level = self.sea_level;
+        let db = self.db.clone();
+
+        let mut chunks_lock = self.chunks.lock().unwrap();
         for cx in -spawn_radius..=spawn_radius {
             for cz in -spawn_radius..=spawn_radius {
                 let pos = ChunkPos::new(cx, cz);
-                let chunk = if let Some(ref dir) = self.world_dir {
-                    if let Ok(Some(loaded)) = persistence::load_chunk(dir, pos) {
+                let chunk = if let Some(ref database) = db {
+                    if let Ok(Some(loaded)) = persistence::load_chunk(database, pos) {
                         loaded
                     } else {
                         let new_chunk = if world_type == "flat" {
@@ -185,7 +208,7 @@ impl World {
                         } else {
                             Chunk::new_normal(pos, seed, sea_level)
                         };
-                        let _ = persistence::save_chunk(dir, &new_chunk);
+                        let _ = persistence::save_chunk(database, &new_chunk);
                         new_chunk
                     }
                 } else {
@@ -195,26 +218,58 @@ impl World {
                         Chunk::new_normal(pos, seed, sea_level)
                     }
                 };
-                self.chunks.insert(pos, chunk);
+                chunks_lock.put(pos, Arc::new(chunk));
             }
         }
     }
 
-    pub fn get_chunk(&self, pos: &ChunkPos) -> Option<&Chunk> {
-        self.chunks.get(pos)
+    pub fn get_chunk(&self, pos: &ChunkPos) -> Option<Arc<Chunk>> {
+        self.chunks.lock().unwrap().get(pos).cloned()
     }
 
-    pub fn get_or_generate_chunk(&mut self, pos: ChunkPos) -> &Chunk {
-        if self.chunks.contains_key(&pos) {
-            return self.chunks.get(&pos).unwrap();
+    pub fn insert_chunk(&self, pos: ChunkPos, chunk: Arc<Chunk>) {
+        let evicted = {
+            let mut chunks = self.chunks.lock().unwrap();
+            chunks.push(pos, chunk)
+        };
+
+        if let Some((evicted_pos, evicted_chunk)) = evicted {
+            // Only handle eviction if it's a different chunk, not replacing/updating the same chunk
+            if evicted_pos != pos {
+                // Check if evicted chunk is dirty
+                let was_dirty = {
+                    let mut dirty = self.dirty_chunks.lock().unwrap();
+                    dirty.remove(&evicted_pos)
+                };
+
+                if was_dirty {
+                    if let Some(ref db) = self.db {
+                        let db = db.clone();
+                        tokio::spawn(async move {
+                            let _ = tokio::task::spawn_blocking(move || {
+                                if let Err(e) = persistence::save_chunk(&db, &evicted_chunk) {
+                                    tracing::error!("Failed to save evicted chunk at {:?}: {:?}", evicted_pos, e);
+                                }
+                            }).await;
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn get_or_generate_chunk(&mut self, pos: ChunkPos) -> Arc<Chunk> {
+        if let Some(chunk) = self.get_chunk(&pos) {
+            return chunk;
         }
 
         let world_type = self.world_type.clone();
         let seed = self.seed;
         let sea_level = self.sea_level;
+        let db = self.db.clone();
 
-        let chunk = if let Some(ref dir) = self.world_dir {
-            if let Ok(Some(loaded)) = persistence::load_chunk(dir, pos) {
+        let chunk = if let Some(ref database) = db {
+            if let Ok(Some(loaded)) = persistence::load_chunk(database, pos) {
                 loaded
             } else {
                 let new_chunk = if world_type == "flat" {
@@ -222,7 +277,7 @@ impl World {
                 } else {
                     Chunk::new_normal(pos, seed, sea_level)
                 };
-                let _ = persistence::save_chunk(dir, &new_chunk);
+                let _ = persistence::save_chunk(database, &new_chunk);
                 new_chunk
             }
         } else {
@@ -233,8 +288,22 @@ impl World {
             }
         };
 
-        self.chunks.insert(pos, chunk);
-        self.chunks.get(&pos).unwrap()
+        let chunk = Arc::new(chunk);
+        self.insert_chunk(pos, chunk.clone());
+        chunk
+    }
+
+    pub fn set_block(&self, pos: ChunkPos, x: usize, y: usize, z: usize, state: BlockState) {
+        let chunk = self.get_chunk(&pos);
+        if let Some(chunk) = chunk {
+            let mut new_chunk = (*chunk).clone();
+            new_chunk.set_block(x, y, z, state);
+            {
+                let mut dirty = self.dirty_chunks.lock().unwrap();
+                dirty.insert(pos);
+            }
+            self.insert_chunk(pos, Arc::new(new_chunk));
+        }
     }
 
     pub fn save_all(&self) -> anyhow::Result<()> {
@@ -245,11 +314,61 @@ impl World {
                 sea_level: self.sea_level,
             };
             persistence::save_level_info(dir, &level_info)?;
-            for chunk in self.chunks.values() {
-                persistence::save_chunk(dir, chunk)?;
+        }
+        if let Some(ref db) = self.db {
+            let chunks_to_save: Vec<Arc<Chunk>> = {
+                let mut dirty = self.dirty_chunks.lock().unwrap();
+                let mut chunks = self.chunks.lock().unwrap();
+                let mut list = Vec::new();
+                for pos in dirty.drain() {
+                    if let Some(chunk) = chunks.get(&pos) {
+                        list.push(chunk.clone());
+                    }
+                }
+                list
+            };
+            for chunk in chunks_to_save {
+                persistence::save_chunk(db, &chunk)?;
             }
         }
         Ok(())
+    }
+
+    pub async fn save_all_async(world: Arc<RwLock<Self>>) -> anyhow::Result<()> {
+        let (db, level_info, world_dir, chunks_to_save) = {
+            let w = world.read().await;
+            let db = w.db.clone();
+            let level_info = persistence::LevelInfo {
+                seed: w.seed,
+                world_type: w.world_type.clone(),
+                sea_level: w.sea_level,
+            };
+            let world_dir = w.world_dir.clone();
+            let chunks_to_save = {
+                let mut dirty = w.dirty_chunks.lock().unwrap();
+                let mut chunks = w.chunks.lock().unwrap();
+                let mut list = Vec::new();
+                for pos in dirty.drain() {
+                    if let Some(chunk) = chunks.get(&pos) {
+                        list.push(chunk.clone());
+                    }
+                }
+                list
+            };
+            (db, level_info, world_dir, chunks_to_save)
+        };
+
+        tokio::task::spawn_blocking(move || {
+            if let Some(ref dir) = world_dir {
+                persistence::save_level_info(dir, &level_info)?;
+            }
+            if let Some(ref db) = db {
+                for chunk in chunks_to_save {
+                    persistence::save_chunk(db, &chunk)?;
+                }
+            }
+            Ok::<(), anyhow::Error>(())
+        }).await.unwrap()
     }
 }
 
@@ -475,4 +594,98 @@ mod tests {
         assert_eq!(player.yaw, 90.0);
         assert_eq!(player.pitch, -45.0);
     }
+
+    #[tokio::test]
+    async fn test_world_dirty_save_all() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+
+        let world = World::new_with_dir("flat".to_string(), 0, 63, Some(path.to_path_buf()));
+        let pos = ChunkPos::new(0, 0);
+
+        // Verify the chunk exists and is clean initially
+        let chunk = world.get_chunk(&pos).unwrap();
+        assert_eq!(chunk.get_block(0, 4, 0), BlockState::AIR);
+
+        // Modify block - triggers marking it as dirty
+        world.set_block(pos, 0, 4, 0, BlockState::STONE);
+
+        // Verify block modification is reflected in-memory
+        let chunk_after = world.get_chunk(&pos).unwrap();
+        assert_eq!(chunk_after.get_block(0, 4, 0), BlockState::STONE);
+
+        {
+            let dirty = world.dirty_chunks.lock().unwrap();
+            assert!(dirty.contains(&pos));
+        }
+
+        // Save all chunks to disk
+        world.save_all().unwrap();
+
+        // Verify dirty set is cleared
+        {
+            let dirty = world.dirty_chunks.lock().unwrap();
+            assert!(!dirty.contains(&pos));
+        }
+
+        // Drop world to release redb file lock
+        drop(world);
+
+        // Load new world from the same directory to verify serialization
+        let world2 = World::new_with_dir("flat".to_string(), 0, 63, Some(path.to_path_buf()));
+        let loaded = world2.get_chunk(&pos).unwrap();
+        assert_eq!(loaded.get_block(0, 4, 0), BlockState::STONE);
+    }
+
+    #[tokio::test]
+    async fn test_world_eviction_auto_save() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+
+        // Construct a world with the dir
+        let mut world = World::new_with_dir("flat".to_string(), 0, 63, Some(path.to_path_buf()));
+
+        // Insert a dirty chunk at pos (100, 100)
+        let pos = ChunkPos::new(100, 100);
+        let chunk = world.get_or_generate_chunk(pos);
+        assert_eq!(chunk.get_block(0, 4, 0), BlockState::AIR);
+
+        // Modify to make it dirty
+        world.set_block(pos, 0, 4, 0, BlockState::STONE);
+
+        {
+            let dirty = world.dirty_chunks.lock().unwrap();
+            assert!(dirty.contains(&pos));
+        }
+
+        // Now, generate/insert 2048 new chunks at coordinates that are NOT (100, 100)
+        // to force the LRU cache to evict the chunk at (100, 100).
+        for i in 0..2048 {
+            let dummy_pos = ChunkPos::new(200 + i, 200);
+            world.get_or_generate_chunk(dummy_pos);
+        }
+
+        // The chunk at (100, 100) should be evicted from the in-memory cache now.
+        assert!(world.get_chunk(&pos).is_none());
+
+        // Eviction spawns a background task. Yield execution to allow the task to finish writing.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        // Since it was dirty and evicted, it should have been saved to the database and removed from the dirty set.
+        {
+            let dirty = world.dirty_chunks.lock().unwrap();
+            assert!(!dirty.contains(&pos));
+        }
+
+        // Drop the world to release file handle/lock
+        drop(world);
+
+        // Verify the saved data can be loaded in a new world
+        let mut world2 = World::new_with_dir("flat".to_string(), 0, 63, Some(path.to_path_buf()));
+        let loaded = world2.get_or_generate_chunk(pos);
+        assert_eq!(loaded.get_block(0, 4, 0), BlockState::STONE);
+    }
 }
+

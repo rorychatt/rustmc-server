@@ -23,7 +23,7 @@ use crate::protocol::status::{
 };
 use crate::protocol::types::VarInt;
 use crate::registry;
-use crate::world::chunk::ChunkPos;
+use crate::world::chunk::{Chunk, ChunkPos};
 use crate::world::World;
 use uuid::Uuid;
 
@@ -701,24 +701,76 @@ impl Connection {
         let view_distance = self.view_distance;
 
         let mut initial_chunks = std::collections::HashSet::new();
-        let mut chunk_count = 0;
+        let mut chunks_to_send = Vec::new();
+
+        let mut positions = Vec::new();
+        for cx in (player_chunk_x - view_distance)..=(player_chunk_x + view_distance) {
+            for cz in (player_chunk_z - view_distance)..=(player_chunk_z + view_distance) {
+                let pos = ChunkPos::new(cx, cz);
+                initial_chunks.insert(pos);
+                positions.push(pos);
+            }
+        }
+
+        for pos in positions {
+            let chunk = {
+                let world = self.world.read().await;
+                world.get_chunk(&pos)
+            };
+
+            if let Some(chunk) = chunk {
+                chunks_to_send.push(chunk);
+            } else {
+                let chunk = {
+                    let (db, world_type, seed, sea_level) = {
+                        let world = self.world.read().await;
+                        (world.db.clone(), world.world_type.clone(), world.seed, world.sea_level)
+                    };
+
+                    tokio::task::spawn_blocking(move || {
+                        let loaded = if let Some(ref db) = db {
+                            crate::world::persistence::load_chunk(db, pos).unwrap_or(None)
+                        } else {
+                            None
+                        };
+
+                        if let Some(chunk) = loaded {
+                            Arc::new(chunk)
+                        } else {
+                            let new_chunk = if world_type == "flat" {
+                                Chunk::new_flat(pos)
+                            } else {
+                                Chunk::new_normal(pos, seed, sea_level)
+                            };
+                            if let Some(ref db) = db {
+                                let _ = crate::world::persistence::save_chunk(db, &new_chunk);
+                            }
+                            Arc::new(new_chunk)
+                        }
+                    }).await.unwrap()
+                };
+
+                {
+                    let world = self.world.read().await;
+                    world.insert_chunk(pos, chunk.clone());
+                }
+                chunks_to_send.push(chunk);
+            }
+        }
+
+        // Mark chunks as loaded for the player
         {
             let mut world = self.world.write().await;
-            for cx in (player_chunk_x - view_distance)..=(player_chunk_x + view_distance) {
-                for cz in (player_chunk_z - view_distance)..=(player_chunk_z + view_distance) {
-                    let pos = ChunkPos::new(cx, cz);
-                    initial_chunks.insert(pos);
-                    let chunk = world.get_or_generate_chunk(pos);
-                    let packet = chunk_data::encode_chunk_data(chunk)?;
-                    self.write_packet(writer, &packet).await?;
-                    chunk_count += 1;
-                }
-            }
-
-            // Mark chunks as loaded for the player
             if let Some(player) = world.players.get_mut(&uuid) {
                 player.loaded_chunks = initial_chunks;
             }
+        }
+
+        let mut chunk_count = 0;
+        for chunk in chunks_to_send {
+            let packet = chunk_data::encode_chunk_data(&chunk)?;
+            self.write_packet(writer, &packet).await?;
+            chunk_count += 1;
         }
 
         // 8. Chunk Batch Finished
@@ -750,15 +802,59 @@ impl Connection {
         let batch_start = play::encode_chunk_batch_start();
         self.write_packet(writer, &batch_start).await?;
 
-        let mut count = 0;
-        {
-            let mut world = self.world.write().await;
-            for chunk_pos in &to_send {
-                let chunk = world.get_or_generate_chunk(*chunk_pos);
-                let chunk_packet = chunk_data::encode_chunk_data(chunk)?;
-                self.write_packet(writer, &chunk_packet).await?;
-                count += 1;
+        let mut chunks_to_send = Vec::new();
+        for chunk_pos in &to_send {
+            let chunk = {
+                let world = self.world.read().await;
+                world.get_chunk(chunk_pos)
+            };
+
+            if let Some(chunk) = chunk {
+                chunks_to_send.push(chunk);
+            } else {
+                let pos = *chunk_pos;
+                let chunk = {
+                    let (db, world_type, seed, sea_level) = {
+                        let world = self.world.read().await;
+                        (world.db.clone(), world.world_type.clone(), world.seed, world.sea_level)
+                    };
+
+                    tokio::task::spawn_blocking(move || {
+                        let loaded = if let Some(ref db) = db {
+                            crate::world::persistence::load_chunk(db, pos).unwrap_or(None)
+                        } else {
+                            None
+                        };
+
+                        if let Some(chunk) = loaded {
+                            Arc::new(chunk)
+                        } else {
+                            let new_chunk = if world_type == "flat" {
+                                Chunk::new_flat(pos)
+                            } else {
+                                Chunk::new_normal(pos, seed, sea_level)
+                            };
+                            if let Some(ref db) = db {
+                                let _ = crate::world::persistence::save_chunk(db, &new_chunk);
+                            }
+                            Arc::new(new_chunk)
+                        }
+                    }).await.unwrap()
+                };
+
+                {
+                    let world = self.world.read().await;
+                    world.insert_chunk(pos, chunk.clone());
+                }
+                chunks_to_send.push(chunk);
             }
+        }
+
+        let mut count = 0;
+        for chunk in chunks_to_send {
+            let chunk_packet = chunk_data::encode_chunk_data(&chunk)?;
+            self.write_packet(writer, &chunk_packet).await?;
+            count += 1;
         }
 
         let batch_finished = play::encode_chunk_batch_finished(count)?;

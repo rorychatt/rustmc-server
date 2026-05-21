@@ -1,10 +1,10 @@
-use std::fs::{self, File};
+use std::fs;
 use std::path::Path;
 use serde::{Serialize, Deserialize};
-use flate2::Compression;
-use flate2::write::ZlibEncoder;
-use flate2::read::ZlibDecoder;
 use crate::world::chunk::{Chunk, ChunkPos};
+use redb::TableDefinition;
+
+pub const CHUNKS_TABLE: TableDefinition<[u8; 8], &[u8]> = TableDefinition::new("chunks");
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LevelInfo {
@@ -13,40 +13,61 @@ pub struct LevelInfo {
     pub sea_level: i32,
 }
 
-pub fn save_chunk(world_dir: &Path, chunk: &Chunk) -> anyhow::Result<()> {
-    let chunks_dir = world_dir.join("chunks");
-    fs::create_dir_all(&chunks_dir)?;
+pub fn chunk_key(pos: ChunkPos) -> [u8; 8] {
+    let mut key = [0u8; 8];
+    key[0..4].copy_from_slice(&pos.x.to_be_bytes());
+    key[4..8].copy_from_slice(&pos.z.to_be_bytes());
+    key
+}
+
+pub fn open_database(world_dir: &Path) -> anyhow::Result<redb::Database> {
+    fs::create_dir_all(world_dir)?;
+    let db_path = world_dir.join("chunks.redb");
+    let db = redb::Database::create(&db_path)?;
     
-    let chunk_file = chunks_dir.join(format!("chunk_{}_{}.dat", chunk.pos.x, chunk.pos.z));
-    let file = File::create(chunk_file)?;
+    // Ensure chunks table is created
+    let write_txn = db.begin_write()?;
+    {
+        let _ = write_txn.open_table(CHUNKS_TABLE)?;
+    }
+    write_txn.commit()?;
     
-    let mut encoder = ZlibEncoder::new(file, Compression::default());
-    serde_json::to_writer(&mut encoder, chunk)?;
-    encoder.finish()?;
+    Ok(db)
+}
+
+pub fn save_chunk(db: &redb::Database, chunk: &Chunk) -> anyhow::Result<()> {
+    let key = chunk_key(chunk.pos);
+    let serialized = bincode::serialize(chunk)?;
+    
+    let write_txn = db.begin_write()?;
+    {
+        let mut table = write_txn.open_table(CHUNKS_TABLE)?;
+        table.insert(&key, serialized.as_slice())?;
+    }
+    write_txn.commit()?;
     
     Ok(())
 }
 
-pub fn load_chunk(world_dir: &Path, pos: ChunkPos) -> anyhow::Result<Option<Chunk>> {
-    let chunk_file = world_dir
-        .join("chunks")
-        .join(format!("chunk_{}_{}.dat", pos.x, pos.z));
-        
-    if !chunk_file.exists() {
-        return Ok(None);
+pub fn load_chunk(db: &redb::Database, pos: ChunkPos) -> anyhow::Result<Option<Chunk>> {
+    let key = chunk_key(pos);
+    let read_txn = db.begin_read()?;
+    let table = read_txn.open_table(CHUNKS_TABLE)?;
+    let value = table.get(&key)?;
+    
+    match value {
+        Some(guard) => {
+            let chunk: Chunk = bincode::deserialize(guard.value())?;
+            Ok(Some(chunk))
+        }
+        None => Ok(None),
     }
-    
-    let file = File::open(chunk_file)?;
-    let decoder = ZlibDecoder::new(file);
-    let chunk: Chunk = serde_json::from_reader(decoder)?;
-    
-    Ok(Some(chunk))
 }
 
 pub fn save_level_info(world_dir: &Path, level_info: &LevelInfo) -> anyhow::Result<()> {
     fs::create_dir_all(world_dir)?;
     let level_file = world_dir.join("level.json");
-    let file = File::create(level_file)?;
+    let file = fs::File::create(level_file)?;
     serde_json::to_writer_pretty(file, level_info)?;
     Ok(())
 }
@@ -56,7 +77,7 @@ pub fn load_level_info(world_dir: &Path) -> anyhow::Result<Option<LevelInfo>> {
     if !level_file.exists() {
         return Ok(None);
     }
-    let file = File::open(level_file)?;
+    let file = fs::File::open(level_file)?;
     let level_info: LevelInfo = serde_json::from_reader(file)?;
     Ok(Some(level_info))
 }
@@ -156,6 +177,7 @@ mod tests {
     fn test_chunk_roundtrip() {
         let dir = tempdir().unwrap();
         let path = dir.path();
+        let db = open_database(path).unwrap();
         
         let pos = ChunkPos::new(3, -2);
         let mut chunk = Chunk::new(pos);
@@ -164,9 +186,9 @@ mod tests {
         chunk.set_block(2, 4, 5, crate::world::chunk::BlockState::STONE);
         chunk.set_block(7, 12, 11, crate::world::chunk::BlockState::GRASS_BLOCK);
         
-        save_chunk(path, &chunk).unwrap();
+        save_chunk(&db, &chunk).unwrap();
         
-        let loaded_chunk = load_chunk(path, pos).unwrap().unwrap();
+        let loaded_chunk = load_chunk(&db, pos).unwrap().unwrap();
         assert_eq!(loaded_chunk.pos, pos);
         assert_eq!(loaded_chunk.get_block(2, 4, 5), crate::world::chunk::BlockState::STONE);
         assert_eq!(loaded_chunk.get_block(7, 12, 11), crate::world::chunk::BlockState::GRASS_BLOCK);
@@ -176,7 +198,9 @@ mod tests {
     #[test]
     fn test_missing_chunk() {
         let dir = tempdir().unwrap();
-        let loaded = load_chunk(dir.path(), ChunkPos::new(0, 0)).unwrap();
+        let path = dir.path();
+        let db = open_database(path).unwrap();
+        let loaded = load_chunk(&db, ChunkPos::new(0, 0)).unwrap();
         assert!(loaded.is_none());
     }
 

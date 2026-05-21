@@ -166,8 +166,7 @@ impl Server {
         loop {
             interval.tick().await;
             info!("Autosaving world chunks...");
-            let world = world.read().await;
-            match world.save_all() {
+            match World::save_all_async(world.clone()).await {
                 Ok(_) => info!("Autosave complete."),
                 Err(e) => error!("Autosave failed: {}", e),
             }
@@ -190,11 +189,8 @@ impl Server {
             
             if let Some(dir) = world_dir {
                 info!("Creating automated backup of world directory...");
-                {
-                    let world = world.read().await;
-                    if let Err(e) = world.save_all() {
-                        error!("Failed to save world before backup: {}", e);
-                    }
+                if let Err(e) = World::save_all_async(world.clone()).await {
+                    error!("Failed to save world before backup: {}", e);
                 }
                 
                 let dir_clone = dir.clone();
