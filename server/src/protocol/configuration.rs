@@ -70,9 +70,123 @@ pub fn encode_registry_data(registry_id: &str, entries: &[RegistryEntry]) -> io:
 
 pub fn encode_update_tags() -> io::Result<Packet> {
     let mut data = Vec::new();
-    VarInt(0).write(&mut data)?;
+    
+    // We send tags for 2 registries: minecraft:enchantment and minecraft:worldgen/biome
+    VarInt(2).write(&mut data)?;
+
+    // 1. minecraft:enchantment
+    write_string(&mut data, "minecraft:enchantment")?;
+    
+    // Load enchantments to map ids to indices
+    let enchantments = crate::registry::load_current("minecraft:enchantment")?;
+    let get_enchantment_id = |id: &str| -> i32 {
+        enchantments.iter().position(|e| e.id == id).map(|pos| pos as i32).unwrap_or(-1)
+    };
+
+    // We have 7 enchantment tags
+    VarInt(7).write(&mut data)?;
+
+    let enchantment_tags: &[(&str, &[&str])] = &[
+        ("minecraft:exclusive_set/damage", &[
+            "minecraft:bane_of_arthropods",
+            "minecraft:breach",
+            "minecraft:density",
+            "minecraft:impaling",
+            "minecraft:sharpness",
+            "minecraft:smite",
+        ]),
+        ("minecraft:exclusive_set/armor", &[
+            "minecraft:blast_protection",
+            "minecraft:fire_protection",
+            "minecraft:projectile_protection",
+            "minecraft:protection",
+        ]),
+        ("minecraft:exclusive_set/boots", &[
+            "minecraft:depth_strider",
+            "minecraft:frost_walker",
+        ]),
+        ("minecraft:exclusive_set/bow", &[
+            "minecraft:infinity",
+        ]),
+        ("minecraft:exclusive_set/crossbow", &[
+            "minecraft:multishot",
+            "minecraft:piercing",
+        ]),
+        ("minecraft:exclusive_set/mining", &[
+            "minecraft:fortune",
+            "minecraft:silk_touch",
+        ]),
+        ("minecraft:exclusive_set/riptide", &[
+            "minecraft:riptide",
+        ]),
+    ];
+
+    for &(tag_name, members) in enchantment_tags {
+        write_string(&mut data, tag_name)?;
+        
+        let mut member_ids = Vec::new();
+        for &m in members {
+            let idx = get_enchantment_id(m);
+            if idx != -1 {
+                member_ids.push(idx);
+            }
+        }
+        
+        VarInt(member_ids.len() as i32).write(&mut data)?;
+        for &id in &member_ids {
+            VarInt(id).write(&mut data)?;
+        }
+    }
+
+    // 2. minecraft:worldgen/biome
+    write_string(&mut data, "minecraft:worldgen/biome")?;
+
+    let biomes = crate::registry::load_current("minecraft:worldgen/biome")?;
+    let get_biome_id = |id: &str| -> i32 {
+        biomes.iter().position(|e| e.id == id).map(|pos| pos as i32).unwrap_or(-1)
+    };
+
+    // We have 3 biome tags
+    VarInt(3).write(&mut data)?;
+
+    let biome_tags: &[(&str, &[&str])] = &[
+        ("minecraft:is_jungle", &[
+            "minecraft:jungle",
+            "minecraft:sparse_jungle",
+            "minecraft:bamboo_jungle",
+        ]),
+        ("minecraft:is_savanna", &[
+            "minecraft:savanna",
+            "minecraft:savanna_plateau",
+            "minecraft:windswept_savanna",
+        ]),
+        ("minecraft:is_badlands", &[
+            "minecraft:badlands",
+            "minecraft:wooded_badlands",
+            "minecraft:eroded_badlands",
+        ]),
+    ];
+
+    for &(tag_name, members) in biome_tags {
+        write_string(&mut data, tag_name)?;
+        
+        let mut member_ids = Vec::new();
+        for &m in members {
+            let idx = get_biome_id(m);
+            if idx != -1 {
+                member_ids.push(idx);
+            }
+        }
+        
+        VarInt(member_ids.len() as i32).write(&mut data)?;
+        for &id in &member_ids {
+            VarInt(id).write(&mut data)?;
+        }
+    }
+
     Ok(Packet::new(ids::UPDATE_TAGS, data))
 }
+
 
 pub fn encode_finish_configuration() -> Packet {
     Packet::new(ids::FINISH_CONFIGURATION, Vec::new())
@@ -117,6 +231,7 @@ mod tests {
     fn test_encode_update_tags() {
         let packet = encode_update_tags().unwrap();
         assert_eq!(packet.id, ids::UPDATE_TAGS);
+        assert!(!packet.data.is_empty());
     }
 
     #[test]
