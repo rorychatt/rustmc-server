@@ -55,6 +55,12 @@ gameplay:
   hardcore: ${configState['hardcore']}
   simulation_distance: ${configState['simulation_distance']}
   sea_level: ${configState['sea_level']}
+  world_type: "${configState['world_type']}"
+  seed: ${configState['seed']}
+  world_dir: "${configState['world_dir']}"
+  save_interval_secs: ${configState['save_interval_secs']}
+  backup_interval_secs: ${configState['backup_interval_secs']}
+  max_backups: ${configState['max_backups']}
 `;
   };
 
@@ -113,22 +119,33 @@ gameplay:
 
                     {opt.type === 'number' && (
                       <div className="flex items-center gap-3">
-                        <input
-                          type="range"
-                          min={opt.min ?? 1}
-                          max={opt.max ?? 100}
-                          className="flex-grow h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-400"
-                          value={configState[opt.key]}
-                          onChange={e => handleValueChange(opt.key, parseInt(e.target.value))}
-                        />
-                        <input
-                          type="number"
-                          min={opt.min}
-                          max={opt.max}
-                          className="w-16 px-2 py-1 bg-slate-950/60 border border-slate-800 rounded text-center text-xs font-mono text-cyan-400 focus:outline-none focus:border-cyan-500/60"
-                          value={configState[opt.key]}
-                          onChange={e => handleValueChange(opt.key, parseInt(e.target.value) || opt.defaultValue)}
-                        />
+                        {opt.min !== undefined && opt.max !== undefined ? (
+                          <>
+                            <input
+                              type="range"
+                              min={opt.min}
+                              max={opt.max}
+                              className="flex-grow h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-400"
+                              value={configState[opt.key]}
+                              onChange={e => handleValueChange(opt.key, parseInt(e.target.value))}
+                            />
+                            <input
+                              type="number"
+                              min={opt.min}
+                              max={opt.max}
+                              className="w-16 px-2 py-1 bg-slate-950/60 border border-slate-800 rounded text-center text-xs font-mono text-cyan-400 focus:outline-none focus:border-cyan-500/60"
+                              value={configState[opt.key]}
+                              onChange={e => handleValueChange(opt.key, parseInt(e.target.value) || opt.defaultValue)}
+                            />
+                          </>
+                        ) : (
+                          <input
+                            type="number"
+                            className="w-full px-3 py-2 bg-slate-950/60 border border-slate-800 rounded-lg text-sm text-slate-300 placeholder-slate-600 focus:outline-none focus:border-cyan-500/60 focus:ring-1 focus:ring-cyan-500/20"
+                            value={configState[opt.key]}
+                            onChange={e => handleValueChange(opt.key, parseInt(e.target.value) || 0)}
+                          />
+                        )}
                       </div>
                     )}
 

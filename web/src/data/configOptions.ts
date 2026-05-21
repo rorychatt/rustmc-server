@@ -136,6 +136,49 @@ export const CONFIG_SCHEMA: ConfigGroup[] = [
         min: 0,
         max: 255,
         description: 'Base sea height level utilized during flat chunk generation.'
+      },
+      {
+        key: 'world_type',
+        name: 'World Type',
+        type: 'select',
+        defaultValue: 'normal',
+        options: ['normal', 'flat'],
+        description: 'Determines the world generation style. "flat" generates a flat grass plain, "normal" generates a noise-based surface.'
+      },
+      {
+        key: 'seed',
+        name: 'World Seed',
+        type: 'number',
+        defaultValue: 0,
+        description: 'Seed for random number generator utilized during normal noise terrain generation.'
+      },
+      {
+        key: 'world_dir',
+        name: 'World Directory',
+        type: 'string',
+        defaultValue: 'world',
+        description: 'Directory path where the world state (chunks, level info) is saved and loaded.'
+      },
+      {
+        key: 'save_interval_secs',
+        name: 'Save Interval (secs)',
+        type: 'number',
+        defaultValue: 300,
+        description: 'Time interval in seconds between automatic background saving of modified chunks.'
+      },
+      {
+        key: 'backup_interval_secs',
+        name: 'Backup Interval (secs)',
+        type: 'number',
+        defaultValue: 3600,
+        description: 'Time interval in seconds between automatic background backups of the world directory.'
+      },
+      {
+        key: 'max_backups',
+        name: 'Max Backups',
+        type: 'number',
+        defaultValue: 5,
+        description: 'Maximum number of automated backups to keep before older backups are pruned.'
       }
     ]
   }

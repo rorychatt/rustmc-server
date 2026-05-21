@@ -14,10 +14,12 @@ import {
   X, 
   ArrowRight,
   CheckCircle,
-  FileText
+  FileText,
+  Globe,
+  Database
 } from 'lucide-react';
 
-type TabId = 'overview' | 'architecture' | 'config' | 'protocol' | 'transfer' | 'security';
+type TabId = 'overview' | 'architecture' | 'world' | 'config' | 'protocol' | 'transfer' | 'security';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
@@ -26,6 +28,7 @@ export default function App() {
   const tabs = [
     { id: 'overview', name: 'Overview', icon: BookOpen },
     { id: 'architecture', name: 'Server Architecture', icon: Cpu },
+    { id: 'world', name: 'World & Persistence', icon: Globe },
     { id: 'config', name: 'Config Generator', icon: Settings },
     { id: 'protocol', name: 'Protocol & Packets', icon: GitFork },
     { id: 'transfer', name: 'Server Transfer', icon: Key },
@@ -276,6 +279,140 @@ export default function App() {
                     <li>Transitions client connection into Play phase.</li>
                     <li>Subscribes to global server broadcast channel.</li>
                   </ol>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Tab: World & Persistence */}
+          {activeTab === 'world' && (
+            <div className="space-y-6 animate-fadeIn">
+              {/* Header Card */}
+              <div className="p-6 rounded-xl glass-panel space-y-4">
+                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                  <Globe className="text-cyan-400 w-6 h-6" />
+                  World Generation & Chunk Persistence
+                </h2>
+                <p className="text-slate-400 text-sm leading-relaxed">
+                  RustMC implements a high-performance world orchestration system that handles custom world generation, dynamic spawn height detection, asynchronous chunk serialization via Zlib compression, and robust automated backups.
+                </p>
+              </div>
+
+              {/* World Generation Section */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="p-6 rounded-xl glass-panel space-y-4">
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+                    World Generators
+                  </h3>
+                  <div className="space-y-3 text-slate-400 text-xs leading-relaxed">
+                    <p>
+                      The server supports two world generation styles, configurable via the <code>world_type</code> parameter in <code>server.yaml</code>:
+                    </p>
+                    <ul className="list-disc list-inside space-y-2 pl-2">
+                      <li>
+                        <strong className="text-white">Flat World (<code>flat</code>):</strong> Generates a uniform layered terrain consisting of 1 Bedrock, 2 Dirt, and 1 Grass block at the configured <code>sea_level</code> (default Y=63). Ideal for testing and lightweight lobby setups.
+                      </li>
+                      <li>
+                        <strong className="text-white">Normal World (<code>normal</code>):</strong> Utilizes a noise generator based on a pseudo-random number seed (specified by <code>seed</code>) to produce natural terrain contours, hills, and valleys that emulate standard Minecraft environments.
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+
+                <div className="p-6 rounded-xl glass-panel space-y-4">
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                    Spawn Height Detection
+                  </h3>
+                  <div className="space-y-3 text-slate-400 text-xs leading-relaxed">
+                    <p>
+                      To prevent players from suffocating or falling endlessly into the void when spawning, RustMC implements an automated <strong>Spawn Height Finder</strong>:
+                    </p>
+                    <ol className="list-decimal list-inside space-y-2 pl-2 font-mono text-[11px]">
+                      <li>Computes the spawn chunk coordinate.</li>
+                      <li>Scans downward from the sky limit (Y=319) at the target (X, Z).</li>
+                      <li>Locates the first non-air block state.</li>
+                      <li>Ensures the block is solid (not air or fluid).</li>
+                      <li>Sets spawn position precisely on top of this block.</li>
+                    </ol>
+                  </div>
+                </div>
+              </div>
+
+              {/* Persistence Details */}
+              <div className="p-6 rounded-xl glass-panel space-y-4">
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Database className="text-cyan-400 w-5 h-5" />
+                  Chunk Serialization & Compression
+                </h3>
+                <p className="text-slate-400 text-sm leading-relaxed">
+                  World chunks are persisted to disk inside the directory configured by <code>world_dir</code>. Each chunk is saved in its own file using a compressed JSON strategy to maximize space efficiency:
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+                  <div className="p-4 rounded-lg bg-slate-950/40 border border-slate-800/60 text-xs space-y-2">
+                    <div className="font-bold text-white font-mono">1. Metadata (level.json)</div>
+                    <p className="text-slate-400 leading-normal">
+                      Saves world-wide attributes including spawn coordinates (X, Y, Z), world seed, world type, difficulty, and sea level.
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-lg bg-slate-950/40 border border-slate-800/60 text-xs space-y-2">
+                    <div className="font-bold text-white font-mono">2. Chunk Files (c.X.Z.json.zlib)</div>
+                    <p className="text-slate-400 leading-normal">
+                      Individual chunk columns are serialized to JSON structure containing block state palettes, non-air block counts, and block arrays, then compressed using Zlib.
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-lg bg-slate-950/40 border border-slate-800/60 text-xs space-y-2">
+                    <div className="font-bold text-white font-mono">3. Async File I/O</div>
+                    <p className="text-slate-400 leading-normal">
+                      All reading and writing of compressed chunk data is performed using Rust's file system handles, ensuring integrity and speed.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-slate-950/60 rounded-lg border border-slate-800 p-4 font-mono text-xs text-emerald-400/90 space-y-1 overflow-x-auto">
+                  <div className="text-slate-500">// Directory layout on disk:</div>
+                  <div>world/</div>
+                  <div>├── level.json                 <span className="text-slate-500"># World configuration metadata</span></div>
+                  <div>└── chunks/                   <span className="text-slate-500"># Compressed chunk files</span></div>
+                  <div>    ├── c.0.0.json.zlib        <span className="text-slate-500"># Chunk at (0, 0)</span></div>
+                  <div>    ├── c.0.1.json.zlib        <span className="text-slate-500"># Chunk at (0, 1)</span></div>
+                  <div>    └── c.-1.0.json.zlib       <span className="text-slate-500"># Chunk at (-1, 0)</span></div>
+                </div>
+              </div>
+
+              {/* Background Loops & Backups */}
+              <div className="p-6 rounded-xl glass-panel space-y-4">
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Terminal className="text-emerald-400 w-5 h-5" />
+                  Automated Background Tasks & Backups
+                </h3>
+                <p className="text-slate-400 text-sm leading-relaxed">
+                  RustMC manages persistence operations in the background using lightweight asynchronous Tokio loops, keeping the server main tick thread responsive:
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="p-5 rounded-lg bg-slate-950/40 border border-slate-800/60 space-y-3">
+                    <h4 className="text-sm font-bold text-white">Periodic Autosave Loop</h4>
+                    <p className="text-slate-400 text-xs leading-relaxed">
+                      Runs in a background task at the frequency set by <code>save_interval_secs</code> (default: 300s). The loop acquires a read lock on the world state, identifies modified/dirty chunks, and serializes them asynchronously to avoid interrupting connection processing.
+                    </p>
+                  </div>
+                  
+                  <div className="p-5 rounded-lg bg-slate-950/40 border border-slate-800/60 space-y-3">
+                    <h4 className="text-sm font-bold text-white">Automated Backups & Rotation</h4>
+                    <p className="text-slate-400 text-xs leading-relaxed">
+                      Runs at the frequency set by <code>backup_interval_secs</code> (default: 3600s). The task creates a full copy of the world directory under <code>backups/backup_&lt;millisecond_timestamp&gt;/</code>. To prevent blocking the async runtime, I/O copying is offloaded to a thread pool via <code>tokio::task::spawn_blocking</code>.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-5 rounded-lg bg-slate-950/40 border border-slate-800/60 space-y-3">
+                  <h4 className="text-sm font-bold text-white">Backup Pruning Policy</h4>
+                  <p className="text-slate-400 text-xs leading-relaxed">
+                    To prevent the storage volume from filling up over time, the backup system enforces a pruning algorithm: after a successful backup, it scans the backups directory, sorts backups chronologically, and deletes the oldest folders so that only the latest <code>max_backups</code> (default: 5) are kept.
+                  </p>
                 </div>
               </div>
             </div>
