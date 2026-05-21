@@ -1,5 +1,47 @@
 [
-  {"id":"minecraft:cold","data":{"asset_id":"minecraft:cold","spawn_conditions":[{"context":{"min_light":0,"max_light":15},"chance":0.0625}]}},
-  {"id":"minecraft:default","data":{"asset_id":"minecraft:default","spawn_conditions":[{"context":{"min_light":0,"max_light":15},"chance":0.9375}]}},
-  {"id":"minecraft:warm","data":{"asset_id":"minecraft:warm","spawn_conditions":[{"context":{"min_light":0,"max_light":15},"chance":0.0625}]}}
+  {
+    "id": "minecraft:cold",
+    "data": {
+      "asset_id": "minecraft:entity/chicken/chicken_cold",
+      "baby_asset_id": "minecraft:entity/chicken/chicken_cold_baby",
+      "model": "cold",
+      "spawn_conditions": [
+        {
+          "condition": {
+            "type": "minecraft:biome",
+            "biomes": "#minecraft:spawns_cold_variant_farm_animals"
+          },
+          "priority": 1
+        }
+      ]
+    }
+  },
+  {
+    "id": "minecraft:temperate",
+    "data": {
+      "asset_id": "minecraft:entity/chicken/chicken_temperate",
+      "baby_asset_id": "minecraft:entity/chicken/chicken_temperate_baby",
+      "spawn_conditions": [
+        {
+          "priority": 0
+        }
+      ]
+    }
+  },
+  {
+    "id": "minecraft:warm",
+    "data": {
+      "asset_id": "minecraft:entity/chicken/chicken_warm",
+      "baby_asset_id": "minecraft:entity/chicken/chicken_warm_baby",
+      "spawn_conditions": [
+        {
+          "condition": {
+            "type": "minecraft:biome",
+            "biomes": "#minecraft:spawns_warm_variant_farm_animals"
+          },
+          "priority": 1
+        }
+      ]
+    }
+  }
 ]

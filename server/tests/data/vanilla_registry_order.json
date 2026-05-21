@@ -21,6 +21,7 @@
     "minecraft:looting",
     "minecraft:loyalty",
     "minecraft:luck_of_the_sea",
+    "minecraft:lunge",
     "minecraft:lure",
     "minecraft:mending",
     "minecraft:multishot",
@@ -125,6 +126,7 @@
     "minecraft:cotan",
     "minecraft:courbet",
     "minecraft:creebet",
+    "minecraft:dennis",
     "minecraft:donkey_kong",
     "minecraft:earth",
     "minecraft:endboss",
@@ -362,10 +364,18 @@
     "minecraft:white"
   ],
   "minecraft:pig_sound_variant": [
-    "minecraft:classic"
+    "minecraft:big",
+    "minecraft:classic",
+    "minecraft:mini"
   ],
   "minecraft:wolf_sound_variant": [
-    "minecraft:classic"
+    "minecraft:angry",
+    "minecraft:big",
+    "minecraft:classic",
+    "minecraft:cute",
+    "minecraft:grumpy",
+    "minecraft:puglin",
+    "minecraft:sad"
   ],
   "minecraft:frog_variant": [
     "minecraft:cold",
@@ -374,29 +384,33 @@
   ],
   "minecraft:pig_variant": [
     "minecraft:cold",
-    "minecraft:default",
+    "minecraft:temperate",
     "minecraft:warm"
   ],
   "minecraft:cat_sound_variant": [
-    "minecraft:classic"
+    "minecraft:classic",
+    "minecraft:royal"
   ],
   "minecraft:cow_sound_variant": [
-    "minecraft:classic"
+    "minecraft:classic",
+    "minecraft:moody"
   ],
   "minecraft:zombie_nautilus_variant": [
-    "minecraft:default"
+    "minecraft:temperate",
+    "minecraft:warm"
   ],
   "minecraft:chicken_variant": [
     "minecraft:cold",
-    "minecraft:default",
+    "minecraft:temperate",
     "minecraft:warm"
   ],
   "minecraft:chicken_sound_variant": [
-    "minecraft:classic"
+    "minecraft:classic",
+    "minecraft:picky"
   ],
   "minecraft:cow_variant": [
     "minecraft:cold",
-    "minecraft:default",
+    "minecraft:temperate",
     "minecraft:warm"
   ],
   "minecraft:dialog": [],

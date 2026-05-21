@@ -1,5 +1,43 @@
 [
-  {"id":"minecraft:cold","data":{"asset_id":"minecraft:cold"}},
-  {"id":"minecraft:temperate","data":{"asset_id":"minecraft:temperate"}},
-  {"id":"minecraft:warm","data":{"asset_id":"minecraft:warm"}}
+  {
+    "id": "minecraft:cold",
+    "data": {
+      "asset_id": "minecraft:entity/frog/frog_cold",
+      "spawn_conditions": [
+        {
+          "condition": {
+            "type": "minecraft:biome",
+            "biomes": "#minecraft:spawns_cold_variant_frogs"
+          },
+          "priority": 1
+        }
+      ]
+    }
+  },
+  {
+    "id": "minecraft:temperate",
+    "data": {
+      "asset_id": "minecraft:entity/frog/frog_temperate",
+      "spawn_conditions": [
+        {
+          "priority": 0
+        }
+      ]
+    }
+  },
+  {
+    "id": "minecraft:warm",
+    "data": {
+      "asset_id": "minecraft:entity/frog/frog_warm",
+      "spawn_conditions": [
+        {
+          "condition": {
+            "type": "minecraft:biome",
+            "biomes": "#minecraft:spawns_warm_variant_frogs"
+          },
+          "priority": 1
+        }
+      ]
+    }
+  }
 ]
