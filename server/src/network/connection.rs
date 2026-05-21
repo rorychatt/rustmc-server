@@ -655,15 +655,17 @@ impl Connection {
         };
 
         // 1. Login (Play) packet
-        let login_play = play::encode_login_play(
+        let is_flat = self.config.gameplay.world_type == "flat";
+        let login_play = play::encode_login_play(play::LoginPlayParams {
             entity_id,
-            self.view_distance,
-            self.config.gameplay.simulation_distance,
-            self.config.gameplay.max_players,
-            self.config.gameplay.hardcore,
-            self.config.gameplay.gamemode_id(),
-            self.config.gameplay.sea_level,
-        )?;
+            view_distance: self.view_distance,
+            simulation_distance: self.config.gameplay.simulation_distance,
+            max_players: self.config.gameplay.max_players,
+            hardcore: self.config.gameplay.hardcore,
+            game_mode: self.config.gameplay.gamemode_id(),
+            sea_level: self.config.gameplay.sea_level,
+            is_flat,
+        })?;
         self.write_packet(writer, &login_play).await?;
 
         // Request transfer token cookie if secret is configured

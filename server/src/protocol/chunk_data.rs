@@ -268,9 +268,9 @@ mod tests {
             }
         }
 
-        // Flat world: grass at y=127 (abs), so height = 128
+        // Flat world: grass at abs index 3, so height = 4
         for &h in &motion_blocking {
-            assert_eq!(h, 128);
+            assert_eq!(h, 4);
         }
     }
 

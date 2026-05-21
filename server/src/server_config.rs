@@ -89,6 +89,18 @@ pub struct GameplaySection {
     pub simulation_distance: i32,
     #[serde(default = "default_sea_level")]
     pub sea_level: i32,
+    #[serde(default = "default_world_type")]
+    pub world_type: String,
+    #[serde(default = "default_seed")]
+    pub seed: u64,
+    #[serde(default = "default_world_dir")]
+    pub world_dir: String,
+    #[serde(default = "default_save_interval_secs")]
+    pub save_interval_secs: u64,
+    #[serde(default = "default_backup_interval_secs")]
+    pub backup_interval_secs: u64,
+    #[serde(default = "default_max_backups")]
+    pub max_backups: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -168,6 +180,30 @@ fn default_sea_level() -> i32 {
     63
 }
 
+fn default_world_type() -> String {
+    "normal".to_string()
+}
+
+fn default_seed() -> u64 {
+    0
+}
+
+fn default_world_dir() -> String {
+    "world".to_string()
+}
+
+fn default_save_interval_secs() -> u64 {
+    300
+}
+
+fn default_backup_interval_secs() -> u64 {
+    3600
+}
+
+fn default_max_backups() -> usize {
+    5
+}
+
 impl Default for ServerSection {
     fn default() -> Self {
         Self {
@@ -208,6 +244,12 @@ impl Default for GameplaySection {
             hardcore: default_hardcore(),
             simulation_distance: default_simulation_distance(),
             sea_level: default_sea_level(),
+            world_type: default_world_type(),
+            seed: default_seed(),
+            world_dir: default_world_dir(),
+            save_interval_secs: default_save_interval_secs(),
+            backup_interval_secs: default_backup_interval_secs(),
+            max_backups: default_max_backups(),
         }
     }
 }
@@ -388,6 +430,8 @@ mod tests {
         assert_eq!(config.network.non_play_timeout_secs, 30);
         assert!(config.transfer.secret.is_none());
         assert!(config.last_modified.is_none());
+        assert_eq!(config.gameplay.world_type, "normal");
+        assert_eq!(config.gameplay.seed, 0);
     }
 
     #[test]
@@ -589,6 +633,8 @@ gameplay:
   hardcore: true
   simulation_distance: 6
   sea_level: 60
+  world_type: "flat"
+  seed: 1234567890
 "#;
         let config: ServerConfig = serde_yaml::from_str(yaml_str).unwrap();
         assert_eq!(config.server.bind, "127.0.0.1:25569");
@@ -606,6 +652,8 @@ gameplay:
         assert!(config.gameplay.hardcore);
         assert_eq!(config.gameplay.simulation_distance, 6);
         assert_eq!(config.gameplay.sea_level, 60);
+        assert_eq!(config.gameplay.world_type, "flat");
+        assert_eq!(config.gameplay.seed, 1234567890);
     }
 
     #[test]

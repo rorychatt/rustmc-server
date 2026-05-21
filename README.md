@@ -2,6 +2,10 @@
 
 A multi-threaded Rust-based Minecraft server with Paper plugin compatibility.
 
+[![Documentation Website](https://img.shields.io/badge/docs-website-blue.svg)](https://rorychatt.github.io/rustmc-server/)
+
+Documentation website: [https://rorychatt.github.io/rustmc-server/](https://rorychatt.github.io/rustmc-server/)
+
 ## Features
 
 - **Async I/O**: Built on Tokio for efficient concurrent client handling
@@ -57,6 +61,12 @@ gameplay:
   hardcore: false
   simulation_distance: 8
   sea_level: 63
+  world_type: "normal"        # Options: normal, flat
+  seed: 0                     # Seed for normal noise generation
+  world_dir: "world"          # Directory to save chunks and level data
+  save_interval_secs: 300     # Periodic background chunk autosave interval
+  backup_interval_secs: 3600  # Periodic background backup interval (0 to disable)
+  max_backups: 5              # Number of backup rotations to keep
 ```
 
 ## Testing

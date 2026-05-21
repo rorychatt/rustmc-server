@@ -26,3 +26,7 @@ Thumbs.db
 
 # Cached downloads
 .cache/
+
+# Runtime files
+/world
+

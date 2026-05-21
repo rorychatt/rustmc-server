@@ -1,7 +1,8 @@
 pub mod block_registry;
 pub mod chunk;
+pub mod persistence;
 
-use chunk::{Chunk, ChunkPos};
+use chunk::{Chunk, ChunkPos, BlockState};
 use std::collections::{HashMap, HashSet};
 use tracing::debug;
 use uuid::Uuid;
@@ -30,16 +31,53 @@ pub struct World {
     chunks: HashMap<ChunkPos, Chunk>,
     next_entity_id: i32,
     tick_count: u64,
+    pub world_type: String,
+    pub seed: u64,
+    pub sea_level: i32,
+    pub world_dir: Option<std::path::PathBuf>,
 }
 
 impl World {
     pub fn new() -> Self {
+        Self::new_with_config("flat".to_string(), 0, 63)
+    }
+
+    pub fn new_with_config(world_type: String, seed: u64, sea_level: i32) -> Self {
+        Self::new_with_dir(world_type, seed, sea_level, None)
+    }
+
+    pub fn new_with_dir(
+        world_type: String,
+        seed: u64,
+        sea_level: i32,
+        world_dir: Option<std::path::PathBuf>,
+    ) -> Self {
         let mut world = Self {
             players: HashMap::new(),
             chunks: HashMap::new(),
             next_entity_id: 1,
             tick_count: 0,
+            world_type,
+            seed,
+            sea_level,
+            world_dir,
         };
+        // Load level metadata if it exists
+        if let Some(ref dir) = world.world_dir {
+            if let Ok(Some(level_info)) = persistence::load_level_info(dir) {
+                world.world_type = level_info.world_type;
+                world.seed = level_info.seed;
+                world.sea_level = level_info.sea_level;
+            } else {
+                // Save current configuration to level.json
+                let level_info = persistence::LevelInfo {
+                    seed: world.seed,
+                    world_type: world.world_type.clone(),
+                    sea_level: world.sea_level,
+                };
+                let _ = persistence::save_level_info(dir, &level_info);
+            }
+        }
         world.generate_spawn_chunks();
         world
     }
@@ -57,6 +95,20 @@ impl World {
     ) -> i32 {
         let entity_id = self.next_entity_id;
         self.next_entity_id += 1;
+
+        // Dynamic spawn height based on terrain structure
+        let mut spawn_y = 64.0;
+        let chunk_pos = ChunkPos::from_block(0, 0);
+        if let Some(chunk) = self.get_chunk(&chunk_pos) {
+            for abs_y in (0..384).rev() {
+                let block = chunk.get_block(0, abs_y, 0);
+                if block != BlockState::AIR && block != BlockState::WATER {
+                    spawn_y = (abs_y as f64 - 64.0) + 1.0;
+                    break;
+                }
+            }
+        }
+
         self.players.insert(
             uuid,
             Player {
@@ -64,7 +116,7 @@ impl World {
                 name,
                 entity_id,
                 x: 0.0,
-                y: 64.0,
+                y: spawn_y,
                 z: 0.0,
                 yaw: 0.0,
                 pitch: 0.0,
@@ -117,11 +169,33 @@ impl World {
     }
 
     fn generate_spawn_chunks(&mut self) {
-        let spawn_radius = 4;
+        let spawn_radius = 2;
+        let world_type = self.world_type.clone();
+        let seed = self.seed;
+        let sea_level = self.sea_level;
         for cx in -spawn_radius..=spawn_radius {
             for cz in -spawn_radius..=spawn_radius {
                 let pos = ChunkPos::new(cx, cz);
-                self.chunks.insert(pos, Chunk::new_flat(pos));
+                let chunk = if let Some(ref dir) = self.world_dir {
+                    if let Ok(Some(loaded)) = persistence::load_chunk(dir, pos) {
+                        loaded
+                    } else {
+                        let new_chunk = if world_type == "flat" {
+                            Chunk::new_flat(pos)
+                        } else {
+                            Chunk::new_normal(pos, seed, sea_level)
+                        };
+                        let _ = persistence::save_chunk(dir, &new_chunk);
+                        new_chunk
+                    }
+                } else {
+                    if world_type == "flat" {
+                        Chunk::new_flat(pos)
+                    } else {
+                        Chunk::new_normal(pos, seed, sea_level)
+                    }
+                };
+                self.chunks.insert(pos, chunk);
             }
         }
     }
@@ -131,9 +205,51 @@ impl World {
     }
 
     pub fn get_or_generate_chunk(&mut self, pos: ChunkPos) -> &Chunk {
-        self.chunks
-            .entry(pos)
-            .or_insert_with(|| Chunk::new_flat(pos))
+        if self.chunks.contains_key(&pos) {
+            return self.chunks.get(&pos).unwrap();
+        }
+
+        let world_type = self.world_type.clone();
+        let seed = self.seed;
+        let sea_level = self.sea_level;
+
+        let chunk = if let Some(ref dir) = self.world_dir {
+            if let Ok(Some(loaded)) = persistence::load_chunk(dir, pos) {
+                loaded
+            } else {
+                let new_chunk = if world_type == "flat" {
+                    Chunk::new_flat(pos)
+                } else {
+                    Chunk::new_normal(pos, seed, sea_level)
+                };
+                let _ = persistence::save_chunk(dir, &new_chunk);
+                new_chunk
+            }
+        } else {
+            if world_type == "flat" {
+                Chunk::new_flat(pos)
+            } else {
+                Chunk::new_normal(pos, seed, sea_level)
+            }
+        };
+
+        self.chunks.insert(pos, chunk);
+        self.chunks.get(&pos).unwrap()
+    }
+
+    pub fn save_all(&self) -> anyhow::Result<()> {
+        if let Some(ref dir) = self.world_dir {
+            let level_info = persistence::LevelInfo {
+                seed: self.seed,
+                world_type: self.world_type.clone(),
+                sea_level: self.sea_level,
+            };
+            persistence::save_level_info(dir, &level_info)?;
+            for chunk in self.chunks.values() {
+                persistence::save_chunk(dir, chunk)?;
+            }
+        }
+        Ok(())
     }
 }
 

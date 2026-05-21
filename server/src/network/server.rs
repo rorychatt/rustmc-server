@@ -21,10 +21,27 @@ pub struct Server {
 impl Server {
     pub fn new(addr: String, config: ServerConfig) -> Self {
         let (broadcast_tx, _) = broadcast::channel(256);
+        
+        let world_dir = if let Ok(env_dir) = std::env::var("RUSTMC_WORLD_DIR") {
+            if env_dir == "memory" {
+                None
+            } else {
+                Some(std::path::PathBuf::from(env_dir))
+            }
+        } else {
+            Some(std::path::PathBuf::from(&config.gameplay.world_dir))
+        };
+
+        let world = Arc::new(RwLock::new(World::new_with_dir(
+            config.gameplay.world_type.clone(),
+            config.gameplay.seed,
+            config.gameplay.sea_level,
+            world_dir,
+        )));
         Self {
             addr,
             config: Arc::new(RwLock::new(config)),
-            world: Arc::new(RwLock::new(World::new())),
+            world,
             operators: Arc::new(RwLock::new(Operators::load())),
             broadcast_tx,
         }
@@ -53,6 +70,24 @@ impl Server {
         let config_watch = self.config.clone();
         tokio::spawn(async move {
             Self::config_reload_loop(config_watch).await;
+        });
+
+        let autosave_world = self.world.clone();
+        let save_interval = {
+            let cfg = self.config.read().await;
+            cfg.gameplay.save_interval_secs
+        };
+        tokio::spawn(async move {
+            Self::autosave_loop(autosave_world, save_interval).await;
+        });
+
+        let backup_world = self.world.clone();
+        let (backup_interval, max_backups) = {
+            let cfg = self.config.read().await;
+            (cfg.gameplay.backup_interval_secs, cfg.gameplay.max_backups)
+        };
+        tokio::spawn(async move {
+            Self::backup_loop(backup_world, backup_interval, max_backups).await;
         });
 
         loop {
@@ -118,6 +153,60 @@ impl Server {
             if changed {
                 let mut cfg = config.write().await;
                 cfg.reload();
+            }
+        }
+    }
+
+    async fn autosave_loop(world: Arc<RwLock<World>>, save_interval_secs: u64) {
+        if save_interval_secs == 0 {
+            return;
+        }
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(save_interval_secs));
+        interval.tick().await; // Initial tick completes immediately
+        loop {
+            interval.tick().await;
+            info!("Autosaving world chunks...");
+            let world = world.read().await;
+            match world.save_all() {
+                Ok(_) => info!("Autosave complete."),
+                Err(e) => error!("Autosave failed: {}", e),
+            }
+        }
+    }
+
+    async fn backup_loop(world: Arc<RwLock<World>>, backup_interval_secs: u64, max_backups: usize) {
+        if backup_interval_secs == 0 || max_backups == 0 {
+            return;
+        }
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(backup_interval_secs));
+        interval.tick().await; // Initial tick completes immediately
+        loop {
+            interval.tick().await;
+            
+            let world_dir = {
+                let world = world.read().await;
+                world.world_dir.clone()
+            };
+            
+            if let Some(dir) = world_dir {
+                info!("Creating automated backup of world directory...");
+                {
+                    let world = world.read().await;
+                    if let Err(e) = world.save_all() {
+                        error!("Failed to save world before backup: {}", e);
+                    }
+                }
+                
+                let dir_clone = dir.clone();
+                let result = tokio::task::spawn_blocking(move || {
+                    crate::world::persistence::create_backup(&dir_clone, std::path::Path::new("."), max_backups)
+                }).await;
+                
+                match result {
+                    Ok(Ok(_)) => info!("Automated backup complete and pruned."),
+                    Ok(Err(e)) => error!("Automated backup failed: {}", e),
+                    Err(e) => error!("Backup task joined with error: {}", e),
+                }
             }
         }
     }

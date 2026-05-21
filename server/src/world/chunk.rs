@@ -1,9 +1,11 @@
+use serde::{Serialize, Deserialize};
+
 pub const CHUNK_WIDTH: usize = 16;
 pub const CHUNK_HEIGHT: usize = 384; // -64 to 320
 pub const SECTION_HEIGHT: usize = 16;
 pub const SECTIONS_PER_CHUNK: usize = CHUNK_HEIGHT / SECTION_HEIGHT;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ChunkPos {
     pub x: i32,
     pub z: i32,
@@ -22,7 +24,7 @@ impl ChunkPos {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlockState(pub u16);
 
 // IDs from version 26.1.2 — validated by test_block_state_ids_match_generated_data
@@ -41,7 +43,7 @@ impl BlockState {
     pub const OAK_LOG: Self = Self(137);
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ChunkSection {
     blocks: Vec<BlockState>,
     non_air_count: u16,
@@ -89,9 +91,10 @@ impl ChunkSection {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct Chunk {
     pub pos: ChunkPos,
-    sections: Vec<ChunkSection>,
+    pub sections: Vec<ChunkSection>,
 }
 
 impl Chunk {
@@ -106,23 +109,115 @@ impl Chunk {
 
     pub fn new_flat(pos: ChunkPos) -> Self {
         let mut chunk = Self::new(pos);
-        // Flat world: bedrock at y=-64 (section 0, local y 0), dirt up to y=62, grass at y=63
-        // Section index 0 = y -64 to -49
-        // Section index 4 = y 0 to 15
-        // y=63 is section index 7, local y 15
+        // Flat world template matching vanilla:
+        // bedrock at y=-64 (abs 0)
+        // dirt at y=-63, y=-62 (abs 1, 2)
+        // grass block at y=-61 (abs 3)
 
         for x in 0..CHUNK_WIDTH {
             for z in 0..CHUNK_WIDTH {
-                // y=-64 (section 0, local y 0): bedrock
                 chunk.set_block(x, 0, z, BlockState::BEDROCK);
-                // y=-63 to y=62 (1..127 in absolute-from-bottom)
-                for abs_y in 1..127 {
-                    chunk.set_block(x, abs_y, z, BlockState::DIRT);
-                }
-                // y=63 (abs 127): grass
-                chunk.set_block(x, 127, z, BlockState::GRASS_BLOCK);
+                chunk.set_block(x, 1, z, BlockState::DIRT);
+                chunk.set_block(x, 2, z, BlockState::DIRT);
+                chunk.set_block(x, 3, z, BlockState::GRASS_BLOCK);
             }
         }
+        chunk
+    }
+
+    pub fn new_normal(pos: ChunkPos, seed: u64, sea_level: i32) -> Self {
+        let mut chunk = Self::new(pos);
+
+        // Simple bit mixing hash function for deterministic terrain generation
+        let hash2d = |x: i32, z: i32| -> f64 {
+            let mut h = (x as u64).wrapping_mul(3432918353)
+                .wrapping_add((z as u64).wrapping_mul(461845907))
+                .wrapping_add(seed);
+            h ^= h >> 33;
+            h = h.wrapping_mul(0xff51afd7ed558ccd);
+            h ^= h >> 33;
+            h = h.wrapping_mul(0xc4ceb9fe1a85ec53);
+            h ^= h >> 33;
+            (h as f64) / (u64::MAX as f64)
+        };
+
+        // Bilinear interpolation with smoothstep
+        let noise2d = |x: f64, z: f64| -> f64 {
+            let x0 = x.floor() as i32;
+            let x1 = x0 + 1;
+            let z0 = z.floor() as i32;
+            let z1 = z0 + 1;
+
+            let tx = x - x.floor();
+            let tz = z - z.floor();
+
+            let sx = tx * tx * (3.0 - 2.0 * tx);
+            let sz = tz * tz * (3.0 - 2.0 * tz);
+
+            let n00 = hash2d(x0, z0);
+            let n10 = hash2d(x1, z0);
+            let n01 = hash2d(x0, z1);
+            let n11 = hash2d(x1, z1);
+
+            let nx0 = n00 + sx * (n10 - n00);
+            let nx1 = n01 + sx * (n11 - n01);
+
+            nx0 + sz * (nx1 - nx0)
+        };
+
+        // 4-octave Fractional Brownian Motion (fBm)
+        let fbm = |x: f64, z: f64, octaves: usize| -> f64 {
+            let mut value = 0.0;
+            let mut amplitude = 1.0;
+            let mut frequency = 1.0;
+            let mut max_value = 0.0;
+            for _ in 0..octaves {
+                value += amplitude * noise2d(x * frequency, z * frequency);
+                max_value += amplitude;
+                amplitude *= 0.5;
+                frequency *= 2.0;
+            }
+            value / max_value
+        };
+
+        let sea_level_abs = sea_level + 64;
+
+        for x in 0..CHUNK_WIDTH {
+            for z in 0..CHUNK_WIDTH {
+                let world_x = (pos.x * 16) + x as i32;
+                let world_z = (pos.z * 16) + z as i32;
+
+                // fBm value between 0.0 and 1.0
+                let n = fbm(world_x as f64 * 0.012, world_z as f64 * 0.012, 4);
+
+                // Scale surface height: centered around sea_level_abs +/- 32 blocks
+                let surface_height = sea_level_abs + (n * 64.0 - 32.0) as i32;
+                let surface_height = surface_height.clamp(10, 300);
+
+                // y=-64 (abs 0): Bedrock
+                chunk.set_block(x, 0, z, BlockState::BEDROCK);
+
+                // Fill columns with stone, dirt, grass, sand, and water
+                for abs_y in 1..=320 {
+                    if abs_y < (surface_height - 4) as usize {
+                        chunk.set_block(x, abs_y, z, BlockState::STONE);
+                    } else if abs_y < surface_height as usize {
+                        chunk.set_block(x, abs_y, z, BlockState::DIRT);
+                    } else if abs_y == surface_height as usize {
+                        // Shoreline/beach sand vs above-water grass block
+                        if surface_height < sea_level_abs + 2 {
+                            chunk.set_block(x, abs_y, z, BlockState::SAND);
+                        } else {
+                            chunk.set_block(x, abs_y, z, BlockState::GRASS_BLOCK);
+                        }
+                    } else if abs_y <= sea_level_abs as usize {
+                        // Place water in oceans/lakes
+                        chunk.set_block(x, abs_y, z, BlockState::WATER);
+                    }
+                }
+            }
+        }
+
         chunk
     }
 
@@ -284,14 +379,48 @@ mod tests {
     #[test]
     fn test_flat_chunk_generation() {
         let chunk = Chunk::new_flat(ChunkPos::new(0, 0));
-        // Bedrock at y=0 (bottom)
+        // Bedrock at abs index 0 (y=-64)
         assert_eq!(chunk.get_block(0, 0, 0), BlockState::BEDROCK);
-        // Dirt in the middle
-        assert_eq!(chunk.get_block(0, 64, 0), BlockState::DIRT);
-        // Grass at top of terrain
-        assert_eq!(chunk.get_block(0, 127, 0), BlockState::GRASS_BLOCK);
-        // Air above terrain
-        assert_eq!(chunk.get_block(0, 128, 0), BlockState::AIR);
+        // Dirt at abs indices 1 & 2 (y=-63, -62)
+        assert_eq!(chunk.get_block(0, 1, 0), BlockState::DIRT);
+        assert_eq!(chunk.get_block(0, 2, 0), BlockState::DIRT);
+        // Grass at abs index 3 (y=-61)
+        assert_eq!(chunk.get_block(0, 3, 0), BlockState::GRASS_BLOCK);
+        // Air at y=-60 and above
+        assert_eq!(chunk.get_block(0, 4, 0), BlockState::AIR);
+        assert_eq!(chunk.get_block(0, 64, 0), BlockState::AIR);
+    }
+
+    #[test]
+    fn test_normal_chunk_generation() {
+        // Test normal chunk generation creates grass/dirt/stone, respects seed, and sea level
+        let chunk = Chunk::new_normal(ChunkPos::new(0, 0), 42, 63);
+        
+        // Bedrock at absolute bottom (abs 0)
+        assert_eq!(chunk.get_block(0, 0, 0), BlockState::BEDROCK);
+        
+        // Deep underground should be stone
+        assert_eq!(chunk.get_block(0, 40, 0), BlockState::STONE);
+
+        // Find the height of the surface
+        let mut surface_y = 0;
+        for abs_y in (0..384).rev() {
+            let block = chunk.get_block(0, abs_y, 0);
+            if block != BlockState::AIR && block != BlockState::WATER {
+                surface_y = abs_y;
+                break;
+            }
+        }
+
+        // Surface block must be grass or sand
+        let surface_block = chunk.get_block(0, surface_y, 0);
+        assert!(surface_block == BlockState::GRASS_BLOCK || surface_block == BlockState::SAND);
+        
+        // Block below surface must be dirt
+        assert_eq!(chunk.get_block(0, surface_y - 1, 0), BlockState::DIRT);
+        
+        // Blocks far below surface must be stone
+        assert_eq!(chunk.get_block(0, surface_y - 10, 0), BlockState::STONE);
     }
 
     #[test]
