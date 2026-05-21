@@ -9,6 +9,7 @@ const FLOAT_FIELDS: &[(&str, &str)] = &[
     ("", "creature_spawn_probability"),
     ("effects", "music_volume"),
     ("mood_sound", "offset"),
+    ("", "ambient_light"),
 ];
 
 fn is_float_field(parent: &str, name: &str) -> bool {
@@ -80,6 +81,132 @@ fn write_tag_payload_for_field(
     write_tag_payload(writer, name, value)
 }
 
+fn get_unified_array_type(arr: &[Value]) -> u8 {
+    if arr.is_empty() {
+        return 0x00;
+    }
+    let all_numbers = arr.iter().all(|v| v.is_number());
+    if all_numbers {
+        let mut has_double = false;
+        let mut has_float = false;
+        let mut has_long = false;
+        for val in arr {
+            let t = get_tag_type(val);
+            match t {
+                0x06 => has_double = true,
+                0x05 => has_float = true,
+                0x04 => has_long = true,
+                _ => {}
+            }
+        }
+        if has_double {
+            0x06 // TAG_Double
+        } else if has_float {
+            0x05 // TAG_Float
+        } else if has_long {
+            0x04 // TAG_Long
+        } else {
+            0x03 // TAG_Int
+        }
+    } else {
+        let all_bools = arr.iter().all(|v| v.is_boolean());
+        if all_bools {
+            0x01 // TAG_Byte
+        } else {
+            get_tag_type(&arr[0])
+        }
+    }
+}
+
+fn write_tag_payload_with_type(
+    writer: &mut Vec<u8>,
+    parent: &str,
+    value: &Value,
+    expected_type: u8,
+) -> io::Result<()> {
+    match expected_type {
+        0x01 => {
+            // TAG_Byte
+            let val = match value {
+                Value::Bool(b) => if *b { 1 } else { 0 },
+                Value::Number(n) => n.as_i64().unwrap_or(0) as i8,
+                _ => 0,
+            };
+            writer.push(val as u8);
+        }
+        0x03 => {
+            // TAG_Int
+            let val = match value {
+                Value::Number(n) => n.as_i64().unwrap_or(0) as i32,
+                Value::Bool(b) => if *b { 1 } else { 0 },
+                _ => 0,
+            };
+            writer.write_all(&val.to_be_bytes())?;
+        }
+        0x04 => {
+            // TAG_Long
+            let val = match value {
+                Value::Number(n) => n.as_i64().unwrap_or(0),
+                Value::Bool(b) => if *b { 1 } else { 0 },
+                _ => 0,
+            };
+            writer.write_all(&val.to_be_bytes())?;
+        }
+        0x05 => {
+            // TAG_Float
+            let val = match value {
+                Value::Number(n) => n.as_f64().unwrap_or(0.0) as f32,
+                Value::Bool(b) => if *b { 1.0 } else { 0.0 },
+                _ => 0.0,
+            };
+            writer.write_all(&val.to_be_bytes())?;
+        }
+        0x06 => {
+            // TAG_Double
+            let val = match value {
+                Value::Number(n) => n.as_f64().unwrap_or(0.0),
+                Value::Bool(b) => if *b { 1.0 } else { 0.0 },
+                _ => 0.0,
+            };
+            writer.write_all(&val.to_be_bytes())?;
+        }
+        0x08 => {
+            // TAG_String
+            let s = match value {
+                Value::String(s) => s.as_str(),
+                _ => "",
+            };
+            writer.write_all(&(s.len() as u16).to_be_bytes())?;
+            writer.write_all(s.as_bytes())?;
+        }
+        0x09 => {
+            if let Value::Array(sub_arr) = value {
+                if sub_arr.is_empty() {
+                    writer.push(0x00);
+                    writer.write_all(&0i32.to_be_bytes())?;
+                } else {
+                    let sub_elem_type = get_unified_array_type(sub_arr);
+                    writer.push(sub_elem_type);
+                    writer.write_all(&(sub_arr.len() as i32).to_be_bytes())?;
+                    for item in sub_arr {
+                        write_tag_payload_with_type(writer, parent, item, sub_elem_type)?;
+                    }
+                }
+            } else {
+                writer.push(0x00);
+                writer.write_all(&0i32.to_be_bytes())?;
+            }
+        }
+        0x0A => {
+            write_compound_payload(writer, parent, value)?;
+        }
+        _ => {
+            write_tag_payload(writer, parent, value)?;
+        }
+    }
+    Ok(())
+}
+
 fn write_tag_payload(writer: &mut Vec<u8>, parent: &str, value: &Value) -> io::Result<()> {
     match value {
         Value::Bool(b) => {
@@ -109,11 +236,11 @@ fn write_tag_payload(writer: &mut Vec<u8>, parent: &str, value: &Value) -> io::R
                 writer.push(0x00); // TAG_End type for empty list
                 writer.write_all(&0i32.to_be_bytes())?;
             } else {
-                let elem_type = get_tag_type(&arr[0]);
+                let elem_type = get_unified_array_type(arr);
                 writer.push(elem_type);
                 writer.write_all(&(arr.len() as i32).to_be_bytes())?;
                 for item in arr {
-                    write_tag_payload(writer, parent, item)?;
+                    write_tag_payload_with_type(writer, parent, item, elem_type)?;
                 }
             }
         }
@@ -309,5 +436,28 @@ mod tests {
         let value = json!({});
         let nbt = json_to_nbt(&value).unwrap();
         assert_eq!(nbt, vec![0x00], "Empty compound should be just TAG_End");
+    }
+
+    #[test]
+    fn test_ambient_light_is_coerced_to_float() {
+        let value = json!({"ambient_light": 0});
+        let nbt = json_to_nbt(&value).unwrap();
+        let name = b"ambient_light";
+        let pos = nbt.windows(name.len()).position(|w| w == name).unwrap();
+        assert_eq!(nbt[pos - 2 - 1], 0x05); // TAG_Float
+    }
+
+    #[test]
+    fn test_array_mixed_floats_coerced_to_double() {
+        let value = json!({"values": [1.2, 1.75, 2.2]});
+        let nbt = json_to_nbt(&value).unwrap();
+        let name = b"values";
+        let pos = nbt.windows(name.len()).position(|w| w == name).unwrap();
+        assert_eq!(nbt[pos - 2 - 1], 0x09); // TAG_List
+        let list_payload_start = pos + name.len();
+        assert_eq!(nbt[list_payload_start], 0x06); // elem_type: TAG_Double
+        assert_eq!(&nbt[list_payload_start + 1..list_payload_start + 5], &3i32.to_be_bytes());
+        let values_start = list_payload_start + 5;
+        assert_eq!(nbt.len() - 1 - values_start, 24); // 24 bytes of double payload + 1 byte TAG_End
     }
 }
