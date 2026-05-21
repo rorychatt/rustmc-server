@@ -12,6 +12,7 @@ pub struct TestServer {
 }
 
 impl TestServer {
+    #[allow(dead_code)]
     pub async fn spawn() -> anyhow::Result<Self> {
         Self::spawn_with_ops(None).await
     }
