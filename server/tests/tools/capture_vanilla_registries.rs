@@ -30,6 +30,7 @@ use std::io;
 use std::net::TcpStream;
 
 use rustmc_server::protocol::packet::{Packet, PacketReader, PacketWriter};
+use rustmc_server::registry::nbt_encoder::json_to_nbt;
 use rustmc_server::registry::ALL_REGISTRY_IDS;
 
 const PROTOCOL_VERSION: i32 = 775;
@@ -48,6 +49,8 @@ const BOOL_BYTE_FIELDS: &[&str] = &[
     "respawn_anchor_works",
     "ultrawarm",
 ];
+
+type RegistryEntry = (String, Option<Vec<u8>>);
 
 fn write_varint(buf: &mut Vec<u8>, mut value: i32) {
     loop {
@@ -602,7 +605,9 @@ fn parse_registry_data_packet_full(data: &[u8]) -> io::Result<(String, Vec<serde
     Ok((registry_id, entries))
 }
 
-fn parse_registry_data_packet(data: &[u8]) -> io::Result<(String, Vec<String>)> {
+fn parse_registry_data_packet(
+    data: &[u8],
+) -> io::Result<(String, Vec<RegistryEntry>)> {
     let mut offset = 0;
     let registry_id = read_string_from_buf(data, &mut offset)?;
     let entry_count = read_varint_from_buf(data, &mut offset)? as usize;
@@ -610,17 +615,23 @@ fn parse_registry_data_packet(data: &[u8]) -> io::Result<(String, Vec<String>)> 
 
     for _ in 0..entry_count {
         let entry_id = read_string_from_buf(data, &mut offset)?;
-        entries.push(entry_id);
 
         if offset >= data.len() {
+            entries.push((entry_id, None));
             break;
         }
         let has_data = data[offset] != 0;
         offset += 1;
 
-        if has_data {
+        let nbt_bytes = if has_data {
+            let start = offset;
             skip_nbt(data, &mut offset)?;
-        }
+            Some(data[start..offset].to_vec())
+        } else {
+            None
+        };
+
+        entries.push((entry_id, nbt_bytes));
     }
 
     Ok((registry_id, entries))
@@ -656,7 +667,7 @@ fn capture_vanilla_registry_ordering() {
     login_data.extend_from_slice(&[0u8; 16]); // UUID (all zeros for offline)
     writer.write_packet(&Packet::new(0x00, login_data)).unwrap();
 
-    let mut registries: HashMap<String, Vec<String>> = HashMap::new();
+    let mut registries: HashMap<String, Vec<RegistryEntry>> = HashMap::new();
 
     // Read packets until we get all registry data
     loop {
@@ -714,16 +725,40 @@ fn capture_vanilla_registry_ordering() {
                 .iter()
                 .map(|e| e["id"].as_str().unwrap().to_string())
                 .collect();
-            entries.retain(|id| our_ids.contains(id));
+            entries.retain(|(id, _)| our_ids.contains(id));
         }
     }
 
-    // Write to snapshot file
-    let json = serde_json::to_string_pretty(&registries).unwrap();
-    let output_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    // Write ordering snapshot (IDs only, for backward compatibility)
+    let order_map: HashMap<&str, Vec<&str>> = registries
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.iter().map(|(id, _)| id.as_str()).collect()))
+        .collect();
+    let order_json = serde_json::to_string_pretty(&order_map).unwrap();
+    let order_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/data/vanilla_registry_order.json");
-    std::fs::write(&output_path, json).unwrap();
-    println!("Written registry ordering to {}", output_path.display());
+    std::fs::write(&order_path, order_json).unwrap();
+    println!("Written registry ordering to {}", order_path.display());
+
+    // Write full NBT data snapshot
+    let mut data_map: HashMap<&str, Vec<serde_json::Value>> = HashMap::new();
+    for (reg_id, entries) in &registries {
+        let entry_list: Vec<serde_json::Value> = entries
+            .iter()
+            .map(|(id, nbt)| {
+                serde_json::json!({
+                    "id": id,
+                    "nbt_hex": nbt.as_ref().map(hex::encode).unwrap_or_default()
+                })
+            })
+            .collect();
+        data_map.insert(reg_id.as_str(), entry_list);
+    }
+    let data_json = serde_json::to_string_pretty(&data_map).unwrap();
+    let data_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/data/vanilla_registry_data.json");
+    std::fs::write(&data_path, data_json).unwrap();
+    println!("Written registry NBT data to {}", data_path.display());
 }
 
 fn registry_to_file_mapping() -> HashMap<&'static str, &'static str> {
@@ -929,10 +964,137 @@ fn reorder_registry_files_to_match_vanilla() {
     }
 }
 
+#[test]
+#[ignore]
+fn validate_registry_nbt_data() {
+    let snapshot_str = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/data/vanilla_registry_data.json"),
+    )
+    .expect("vanilla_registry_data.json not found — run capture_vanilla_registry_ordering first");
+
+    let snapshot: HashMap<String, Vec<serde_json::Value>> =
+        serde_json::from_str(&snapshot_str).unwrap();
+
+    let data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data/registries/v775");
+    let registry_to_file = registry_to_file_mapping();
+
+    let mut mismatches = Vec::new();
+    let mut missing_in_ours = Vec::new();
+    let mut extra_in_ours = Vec::new();
+
+    for (registry_id, vanilla_entries) in &snapshot {
+        let Some(&filename) = registry_to_file.get(registry_id.as_str()) else {
+            println!("Skipping {registry_id}: no file mapping");
+            continue;
+        };
+
+        let file_path = data_dir.join(filename);
+        let content = std::fs::read_to_string(&file_path).unwrap();
+        let our_entries: Vec<serde_json::Value> = serde_json::from_str(&content).unwrap();
+
+        let vanilla_ids: Vec<&str> = vanilla_entries
+            .iter()
+            .map(|e| e["id"].as_str().unwrap())
+            .collect();
+        let our_ids: Vec<&str> = our_entries
+            .iter()
+            .map(|e| e["id"].as_str().unwrap())
+            .collect();
+
+        // Check for entries vanilla has that we don't
+        for &vid in &vanilla_ids {
+            if !our_ids.contains(&vid) {
+                missing_in_ours.push(format!("{registry_id}/{vid}"));
+            }
+        }
+
+        // Check for entries we have that vanilla doesn't
+        for &oid in &our_ids {
+            if !vanilla_ids.contains(&oid) {
+                extra_in_ours.push(format!("{registry_id}/{oid}"));
+            }
+        }
+
+        // Compare NBT data for entries present in both
+        for vanilla_entry in vanilla_entries {
+            let entry_id = vanilla_entry["id"].as_str().unwrap();
+            let nbt_hex = vanilla_entry["nbt_hex"].as_str().unwrap_or("");
+
+            if nbt_hex.is_empty() {
+                continue;
+            }
+
+            let vanilla_nbt = hex::decode(nbt_hex).unwrap();
+
+            let Some(our_entry) = our_entries.iter().find(|e| e["id"].as_str() == Some(entry_id))
+            else {
+                continue;
+            };
+
+            if let Some(data) = our_entry.get("data") {
+                match json_to_nbt(data) {
+                    Ok(our_nbt) => {
+                        if our_nbt != vanilla_nbt {
+                            mismatches.push(format!(
+                                "{registry_id}/{entry_id}:\n  vanilla: {}\n  ours:    {}",
+                                hex::encode(&vanilla_nbt),
+                                hex::encode(&our_nbt),
+                            ));
+                        }
+                    }
+                    Err(e) => {
+                        mismatches.push(format!(
+                            "{registry_id}/{entry_id}: NBT encoding error: {e}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    if !missing_in_ours.is_empty() {
+        println!(
+            "\nWARNING: Entries in vanilla but not in ours ({}):",
+            missing_in_ours.len()
+        );
+        for id in &missing_in_ours {
+            println!("  - {id}");
+        }
+    }
+
+    if !extra_in_ours.is_empty() {
+        println!(
+            "\nERROR: Entries in ours but not in vanilla ({}):",
+            extra_in_ours.len()
+        );
+        for id in &extra_in_ours {
+            println!("  - {id}");
+        }
+    }
+
+    if !mismatches.is_empty() {
+        println!("\nNBT mismatches ({}):", mismatches.len());
+        for m in &mismatches {
+            println!("  {m}");
+        }
+    }
+
+    assert!(
+        extra_in_ours.is_empty(),
+        "We have {} entries that vanilla doesn't have",
+        extra_in_ours.len()
+    );
+    assert!(
+        mismatches.is_empty(),
+        "{} NBT data mismatches detected",
+        mismatches.len()
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rustmc_server::registry::nbt_encoder::json_to_nbt;
     use serde_json::json;
 
     fn build_nbt_compound(fields: &[(&str, u8, &[u8])]) -> Vec<u8> {

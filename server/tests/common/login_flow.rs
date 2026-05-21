@@ -6,7 +6,7 @@ use packet_ids::configuration::clientbound as config_cb;
 use packet_ids::play::clientbound as play_cb;
 
 #[allow(dead_code)]
-pub async fn try_complete_login_flow_with_uuid(
+pub async fn try_complete_login_config_phase(
     client: &mut TestClient,
     username: &str,
     uuid: Uuid,
@@ -33,6 +33,17 @@ pub async fn try_complete_login_flow_with_uuid(
     }
 
     client.send_acknowledge_finish_configuration().await?;
+
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub async fn try_complete_login_flow_with_uuid(
+    client: &mut TestClient,
+    username: &str,
+    uuid: Uuid,
+) -> anyhow::Result<()> {
+    try_complete_login_config_phase(client, username, uuid).await?;
 
     loop {
         let packet = client.read_packet().await?;
