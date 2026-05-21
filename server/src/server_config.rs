@@ -373,6 +373,7 @@ impl ServerConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::thread;
     use std::time::Duration;
 
@@ -431,6 +432,7 @@ bind = "0.0.0.0:25567"
     }
 
     #[test]
+    #[serial]
     fn test_has_file_changed_false_when_unchanged() {
         let dir = std::env::temp_dir().join("rustmc_config_test_unchanged");
         std::fs::create_dir_all(&dir).unwrap();
@@ -452,6 +454,7 @@ invalid_packet_threshold = 8
     }
 
     #[test]
+    #[serial]
     fn test_has_file_changed_true_after_write() {
         let dir = std::env::temp_dir().join("rustmc_config_test_changed");
         std::fs::create_dir_all(&dir).unwrap();
@@ -606,6 +609,7 @@ gameplay:
     }
 
     #[test]
+    #[serial]
     fn test_port_file_returns_none_when_unset() {
         std::env::remove_var("RUSTMC_PORT_FILE");
         let config = ServerConfig::default();
@@ -613,6 +617,7 @@ gameplay:
     }
 
     #[test]
+    #[serial]
     fn test_port_file_returns_config_value() {
         std::env::remove_var("RUSTMC_PORT_FILE");
         let mut config = ServerConfig::default();
@@ -621,6 +626,7 @@ gameplay:
     }
 
     #[test]
+    #[serial]
     fn test_port_file_falls_back_to_env_var() {
         let config = ServerConfig::default();
         std::env::set_var("RUSTMC_PORT_FILE", "/tmp/env_port");
@@ -629,6 +635,7 @@ gameplay:
     }
 
     #[test]
+    #[serial]
     fn test_port_file_config_takes_precedence_over_env() {
         std::env::set_var("RUSTMC_PORT_FILE", "/tmp/env_port");
         let mut config = ServerConfig::default();
