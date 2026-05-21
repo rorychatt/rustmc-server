@@ -1,47 +1,5 @@
 [
-  {
-    "id": "minecraft:cold",
-    "data": {
-      "asset_id": "minecraft:entity/pig/pig_cold",
-      "baby_asset_id": "minecraft:entity/pig/pig_cold_baby",
-      "model": "cold",
-      "spawn_conditions": [
-        {
-          "condition": {
-            "type": "minecraft:biome",
-            "biomes": "#minecraft:spawns_cold_variant_farm_animals"
-          },
-          "priority": 1
-        }
-      ]
-    }
-  },
-  {
-    "id": "minecraft:temperate",
-    "data": {
-      "asset_id": "minecraft:entity/pig/pig_temperate",
-      "baby_asset_id": "minecraft:entity/pig/pig_temperate_baby",
-      "spawn_conditions": [
-        {
-          "priority": 0
-        }
-      ]
-    }
-  },
-  {
-    "id": "minecraft:warm",
-    "data": {
-      "asset_id": "minecraft:entity/pig/pig_warm",
-      "baby_asset_id": "minecraft:entity/pig/pig_warm_baby",
-      "spawn_conditions": [
-        {
-          "condition": {
-            "type": "minecraft:biome",
-            "biomes": "#minecraft:spawns_warm_variant_farm_animals"
-          },
-          "priority": 1
-        }
-      ]
-    }
-  }
+  {"id":"minecraft:cold","data":{"baby_asset_id":"minecraft:entity/pig/pig_cold_baby","model":"cold","asset_id":"minecraft:entity/pig/pig_cold"}},
+  {"id":"minecraft:temperate","data":{"baby_asset_id":"minecraft:entity/pig/pig_temperate_baby","asset_id":"minecraft:entity/pig/pig_temperate"}},
+  {"id":"minecraft:warm","data":{"baby_asset_id":"minecraft:entity/pig/pig_warm_baby","asset_id":"minecraft:entity/pig/pig_warm"}}
 ]

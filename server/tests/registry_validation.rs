@@ -6,7 +6,7 @@ use rustmc_server::registry;
 const EXPECTED_COUNTS: &[(&str, usize)] = &[
     ("minecraft:dimension_type", 4),
     ("minecraft:worldgen/biome", 65),
-    ("minecraft:damage_type", 49),
+    ("minecraft:damage_type", 50),
     ("minecraft:painting_variant", 51),
     ("minecraft:wolf_variant", 9),
     ("minecraft:chat_type", 7),
@@ -14,7 +14,7 @@ const EXPECTED_COUNTS: &[(&str, usize)] = &[
     ("minecraft:trim_pattern", 18),
     ("minecraft:banner_pattern", 43),
     ("minecraft:enchantment", 43),
-    ("minecraft:jukebox_song", 19),
+    ("minecraft:jukebox_song", 21),
     ("minecraft:instrument", 8),
     ("minecraft:cat_variant", 11),
     ("minecraft:pig_sound_variant", 3),
@@ -27,11 +27,11 @@ const EXPECTED_COUNTS: &[(&str, usize)] = &[
     ("minecraft:chicken_variant", 3),
     ("minecraft:chicken_sound_variant", 2),
     ("minecraft:cow_variant", 3),
-    ("minecraft:dialog", 0),
-    ("minecraft:world_clock", 0),
-    ("minecraft:timeline", 0),
-    ("minecraft:test_environment", 0),
-    ("minecraft:test_instance", 0),
+    ("minecraft:dialog", 3),
+    ("minecraft:world_clock", 2),
+    ("minecraft:timeline", 4),
+    ("minecraft:test_environment", 1),
+    ("minecraft:test_instance", 1),
 ];
 
 #[test]

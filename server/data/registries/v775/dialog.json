@@ -1,1 +1,5 @@
-[]
+[
+  {"id":"minecraft:custom_options","data":{"external_title":{"translate":"menu.custom_options"},"button_width":310,"columns":1,"exit_action":{"width":200,"label":{"translate":"gui.back"}},"title":{"translate":"menu.custom_options.title"},"type":"minecraft:dialog_list","dialogs":"#minecraft:pause_screen_additions"}},
+  {"id":"minecraft:quick_actions","data":{"external_title":{"translate":"menu.quick_actions"},"button_width":310,"columns":1,"exit_action":{"width":200,"label":{"translate":"gui.back"}},"title":{"translate":"menu.quick_actions.title"},"type":"minecraft:dialog_list","dialogs":"#minecraft:quick_actions"}},
+  {"id":"minecraft:server_links","data":{"external_title":{"translate":"menu.server_links"},"button_width":310,"columns":1,"exit_action":{"width":200,"label":{"translate":"gui.back"}},"title":{"translate":"menu.server_links.title"},"type":"minecraft:server_links"}}
+]

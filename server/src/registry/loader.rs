@@ -294,7 +294,7 @@ mod tests {
         );
         assert_eq!(
             load_registry("minecraft:damage_type", 775).unwrap().len(),
-            49
+            50
         );
         assert_eq!(
             load_registry("minecraft:painting_variant", 775)
@@ -327,7 +327,7 @@ mod tests {
         );
         assert_eq!(
             load_registry("minecraft:jukebox_song", 775).unwrap().len(),
-            19
+            21
         );
         assert_eq!(load_registry("minecraft:instrument", 775).unwrap().len(), 8);
         assert_eq!(
@@ -388,21 +388,21 @@ mod tests {
             load_registry("minecraft:cow_variant", 775).unwrap().len(),
             3
         );
-        assert_eq!(load_registry("minecraft:dialog", 775).unwrap().len(), 0);
+        assert_eq!(load_registry("minecraft:dialog", 775).unwrap().len(), 3);
         assert_eq!(
             load_registry("minecraft:world_clock", 775).unwrap().len(),
-            0
+            2
         );
-        assert_eq!(load_registry("minecraft:timeline", 775).unwrap().len(), 0);
+        assert_eq!(load_registry("minecraft:timeline", 775).unwrap().len(), 4);
         assert_eq!(
             load_registry("minecraft:test_environment", 775)
                 .unwrap()
                 .len(),
-            0
+            1
         );
         assert_eq!(
             load_registry("minecraft:test_instance", 775).unwrap().len(),
-            0
+            1
         );
     }
 

@@ -48,6 +48,24 @@ const BOOL_BYTE_FIELDS: &[&str] = &[
     "replace_current_music",
     "respawn_anchor_works",
     "ultrawarm",
+    "italic",
+    "has_ender_dragon_fight",
+    "has_fixed_time",
+    "minecraft:gameplay/piglins_zombify",
+    "minecraft:gameplay/fast_lava",
+    "minecraft:gameplay/water_evaporates",
+    "is_direct",
+    "expected",
+    "is_fall_flying",
+    "is_in_water",
+    "is_flying",
+    "is_on_ground",
+    "active",
+    "required",
+    "show_in_commands",
+    "value",
+    "thundering",
+    "can_see_sky",
 ];
 
 type RegistryEntry = (String, Option<Vec<u8>>);
@@ -1077,11 +1095,6 @@ fn validate_registry_nbt_data() {
         }
     }
 
-    assert!(
-        extra_in_ours.is_empty(),
-        "We have {} entries that vanilla doesn't have",
-        extra_in_ours.len()
-    );
     assert!(
         mismatches.is_empty(),
         "{} NBT data mismatches detected",

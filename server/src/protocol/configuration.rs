@@ -71,116 +71,24 @@ pub fn encode_registry_data(registry_id: &str, entries: &[RegistryEntry]) -> io:
 pub fn encode_update_tags() -> io::Result<Packet> {
     let mut data = Vec::new();
     
-    // We send tags for 2 registries: minecraft:enchantment and minecraft:worldgen/biome
-    VarInt(2).write(&mut data)?;
+    static TAGS_MAP: std::sync::LazyLock<
+        std::collections::BTreeMap<String, std::collections::BTreeMap<String, Vec<i32>>>,
+    > = std::sync::LazyLock::new(|| {
+        let tags_str = include_str!("../../data/registries/v775/tags.json");
+        serde_json::from_str(tags_str).expect("Failed to parse tags.json")
+    });
 
-    // 1. minecraft:enchantment
-    write_string(&mut data, "minecraft:enchantment")?;
-    
-    // Load enchantments to map ids to indices
-    let enchantments = crate::registry::load_current("minecraft:enchantment")?;
-    let get_enchantment_id = |id: &str| -> i32 {
-        enchantments.iter().position(|e| e.id == id).map(|pos| pos as i32).unwrap_or(-1)
-    };
+    VarInt(TAGS_MAP.len() as i32).write(&mut data)?;
 
-    // We have 7 enchantment tags
-    VarInt(7).write(&mut data)?;
-
-    let enchantment_tags: &[(&str, &[&str])] = &[
-        ("minecraft:exclusive_set/damage", &[
-            "minecraft:bane_of_arthropods",
-            "minecraft:breach",
-            "minecraft:density",
-            "minecraft:impaling",
-            "minecraft:sharpness",
-            "minecraft:smite",
-        ]),
-        ("minecraft:exclusive_set/armor", &[
-            "minecraft:blast_protection",
-            "minecraft:fire_protection",
-            "minecraft:projectile_protection",
-            "minecraft:protection",
-        ]),
-        ("minecraft:exclusive_set/boots", &[
-            "minecraft:depth_strider",
-            "minecraft:frost_walker",
-        ]),
-        ("minecraft:exclusive_set/bow", &[
-            "minecraft:infinity",
-        ]),
-        ("minecraft:exclusive_set/crossbow", &[
-            "minecraft:multishot",
-            "minecraft:piercing",
-        ]),
-        ("minecraft:exclusive_set/mining", &[
-            "minecraft:fortune",
-            "minecraft:silk_touch",
-        ]),
-        ("minecraft:exclusive_set/riptide", &[
-            "minecraft:riptide",
-        ]),
-    ];
-
-    for &(tag_name, members) in enchantment_tags {
-        write_string(&mut data, tag_name)?;
-        
-        let mut member_ids = Vec::new();
-        for &m in members {
-            let idx = get_enchantment_id(m);
-            if idx != -1 {
-                member_ids.push(idx);
+    for (registry_id, tags) in TAGS_MAP.iter() {
+        write_string(&mut data, registry_id)?;
+        VarInt(tags.len() as i32).write(&mut data)?;
+        for (tag_name, members) in tags {
+            write_string(&mut data, tag_name)?;
+            VarInt(members.len() as i32).write(&mut data)?;
+            for &id in members {
+                VarInt(id).write(&mut data)?;
             }
-        }
-        
-        VarInt(member_ids.len() as i32).write(&mut data)?;
-        for &id in &member_ids {
-            VarInt(id).write(&mut data)?;
-        }
-    }
-
-    // 2. minecraft:worldgen/biome
-    write_string(&mut data, "minecraft:worldgen/biome")?;
-
-    let biomes = crate::registry::load_current("minecraft:worldgen/biome")?;
-    let get_biome_id = |id: &str| -> i32 {
-        biomes.iter().position(|e| e.id == id).map(|pos| pos as i32).unwrap_or(-1)
-    };
-
-    // We have 3 biome tags
-    VarInt(3).write(&mut data)?;
-
-    let biome_tags: &[(&str, &[&str])] = &[
-        ("minecraft:is_jungle", &[
-            "minecraft:jungle",
-            "minecraft:sparse_jungle",
-            "minecraft:bamboo_jungle",
-        ]),
-        ("minecraft:is_savanna", &[
-            "minecraft:savanna",
-            "minecraft:savanna_plateau",
-            "minecraft:windswept_savanna",
-        ]),
-        ("minecraft:is_badlands", &[
-            "minecraft:badlands",
-            "minecraft:wooded_badlands",
-            "minecraft:eroded_badlands",
-        ]),
-    ];
-
-    for &(tag_name, members) in biome_tags {
-        write_string(&mut data, tag_name)?;
-        
-        let mut member_ids = Vec::new();
-        for &m in members {
-            let idx = get_biome_id(m);
-            if idx != -1 {
-                member_ids.push(idx);
-            }
-        }
-        
-        VarInt(member_ids.len() as i32).write(&mut data)?;
-        for &id in &member_ids {
-            VarInt(id).write(&mut data)?;
         }
     }
 

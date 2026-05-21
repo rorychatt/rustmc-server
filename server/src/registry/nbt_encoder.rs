@@ -23,10 +23,24 @@ const DOUBLE_FIELDS: &[(&str, &str)] = &[
     ("", "coordinate_scale"),
 ];
 
-fn is_float_field(parent: &str, name: &str) -> bool {
+fn get_parent_and_grandparent(path: &str) -> (&str, &str) {
+    let parts: Vec<&str> = path.split('/').collect();
+    let parent = parts.last().copied().unwrap_or("");
+    let grandparent = if parts.len() >= 2 {
+        parts[parts.len() - 2]
+    } else {
+        ""
+    };
+    (parent, grandparent)
+}
+
+fn is_float_field(parent_path: &str, name: &str) -> bool {
+    let (parent, grandparent) = get_parent_and_grandparent(parent_path);
+
     if name == "base" || name == "per_level_above_first" {
         return parent != "min_cost" && parent != "max_cost";
     }
+
     if name == "volume"
         || name == "pitch"
         || name == "speed"
@@ -35,20 +49,93 @@ fn is_float_field(parent: &str, name: &str) -> bool {
         || name == "duration"
         || name == "radius"
         || name == "values"
+        || name == "exhaustion"
+        || name == "charge"
+        || name == "energy_budget"
+        || name == "probability"
+        || name == "max_amplifier"
+        || name == "min_amplifier"
+        || name == "min_duration"
+        || name == "max_duration"
+        || name == "max_damage"
+        || name == "min_damage"
+        || name == "temperature"
+        || name == "downfall"
+        || name == "creature_spawn_probability"
+        || name == "ambient_light"
+        || name == "chance"
+        || name == "minecraft:gameplay/sky_light_level"
+        || name == "minecraft:visual/cloud_height"
+        || name == "minecraft:visual/fog_end_distance"
+        || name == "minecraft:visual/fog_start_distance"
+        || name == "minecraft:visual/sky_light_factor"
     {
         return true;
     }
-    if name == "offset" {
-        return parent == "mood_sound" || parent == "vertical_position" || parent == "effects";
+
+    if name == "height" {
+        return parent == "effect";
     }
+
+    if name == "offset" {
+        return parent == "vertical_position" || parent == "effects" || parent == "mood_sound";
+    }
+
+    if name == "value" {
+        if parent == "effect" {
+            return true;
+        }
+        if parent == "keyframes" {
+            return grandparent == "cat_waking_up_gift_chance"
+                || grandparent == "sky_light_level"
+                || grandparent == "turtle_egg_hatch_chance"
+                || grandparent == "moon_angle"
+                || grandparent == "sky_light_factor"
+                || grandparent == "star_angle"
+                || grandparent == "star_brightness"
+                || grandparent == "sun_angle"
+                || grandparent == "surface_slime_spawn_chance"
+                || grandparent == "minecraft:gameplay/cat_waking_up_gift_chance"
+                || grandparent == "minecraft:gameplay/sky_light_level"
+                || grandparent == "minecraft:gameplay/turtle_egg_hatch_chance"
+                || grandparent == "minecraft:visual/moon_angle"
+                || grandparent == "minecraft:visual/sky_light_factor"
+                || grandparent == "minecraft:visual/star_angle"
+                || grandparent == "minecraft:visual/star_brightness"
+                || grandparent == "minecraft:visual/sun_angle"
+                || grandparent == "minecraft:gameplay/surface_slime_spawn_chance";
+        }
+    }
+
+    if name == "min" || name == "max" {
+        return parent == "radius"
+            || parent == "range"
+            || parent == "height";
+    }
+
     FLOAT_FIELDS.contains(&(parent, name))
 }
 
-fn is_double_field(parent: &str, name: &str) -> bool {
+fn is_double_field(parent_path: &str, name: &str) -> bool {
+    let (parent, _) = get_parent_and_grandparent(parent_path);
+    if name == "tick_chance" {
+        return true;
+    }
+    if name == "offset" && parent == "mood" {
+        return true;
+    }
+    if name == "coordinate_scale" || name == "direction" {
+        return true;
+    }
+    if name == "min" || name == "max" {
+        if parent == "fall_distance" || parent == "horizontal_speed" {
+            return true;
+        }
+    }
     DOUBLE_FIELDS.contains(&(parent, name))
 }
 
-fn is_long_field(_parent: &str, name: &str) -> bool {
+fn is_long_field(_parent_path: &str, name: &str) -> bool {
     name == "fixed_time"
 }
 
@@ -69,10 +156,10 @@ pub fn json_to_nbt(value: &Value) -> io::Result<Vec<u8>> {
     Ok(data)
 }
 
-fn write_compound_payload(writer: &mut Vec<u8>, parent: &str, value: &Value) -> io::Result<()> {
+fn write_compound_payload(writer: &mut Vec<u8>, parent_path: &str, value: &Value) -> io::Result<()> {
     if let Value::Object(map) = value {
         for (key, val) in map {
-            write_named_tag(writer, parent, key, val)?;
+            write_named_tag(writer, parent_path, key, val)?;
         }
         writer.push(0x00); // TAG_End
     }
@@ -81,28 +168,33 @@ fn write_compound_payload(writer: &mut Vec<u8>, parent: &str, value: &Value) -> 
 
 fn write_named_tag(
     writer: &mut Vec<u8>,
-    parent: &str,
+    parent_path: &str,
     name: &str,
     value: &Value,
 ) -> io::Result<()> {
-    let tag_type = get_tag_type_for_field(parent, name, value);
+    let tag_type = get_tag_type_for_field(parent_path, name, value);
     writer.push(tag_type);
     writer.write_all(&(name.len() as u16).to_be_bytes())?;
     writer.write_all(name.as_bytes())?;
-    write_tag_payload_for_field(writer, parent, name, value)?;
+    write_tag_payload_for_field(writer, parent_path, name, value)?;
     Ok(())
 }
 
-fn get_tag_type_for_field(parent: &str, name: &str, value: &Value) -> u8 {
+fn get_tag_type_for_field(parent_path: &str, name: &str, value: &Value) -> u8 {
     if let Value::Number(_) = value {
-        if is_float_field(parent, name) {
+        if is_float_field(parent_path, name) {
             return 0x05; // TAG_Float
         }
-        if is_double_field(parent, name) {
+        if is_double_field(parent_path, name) {
             return 0x06; // TAG_Double
         }
-        if is_long_field(parent, name) {
+        if is_long_field(parent_path, name) {
             return 0x04; // TAG_Long
+        }
+    }
+    if let Value::Array(arr) = value {
+        if name == "offset" && arr.iter().all(|v| v.is_i64() || v.is_u64()) {
+            return 0x0B; // TAG_Int_Array
         }
     }
     get_tag_type(value)
@@ -110,41 +202,52 @@ fn get_tag_type_for_field(parent: &str, name: &str, value: &Value) -> u8 {
 
 fn write_tag_payload_for_field(
     writer: &mut Vec<u8>,
-    parent: &str,
+    parent_path: &str,
     name: &str,
     value: &Value,
 ) -> io::Result<()> {
+    let tag_type = get_tag_type_for_field(parent_path, name, value);
+    if tag_type == 0x0B {
+        if let Value::Array(arr) = value {
+            writer.write_all(&(arr.len() as i32).to_be_bytes())?;
+            for val in arr {
+                let i = val.as_i64().unwrap_or(0) as i32;
+                writer.write_all(&i.to_be_bytes())?;
+            }
+            return Ok(());
+        }
+    }
     if let Value::Number(n) = value {
-        if is_float_field(parent, name) {
+        if is_float_field(parent_path, name) {
             let f = n.as_f64().unwrap_or(0.0) as f32;
             writer.write_all(&f.to_be_bytes())?;
             return Ok(());
         }
-        if is_double_field(parent, name) {
+        if is_double_field(parent_path, name) {
             let d = n.as_f64().unwrap_or(0.0);
             writer.write_all(&d.to_be_bytes())?;
             return Ok(());
         }
-        if is_long_field(parent, name) {
+        if is_long_field(parent_path, name) {
             let l = n.as_i64().unwrap_or(0);
             writer.write_all(&l.to_be_bytes())?;
             return Ok(());
         }
     }
-    write_tag_payload(writer, parent, name, value)
+    write_tag_payload(writer, parent_path, name, value)
 }
 
-fn get_unified_array_type(parent: &str, name: &str, arr: &[Value]) -> u8 {
+fn get_unified_array_type(parent_path: &str, name: &str, arr: &[Value]) -> u8 {
     if arr.is_empty() {
         return 0x00;
     }
-    if is_float_field(parent, name) {
+    if is_float_field(parent_path, name) {
         return 0x05; // TAG_Float
     }
-    if is_double_field(parent, name) {
+    if is_double_field(parent_path, name) {
         return 0x06; // TAG_Double
     }
-    if is_long_field(parent, name) {
+    if is_long_field(parent_path, name) {
         return 0x04; // TAG_Long
     }
     let all_numbers = arr.iter().all(|v| v.is_number());
@@ -182,7 +285,7 @@ fn get_unified_array_type(parent: &str, name: &str, arr: &[Value]) -> u8 {
 
 fn write_tag_payload_with_type(
     writer: &mut Vec<u8>,
-    parent: &str,
+    parent_path: &str,
     name: &str,
     value: &Value,
     expected_type: u8,
@@ -248,11 +351,11 @@ fn write_tag_payload_with_type(
                     writer.push(0x00);
                     writer.write_all(&0i32.to_be_bytes())?;
                 } else {
-                    let sub_elem_type = get_unified_array_type(parent, name, sub_arr);
+                    let sub_elem_type = get_unified_array_type(parent_path, name, sub_arr);
                     writer.push(sub_elem_type);
                     writer.write_all(&(sub_arr.len() as i32).to_be_bytes())?;
                     for item in sub_arr {
-                        write_tag_payload_with_type(writer, parent, name, item, sub_elem_type)?;
+                        write_tag_payload_with_type(writer, parent_path, name, item, sub_elem_type)?;
                     }
                 }
             } else {
@@ -261,10 +364,27 @@ fn write_tag_payload_with_type(
             }
         }
         0x0A => {
-            write_compound_payload(writer, name, value)?;
+            let next_path = if parent_path.is_empty() {
+                name.to_string()
+            } else {
+                format!("{}/{}", parent_path, name)
+            };
+            write_compound_payload(writer, &next_path, value)?;
+        }
+        0x0B => {
+            // TAG_Int_Array
+            if let Value::Array(arr) = value {
+                writer.write_all(&(arr.len() as i32).to_be_bytes())?;
+                for val in arr {
+                    let i = val.as_i64().unwrap_or(0) as i32;
+                    writer.write_all(&i.to_be_bytes())?;
+                }
+            } else {
+                writer.write_all(&0i32.to_be_bytes())?;
+            }
         }
         _ => {
-            write_tag_payload(writer, parent, name, value)?;
+            write_tag_payload(writer, parent_path, name, value)?;
         }
     }
     Ok(())
@@ -272,7 +392,7 @@ fn write_tag_payload_with_type(
 
 fn write_tag_payload(
     writer: &mut Vec<u8>,
-    parent: &str,
+    parent_path: &str,
     name: &str,
     value: &Value,
 ) -> io::Result<()> {
@@ -281,13 +401,13 @@ fn write_tag_payload(
             writer.push(if *b { 1 } else { 0 });
         }
         Value::Number(n) => {
-            if is_float_field(parent, name) {
+            if is_float_field(parent_path, name) {
                 let f = n.as_f64().unwrap_or(0.0) as f32;
                 writer.write_all(&f.to_be_bytes())?;
-            } else if is_double_field(parent, name) {
+            } else if is_double_field(parent_path, name) {
                 let d = n.as_f64().unwrap_or(0.0);
                 writer.write_all(&d.to_be_bytes())?;
-            } else if is_long_field(parent, name) {
+            } else if is_long_field(parent_path, name) {
                 let l = n.as_i64().unwrap_or(0);
                 writer.write_all(&l.to_be_bytes())?;
             } else if let Some(i) = n.as_i64() {
@@ -313,16 +433,21 @@ fn write_tag_payload(
                 writer.push(0x00); // TAG_End type for empty list
                 writer.write_all(&0i32.to_be_bytes())?;
             } else {
-                let elem_type = get_unified_array_type(parent, name, arr);
+                let elem_type = get_unified_array_type(parent_path, name, arr);
                 writer.push(elem_type);
                 writer.write_all(&(arr.len() as i32).to_be_bytes())?;
                 for item in arr {
-                    write_tag_payload_with_type(writer, parent, name, item, elem_type)?;
+                    write_tag_payload_with_type(writer, parent_path, name, item, elem_type)?;
                 }
             }
         }
         Value::Object(_) => {
-            write_compound_payload(writer, name, value)?;
+            let next_path = if parent_path.is_empty() {
+                name.to_string()
+            } else {
+                format!("{}/{}", parent_path, name)
+            };
+            write_compound_payload(writer, &next_path, value)?;
         }
         Value::Null => {
             writer.push(0x00); // TAG_End for null

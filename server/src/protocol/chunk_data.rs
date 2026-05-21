@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::io::{self, Write};
 
-use crate::protocol::nbt;
 use crate::protocol::packet::Packet;
 use crate::protocol::packet_ids::play::clientbound::LEVEL_CHUNK_WITH_LIGHT;
 use crate::protocol::types::VarInt;
@@ -74,17 +73,13 @@ impl PalettedContainer {
 
         if self.bits_per_entry == 0 {
             VarInt(self.palette[0]).write(writer)?;
-            VarInt(0).write(writer)?;
-        } else if !self.palette.is_empty() {
-            VarInt(self.palette.len() as i32).write(writer)?;
-            for &entry in &self.palette {
-                VarInt(entry).write(writer)?;
-            }
-            VarInt(self.data.len() as i32).write(writer)?;
-            for &val in &self.data {
-                writer.write_all(&val.to_be_bytes())?;
-            }
         } else {
+            if !self.palette.is_empty() {
+                VarInt(self.palette.len() as i32).write(writer)?;
+                for &entry in &self.palette {
+                    VarInt(entry).write(writer)?;
+                }
+            }
             VarInt(self.data.len() as i32).write(writer)?;
             for &val in &self.data {
                 writer.write_all(&val.to_be_bytes())?;
@@ -141,10 +136,24 @@ pub fn encode_chunk_data(chunk: &Chunk) -> io::Result<Packet> {
     let motion_blocking_packed = pack_heightmap(&motion_blocking);
     let world_surface_packed = pack_heightmap(&world_surface);
 
-    nbt::write_unnamed_compound_start(&mut data)?;
-    nbt::write_long_array(&mut data, "MOTION_BLOCKING", &motion_blocking_packed)?;
-    nbt::write_long_array(&mut data, "WORLD_SURFACE", &world_surface_packed)?;
-    nbt::write_compound_end(&mut data)?;
+    // Heightmaps as a Map of Heightmap$Types ordinal to long array
+    // Map size (2)
+    VarInt(2).write(&mut data)?;
+
+    // MOTION_BLOCKING (ordinal 4)
+    VarInt(4).write(&mut data)?;
+    VarInt(motion_blocking_packed.len() as i32).write(&mut data)?;
+    for &val in &motion_blocking_packed {
+        data.extend_from_slice(&val.to_be_bytes());
+    }
+
+    // WORLD_SURFACE (ordinal 1)
+    VarInt(1).write(&mut data)?;
+    VarInt(world_surface_packed.len() as i32).write(&mut data)?;
+    for &val in &world_surface_packed {
+        data.extend_from_slice(&val.to_be_bytes());
+    }
+
 
     let mut chunk_section_data = Vec::new();
 
@@ -159,7 +168,6 @@ pub fn encode_chunk_data(chunk: &Chunk) -> io::Result<Packet> {
         // Biomes: single-value palette (Plains = 1)
         chunk_section_data.push(0); // bits_per_entry = 0
         VarInt(1).write(&mut chunk_section_data)?; // Plains biome ID
-        VarInt(0).write(&mut chunk_section_data)?; // 0 longs
     }
 
     VarInt(chunk_section_data.len() as i32).write(&mut data)?;
@@ -177,9 +185,6 @@ pub fn encode_chunk_data(chunk: &Chunk) -> io::Result<Packet> {
 fn write_light_data(writer: &mut impl Write) -> io::Result<()> {
     let section_count = SECTIONS_PER_CHUNK + 2; // includes above and below
 
-    // Trust edges
-    writer.write_all(&[1])?;
-
     // Sky light mask: all sections present
     let mask_longs = section_count.div_ceil(64);
     VarInt(mask_longs as i32).write(writer)?;
@@ -189,15 +194,13 @@ fn write_light_data(writer: &mut impl Write) -> io::Result<()> {
     }
     writer.write_all(&mask.to_be_bytes())?;
 
-    // Block light mask: none
-    VarInt(mask_longs as i32).write(writer)?;
-    writer.write_all(&0i64.to_be_bytes())?;
+    // Block light mask: none (empty BitSet -> VarInt(0))
+    VarInt(0).write(writer)?;
 
-    // Empty sky light mask: none
-    VarInt(mask_longs as i32).write(writer)?;
-    writer.write_all(&0i64.to_be_bytes())?;
+    // Empty sky light mask: none (empty BitSet -> VarInt(0))
+    VarInt(0).write(writer)?;
 
-    // Empty block light mask: all sections
+    // Empty block light mask: all sections present
     VarInt(mask_longs as i32).write(writer)?;
     writer.write_all(&mask.to_be_bytes())?;
 
@@ -209,7 +212,7 @@ fn write_light_data(writer: &mut impl Write) -> io::Result<()> {
         writer.write_all(&full_light)?;
     }
 
-    // Block light arrays: none (matched by empty block light mask = all)
+    // Block light arrays: none (blockYMask is empty)
     VarInt(0).write(writer)?;
 
     Ok(())
@@ -248,7 +251,9 @@ mod tests {
         container.write(&mut buf).unwrap();
 
         assert_eq!(buf[0], 0); // bits_per_entry = 0
-                               // Next bytes: VarInt for stone ID (1), then VarInt(0) for data length
+        // Next bytes: VarInt for stone ID (1)
+        assert_eq!(buf.len(), 2); // 1 byte for bits_per_entry, 1 byte for VarInt(1)
+        assert_eq!(buf[1], 1);
     }
 
     #[test]
@@ -290,6 +295,61 @@ mod tests {
     }
 
     #[test]
+    fn test_chunk_data_heightmaps_serialization() {
+        let chunk = Chunk::new_flat(ChunkPos::new(0, 0));
+        let packet = encode_chunk_data(&chunk).unwrap();
+        
+        let mut cursor = std::io::Cursor::new(&packet.data[8..]); // skip X and Z
+
+        let read_varint = |c: &mut std::io::Cursor<&[u8]>| -> i32 {
+            let mut val = 0;
+            let mut shift = 0;
+            loop {
+                let mut b = [0u8; 1];
+                std::io::Read::read_exact(c, &mut b).unwrap();
+                val |= ((b[0] & 0x7F) as i32) << shift;
+                if (b[0] & 0x80) == 0 {
+                    break;
+                }
+                shift += 7;
+            }
+            val
+        };
+
+        // Map size
+        let map_size = read_varint(&mut cursor);
+        assert_eq!(map_size, 2);
+
+        // First key: MOTION_BLOCKING (ordinal 4)
+        let key1 = read_varint(&mut cursor);
+        assert_eq!(key1, 4);
+
+        // Long array size (37)
+        let len1 = read_varint(&mut cursor);
+        assert_eq!(len1, 37);
+
+        // Skip 37 longs
+        for _ in 0..37 {
+            let mut b = [0u8; 8];
+            std::io::Read::read_exact(&mut cursor, &mut b).unwrap();
+        }
+
+        // Second key: WORLD_SURFACE (ordinal 1)
+        let key2 = read_varint(&mut cursor);
+        assert_eq!(key2, 1);
+
+        // Long array size (37)
+        let len2 = read_varint(&mut cursor);
+        assert_eq!(len2, 37);
+
+        // Skip 37 longs
+        for _ in 0..37 {
+            let mut b = [0u8; 8];
+            std::io::Read::read_exact(&mut cursor, &mut b).unwrap();
+        }
+    }
+
+    #[test]
     fn test_pack_heightmap() {
         let mut heights = [0u16; 256];
         heights[0] = 128;
@@ -304,5 +364,204 @@ mod tests {
         assert_eq!(val0, 128);
         let val1 = (packed[0] >> 9) & 0x1FF;
         assert_eq!(val1, 64);
+    }
+
+    #[test]
+    fn test_light_data_serialization() {
+        let mut data = Vec::new();
+        write_light_data(&mut data).unwrap();
+
+        let mut cursor = std::io::Cursor::new(data);
+
+        // Helper to read VarInt
+        let read_varint = |c: &mut std::io::Cursor<Vec<u8>>| -> i32 {
+            let mut val = 0;
+            let mut shift = 0;
+            loop {
+                let mut b = [0u8; 1];
+                std::io::Read::read_exact(c, &mut b).unwrap();
+                val |= ((b[0] & 0x7F) as i32) << shift;
+                if (b[0] & 0x80) == 0 {
+                    break;
+                }
+                shift += 7;
+            }
+            val
+        };
+
+        // 1. skyYMask
+        let sky_y_mask_len = read_varint(&mut cursor);
+        assert_eq!(sky_y_mask_len, 1);
+        let mut sky_y_mask_bytes = [0u8; 8];
+        std::io::Read::read_exact(&mut cursor, &mut sky_y_mask_bytes).unwrap();
+        let sky_y_mask = i64::from_be_bytes(sky_y_mask_bytes);
+        let expected_mask = (1i64 << (SECTIONS_PER_CHUNK + 2)) - 1;
+        assert_eq!(sky_y_mask, expected_mask);
+
+        // 2. blockYMask (empty -> VarInt(0))
+        let block_y_mask_len = read_varint(&mut cursor);
+        assert_eq!(block_y_mask_len, 0);
+
+        // 3. emptySkyYMask (empty -> VarInt(0))
+        let empty_sky_y_mask_len = read_varint(&mut cursor);
+        assert_eq!(empty_sky_y_mask_len, 0);
+
+        // 4. emptyBlockYMask
+        let empty_block_y_mask_len = read_varint(&mut cursor);
+        assert_eq!(empty_block_y_mask_len, 1);
+        let mut empty_block_y_mask_bytes = [0u8; 8];
+        std::io::Read::read_exact(&mut cursor, &mut empty_block_y_mask_bytes).unwrap();
+        let empty_block_y_mask = i64::from_be_bytes(empty_block_y_mask_bytes);
+        assert_eq!(empty_block_y_mask, expected_mask);
+
+        // 5. skyUpdates
+        let sky_updates_len = read_varint(&mut cursor);
+        assert_eq!(sky_updates_len, (SECTIONS_PER_CHUNK + 2) as i32);
+        for _ in 0..sky_updates_len {
+            let len = read_varint(&mut cursor);
+            assert_eq!(len, 2048);
+            let mut array = vec![0u8; 2048];
+            std::io::Read::read_exact(&mut cursor, &mut array).unwrap();
+            assert!(array.iter().all(|&b| b == 0xFF));
+        }
+
+        // 6. blockUpdates
+        let block_updates_len = read_varint(&mut cursor);
+        assert_eq!(block_updates_len, 0);
+
+        // Verify we read everything
+        assert_eq!(cursor.position(), cursor.get_ref().len() as u64);
+    }
+
+    #[test]
+    fn test_chunk_section_data_decoding_roundtrip() {
+        let chunk = Chunk::new_normal(ChunkPos::new(0, 0), 42, 63);
+        let packet = encode_chunk_data(&chunk).unwrap();
+
+        let mut cursor = std::io::Cursor::new(&packet.data[8..]); // skip X and Z
+
+        let read_varint = |c: &mut std::io::Cursor<&[u8]>| -> i32 {
+            let mut val = 0;
+            let mut shift = 0;
+            loop {
+                let mut b = [0u8; 1];
+                std::io::Read::read_exact(c, &mut b).unwrap();
+                val |= ((b[0] & 0x7F) as i32) << shift;
+                if (b[0] & 0x80) == 0 {
+                    break;
+                }
+                shift += 7;
+            }
+            val
+        };
+
+        // Read heightmaps
+        let map_size = read_varint(&mut cursor);
+        for _ in 0..map_size {
+            let _key = read_varint(&mut cursor);
+            let len = read_varint(&mut cursor);
+            for _ in 0..len {
+                let mut b = [0u8; 8];
+                std::io::Read::read_exact(&mut cursor, &mut b).unwrap();
+            }
+        }
+
+        // Read section data length
+        let section_data_len = read_varint(&mut cursor) as usize;
+        let mut section_data_bytes = vec![0u8; section_data_len];
+        std::io::Read::read_exact(&mut cursor, &mut section_data_bytes).unwrap();
+
+        let mut section_cursor = std::io::Cursor::new(&section_data_bytes[..]);
+
+        let read_container = |c: &mut std::io::Cursor<&[u8]>, container_name: &str, sec_idx: usize| {
+            let mut b = [0u8; 1];
+            std::io::Read::read_exact(c, &mut b).unwrap();
+            let bits_per_entry = b[0];
+            println!(
+                "Section {}, Container: {}, bits_per_entry: {}",
+                sec_idx, container_name, bits_per_entry
+            );
+
+            if bits_per_entry == 0 {
+                let mut val = 0;
+                let mut shift = 0;
+                loop {
+                    let mut b = [0u8; 1];
+                    std::io::Read::read_exact(c, &mut b).unwrap();
+                    val |= ((b[0] & 0x7F) as i32) << shift;
+                    if (b[0] & 0x80) == 0 {
+                        break;
+                    }
+                    shift += 7;
+                }
+                let single_val = val;
+                
+                println!(
+                    "  Single-value: {}",
+                    single_val
+                );
+            } else {
+                let mut val = 0;
+                let mut shift = 0;
+                loop {
+                    let mut b = [0u8; 1];
+                    std::io::Read::read_exact(c, &mut b).unwrap();
+                    val |= ((b[0] & 0x7F) as i32) << shift;
+                    if (b[0] & 0x80) == 0 {
+                        break;
+                    }
+                    shift += 7;
+                }
+                let palette_len = val;
+                
+                println!("  Palette len: {}", palette_len);
+                for i in 0..palette_len {
+                    let mut val = 0;
+                    let mut shift = 0;
+                    loop {
+                        let mut b = [0u8; 1];
+                        std::io::Read::read_exact(c, &mut b).unwrap();
+                        val |= ((b[0] & 0x7F) as i32) << shift;
+                        if (b[0] & 0x80) == 0 {
+                            break;
+                        }
+                        shift += 7;
+                    }
+                    let p_val = val;
+                    println!("    Palette[{}]: {}", i, p_val);
+                }
+                
+                let mut val = 0;
+                let mut shift = 0;
+                loop {
+                    let mut b = [0u8; 1];
+                    std::io::Read::read_exact(c, &mut b).unwrap();
+                    val |= ((b[0] & 0x7F) as i32) << shift;
+                    if (b[0] & 0x80) == 0 {
+                        break;
+                    }
+                    shift += 7;
+                }
+                let data_len = val;
+                
+                println!("  Data array len: {}", data_len);
+                for _ in 0..data_len {
+                    let mut long_bytes = [0u8; 8];
+                    std::io::Read::read_exact(c, &mut long_bytes).unwrap();
+                }
+            }
+        };
+
+        for sec_idx in 0..SECTIONS_PER_CHUNK {
+            let mut block_count_bytes = [0u8; 2];
+            std::io::Read::read_exact(&mut section_cursor, &mut block_count_bytes).unwrap();
+            let block_count = u16::from_be_bytes(block_count_bytes);
+            println!("Section {}, block_count: {}", sec_idx, block_count);
+
+            read_container(&mut section_cursor, "Blocks", sec_idx);
+            read_container(&mut section_cursor, "Biomes", sec_idx);
+        }
+
+        assert_eq!(section_cursor.position(), section_data_bytes.len() as u64);
     }
 }

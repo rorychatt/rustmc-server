@@ -1,1 +1,4 @@
-[]
+[
+  {"id":"minecraft:overworld","data":{}},
+  {"id":"minecraft:the_end","data":{}}
+]
