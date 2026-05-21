@@ -186,6 +186,7 @@ impl Operators {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
     fn test_operators_empty() {
@@ -248,6 +249,7 @@ level = 4
     }
 
     #[test]
+    #[serial]
     fn test_reload_picks_up_changes() {
         let dir = std::env::temp_dir().join("rustmc_ops_test_reload");
         std::fs::create_dir_all(&dir).unwrap();
