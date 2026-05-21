@@ -23,10 +23,13 @@ use std::io;
 use std::net::TcpStream;
 
 use rustmc_server::protocol::packet::{Packet, PacketReader, PacketWriter};
+use rustmc_server::registry::nbt_encoder::json_to_nbt;
 use rustmc_server::registry::ALL_REGISTRY_IDS;
 
 const PROTOCOL_VERSION: i32 = 775;
 const REGISTRY_DATA_PACKET_ID: i32 = 0x07;
+
+type RegistryEntry = (String, Option<Vec<u8>>);
 
 fn write_varint(buf: &mut Vec<u8>, mut value: i32) {
     loop {
@@ -233,7 +236,9 @@ fn skip_nbt_payload(buf: &[u8], offset: &mut usize, tag_type: u8) -> io::Result<
     }
 }
 
-fn parse_registry_data_packet(data: &[u8]) -> io::Result<(String, Vec<String>)> {
+fn parse_registry_data_packet(
+    data: &[u8],
+) -> io::Result<(String, Vec<RegistryEntry>)> {
     let mut offset = 0;
     let registry_id = read_string_from_buf(data, &mut offset)?;
     let entry_count = read_varint_from_buf(data, &mut offset)? as usize;
@@ -241,17 +246,23 @@ fn parse_registry_data_packet(data: &[u8]) -> io::Result<(String, Vec<String>)> 
 
     for _ in 0..entry_count {
         let entry_id = read_string_from_buf(data, &mut offset)?;
-        entries.push(entry_id);
 
         if offset >= data.len() {
+            entries.push((entry_id, None));
             break;
         }
         let has_data = data[offset] != 0;
         offset += 1;
 
-        if has_data {
+        let nbt_bytes = if has_data {
+            let start = offset;
             skip_nbt(data, &mut offset)?;
-        }
+            Some(data[start..offset].to_vec())
+        } else {
+            None
+        };
+
+        entries.push((entry_id, nbt_bytes));
     }
 
     Ok((registry_id, entries))
@@ -287,7 +298,7 @@ fn capture_vanilla_registry_ordering() {
     login_data.extend_from_slice(&[0u8; 16]); // UUID (all zeros for offline)
     writer.write_packet(&Packet::new(0x00, login_data)).unwrap();
 
-    let mut registries: HashMap<String, Vec<String>> = HashMap::new();
+    let mut registries: HashMap<String, Vec<RegistryEntry>> = HashMap::new();
 
     // Read packets until we get all registry data
     loop {
@@ -334,7 +345,55 @@ fn capture_vanilla_registry_ordering() {
 
     // Filter entries within each registry to only those in our data files
     let data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data/registries/v775");
-    let registry_to_file: HashMap<&str, &str> = [
+    let registry_to_file: HashMap<&str, &str> = registry_to_file_map();
+
+    for (registry_id, entries) in registries.iter_mut() {
+        if let Some(&filename) = registry_to_file.get(registry_id.as_str()) {
+            let file_path = data_dir.join(filename);
+            let content = std::fs::read_to_string(&file_path).unwrap();
+            let file_entries: Vec<serde_json::Value> = serde_json::from_str(&content).unwrap();
+            let our_ids: Vec<String> = file_entries
+                .iter()
+                .map(|e| e["id"].as_str().unwrap().to_string())
+                .collect();
+            entries.retain(|(id, _)| our_ids.contains(id));
+        }
+    }
+
+    // Write ordering snapshot (IDs only, for backward compatibility)
+    let order_map: HashMap<&str, Vec<&str>> = registries
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.iter().map(|(id, _)| id.as_str()).collect()))
+        .collect();
+    let order_json = serde_json::to_string_pretty(&order_map).unwrap();
+    let order_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/data/vanilla_registry_order.json");
+    std::fs::write(&order_path, order_json).unwrap();
+    println!("Written registry ordering to {}", order_path.display());
+
+    // Write full NBT data snapshot
+    let mut data_map: HashMap<&str, Vec<serde_json::Value>> = HashMap::new();
+    for (reg_id, entries) in &registries {
+        let entry_list: Vec<serde_json::Value> = entries
+            .iter()
+            .map(|(id, nbt)| {
+                serde_json::json!({
+                    "id": id,
+                    "nbt_hex": nbt.as_ref().map(hex::encode).unwrap_or_default()
+                })
+            })
+            .collect();
+        data_map.insert(reg_id.as_str(), entry_list);
+    }
+    let data_json = serde_json::to_string_pretty(&data_map).unwrap();
+    let data_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/data/vanilla_registry_data.json");
+    std::fs::write(&data_path, data_json).unwrap();
+    println!("Written registry NBT data to {}", data_path.display());
+}
+
+fn registry_to_file_map() -> HashMap<&'static str, &'static str> {
+    [
         ("minecraft:banner_pattern", "banner_pattern.json"),
         ("minecraft:chat_type", "chat_type.json"),
         ("minecraft:damage_type", "damage_type.json"),
@@ -371,27 +430,7 @@ fn capture_vanilla_registry_ordering() {
         ("minecraft:test_instance", "test_instance.json"),
     ]
     .into_iter()
-    .collect();
-
-    for (registry_id, entries) in registries.iter_mut() {
-        if let Some(&filename) = registry_to_file.get(registry_id.as_str()) {
-            let file_path = data_dir.join(filename);
-            let content = std::fs::read_to_string(&file_path).unwrap();
-            let file_entries: Vec<serde_json::Value> = serde_json::from_str(&content).unwrap();
-            let our_ids: Vec<String> = file_entries
-                .iter()
-                .map(|e| e["id"].as_str().unwrap().to_string())
-                .collect();
-            entries.retain(|id| our_ids.contains(id));
-        }
-    }
-
-    // Write to snapshot file
-    let json = serde_json::to_string_pretty(&registries).unwrap();
-    let output_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/data/vanilla_registry_order.json");
-    std::fs::write(&output_path, json).unwrap();
-    println!("Written registry ordering to {}", output_path.display());
+    .collect()
 }
 
 fn rekey_entry(entry: &serde_json::Value) -> serde_json::Value {
@@ -416,44 +455,7 @@ fn reorder_registry_files_to_match_vanilla() {
 
     let data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data/registries/v775");
 
-    let registry_to_file: HashMap<&str, &str> = [
-        ("minecraft:banner_pattern", "banner_pattern.json"),
-        ("minecraft:chat_type", "chat_type.json"),
-        ("minecraft:damage_type", "damage_type.json"),
-        ("minecraft:dimension_type", "dimension_type.json"),
-        ("minecraft:enchantment", "enchantment.json"),
-        ("minecraft:instrument", "instrument.json"),
-        ("minecraft:jukebox_song", "jukebox_song.json"),
-        ("minecraft:painting_variant", "painting_variant.json"),
-        ("minecraft:trim_material", "trim_material.json"),
-        ("minecraft:trim_pattern", "trim_pattern.json"),
-        ("minecraft:wolf_variant", "wolf_variant.json"),
-        ("minecraft:worldgen/biome", "worldgen_biome.json"),
-        ("minecraft:cat_variant", "cat_variant.json"),
-        ("minecraft:pig_sound_variant", "pig_sound_variant.json"),
-        ("minecraft:wolf_sound_variant", "wolf_sound_variant.json"),
-        ("minecraft:frog_variant", "frog_variant.json"),
-        ("minecraft:pig_variant", "pig_variant.json"),
-        ("minecraft:cat_sound_variant", "cat_sound_variant.json"),
-        ("minecraft:cow_sound_variant", "cow_sound_variant.json"),
-        (
-            "minecraft:zombie_nautilus_variant",
-            "zombie_nautilus_variant.json",
-        ),
-        ("minecraft:chicken_variant", "chicken_variant.json"),
-        (
-            "minecraft:chicken_sound_variant",
-            "chicken_sound_variant.json",
-        ),
-        ("minecraft:cow_variant", "cow_variant.json"),
-        ("minecraft:dialog", "dialog.json"),
-        ("minecraft:world_clock", "world_clock.json"),
-        ("minecraft:timeline", "timeline.json"),
-        ("minecraft:test_environment", "test_environment.json"),
-        ("minecraft:test_instance", "test_instance.json"),
-    ]
-    .into_iter()
-    .collect();
+    let registry_to_file: HashMap<&str, &str> = registry_to_file_map();
 
     for (registry_id, expected_order) in &snapshot {
         let Some(&filename) = registry_to_file.get(registry_id.as_str()) else {
@@ -496,4 +498,132 @@ fn reorder_registry_files_to_match_vanilla() {
         std::fs::write(&file_path, output).unwrap();
         println!("Reordered {filename} ({} entries)", sorted.len());
     }
+}
+
+#[test]
+#[ignore]
+fn validate_registry_nbt_data() {
+    let snapshot_str = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/data/vanilla_registry_data.json"),
+    )
+    .expect("vanilla_registry_data.json not found — run capture_vanilla_registry_ordering first");
+
+    let snapshot: HashMap<String, Vec<serde_json::Value>> =
+        serde_json::from_str(&snapshot_str).unwrap();
+
+    let data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data/registries/v775");
+    let registry_to_file = registry_to_file_map();
+
+    let mut mismatches = Vec::new();
+    let mut missing_in_ours = Vec::new();
+    let mut extra_in_ours = Vec::new();
+
+    for (registry_id, vanilla_entries) in &snapshot {
+        let Some(&filename) = registry_to_file.get(registry_id.as_str()) else {
+            println!("Skipping {registry_id}: no file mapping");
+            continue;
+        };
+
+        let file_path = data_dir.join(filename);
+        let content = std::fs::read_to_string(&file_path).unwrap();
+        let our_entries: Vec<serde_json::Value> = serde_json::from_str(&content).unwrap();
+
+        let vanilla_ids: Vec<&str> = vanilla_entries
+            .iter()
+            .map(|e| e["id"].as_str().unwrap())
+            .collect();
+        let our_ids: Vec<&str> = our_entries
+            .iter()
+            .map(|e| e["id"].as_str().unwrap())
+            .collect();
+
+        // Check for entries vanilla has that we don't
+        for &vid in &vanilla_ids {
+            if !our_ids.contains(&vid) {
+                missing_in_ours.push(format!("{registry_id}/{vid}"));
+            }
+        }
+
+        // Check for entries we have that vanilla doesn't
+        for &oid in &our_ids {
+            if !vanilla_ids.contains(&oid) {
+                extra_in_ours.push(format!("{registry_id}/{oid}"));
+            }
+        }
+
+        // Compare NBT data for entries present in both
+        for vanilla_entry in vanilla_entries {
+            let entry_id = vanilla_entry["id"].as_str().unwrap();
+            let nbt_hex = vanilla_entry["nbt_hex"].as_str().unwrap_or("");
+
+            if nbt_hex.is_empty() {
+                continue;
+            }
+
+            let vanilla_nbt = hex::decode(nbt_hex).unwrap();
+
+            let Some(our_entry) = our_entries.iter().find(|e| e["id"].as_str() == Some(entry_id))
+            else {
+                continue;
+            };
+
+            if let Some(data) = our_entry.get("data") {
+                match json_to_nbt(data) {
+                    Ok(our_nbt) => {
+                        if our_nbt != vanilla_nbt {
+                            mismatches.push(format!(
+                                "{registry_id}/{entry_id}:\n  vanilla: {}\n  ours:    {}",
+                                hex::encode(&vanilla_nbt),
+                                hex::encode(&our_nbt),
+                            ));
+                        }
+                    }
+                    Err(e) => {
+                        mismatches.push(format!(
+                            "{registry_id}/{entry_id}: NBT encoding error: {e}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    if !missing_in_ours.is_empty() {
+        println!(
+            "\nWARNING: Entries in vanilla but not in ours ({}):",
+            missing_in_ours.len()
+        );
+        for id in &missing_in_ours {
+            println!("  - {id}");
+        }
+    }
+
+    if !extra_in_ours.is_empty() {
+        println!(
+            "\nERROR: Entries in ours but not in vanilla ({}):",
+            extra_in_ours.len()
+        );
+        for id in &extra_in_ours {
+            println!("  - {id}");
+        }
+    }
+
+    if !mismatches.is_empty() {
+        println!("\nNBT mismatches ({}):", mismatches.len());
+        for m in &mismatches {
+            println!("  {m}");
+        }
+    }
+
+    assert!(
+        extra_in_ours.is_empty(),
+        "We have {} entries that vanilla doesn't have",
+        extra_in_ours.len()
+    );
+    assert!(
+        mismatches.is_empty(),
+        "{} NBT data mismatches detected",
+        mismatches.len()
+    );
 }

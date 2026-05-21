@@ -45,6 +45,7 @@ proptest = { workspace = true }
 criterion = { workspace = true }
 rustmc-test-utils = { path = "../test-utils" }
 serial_test = "3"
+hex = "0.4"
 
 [[test]]
 name = "capture_vanilla_registries"
