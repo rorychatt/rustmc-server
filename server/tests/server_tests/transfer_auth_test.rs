@@ -1,6 +1,4 @@
-mod common;
-
-use common::{
+use crate::common::{
     retry_test, try_complete_login_config_phase, try_complete_login_flow_with_uuid,
     try_drain_initial_play_packets, TestClient, TestServer,
 };

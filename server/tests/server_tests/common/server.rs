@@ -9,6 +9,7 @@ pub struct TestServer {
     process: Child,
     port: u16,
     _ops_file: Option<PathBuf>,
+    _world_dir: Option<tempfile::TempDir>,
 }
 
 impl TestServer {
@@ -43,12 +44,10 @@ impl TestServer {
         Self::spawn_with_env_and_ops(&extra_refs, ops_file).await
     }
 
-    #[allow(dead_code)]
     pub async fn spawn_with_env(extra_env: &[(&str, &str)]) -> anyhow::Result<Self> {
         Self::spawn_with_env_and_ops(extra_env, None).await
     }
 
-    #[allow(dead_code)]
     pub async fn spawn_with_env_and_ops_config(
         extra_env: &[(&str, &str)],
         ops_content: Option<&str>,
@@ -96,11 +95,15 @@ impl TestServer {
             .and_then(|v| v.parse().ok())
             .unwrap_or(60);
 
+        let temp_world = tempfile::tempdir().unwrap();
+
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_rustmc-server"));
         cmd.env("RUSTMC_BIND", "127.0.0.1:0")
             .env("RUSTMC_PORT_FILE", &port_file)
             .env("RUSTMC_PLUGINS", "")
+            .env("RUSTMC_WORLD_DIR", temp_world.path().to_string_lossy().into_owned())
             .env("RUST_LOG", "rustmc_server=warn")
+            .env("RUSTMC_NON_PLAY_TIMEOUT", "300")
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
 
@@ -134,6 +137,7 @@ impl TestServer {
             process: child,
             port,
             _ops_file: ops_file,
+            _world_dir: Some(temp_world),
         })
     }
 

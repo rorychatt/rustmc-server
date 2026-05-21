@@ -1,6 +1,4 @@
-mod common;
-
-use common::{retry_test, TestClient, TestServer};
+use crate::common::{self, retry_test, TestClient, TestServer};
 use rustmc_server::protocol::packet_ids;
 use serial_test::serial;
 use std::io::{Cursor, Read};

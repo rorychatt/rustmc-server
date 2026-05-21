@@ -43,12 +43,10 @@ impl TestClient {
         self.send_packet(handshake_sb::HANDSHAKE, &data).await
     }
 
-    #[allow(dead_code)]
     pub async fn send_status_request(&mut self) -> anyhow::Result<()> {
         self.send_packet(status_sb::STATUS_REQUEST, &[]).await
     }
 
-    #[allow(dead_code)]
     pub async fn send_ping(&mut self, payload: i64) -> anyhow::Result<()> {
         let data = payload.to_be_bytes().to_vec();
         self.send_packet(status_sb::PING_REQUEST, &data).await
@@ -71,7 +69,6 @@ impl TestClient {
         self.send_packet(config_sb::KNOWN_PACKS, &data).await
     }
 
-    #[allow(dead_code)]
     pub async fn send_acknowledge_finish_configuration(&mut self) -> anyhow::Result<()> {
         self.send_packet(config_sb::ACKNOWLEDGE_FINISH, &[]).await
     }
@@ -92,19 +89,12 @@ impl TestClient {
         self.send_packet(play_sb::SET_PLAYER_POSITION, &data).await
     }
 
-    #[allow(dead_code)]
     pub async fn send_chat_command(&mut self, command: &str) -> anyhow::Result<()> {
         let mut data = Vec::new();
         write_string(&mut data, command)?;
         self.send_packet(play_sb::CHAT_COMMAND, &data).await
     }
 
-    #[allow(dead_code)]
-    pub async fn send_chat_message(&mut self, message: &str) -> anyhow::Result<()> {
-        let mut data = Vec::new();
-        write_string(&mut data, message)?;
-        self.send_packet(play_sb::CHAT_MESSAGE, &data).await
-    }
 
     #[allow(dead_code)]
     pub async fn send_confirm_teleportation(&mut self, teleport_id: i32) -> anyhow::Result<()> {
@@ -114,18 +104,11 @@ impl TestClient {
             .await
     }
 
-    #[allow(dead_code)]
-    pub async fn send_player_loaded(&mut self) -> anyhow::Result<()> {
-        self.send_packet(play_sb::PLAYER_LOADED, &[]).await
-    }
-
-    #[allow(dead_code)]
     pub async fn send_chunk_batch_received(&mut self, chunks_per_tick: f32) -> anyhow::Result<()> {
         let data = chunks_per_tick.to_be_bytes().to_vec();
         self.send_packet(play_sb::CHUNK_BATCH_RECEIVED, &data).await
     }
 
-    #[allow(dead_code)]
     pub async fn send_client_tick_end(&mut self) -> anyhow::Result<()> {
         self.send_packet(play_sb::CLIENT_TICK_END, &[]).await
     }
@@ -250,7 +233,6 @@ pub struct RawPacket {
 }
 
 impl RawPacket {
-    #[allow(dead_code)]
     pub fn read_transfer(&self) -> anyhow::Result<(String, i32)> {
         let mut cursor = Cursor::new(&self.data);
         let host = read_string(&mut cursor)?;
@@ -258,7 +240,6 @@ impl RawPacket {
         Ok((host, port))
     }
 
-    #[allow(dead_code)]
     pub fn read_system_chat(&self) -> anyhow::Result<String> {
         let mut cursor = Cursor::new(&self.data);
         let json = read_string(&mut cursor)?;
