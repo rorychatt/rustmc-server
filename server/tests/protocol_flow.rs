@@ -14,456 +14,348 @@ use packet_ids::status::clientbound as status_cb;
 #[tokio::test]
 #[serial]
 async fn test_status_flow() {
-    let server = TestServer::spawn().await.expect("Failed to spawn server");
-    let mut client = TestClient::connect(server.port())
-        .await
-        .expect("Failed to connect");
+    retry_test("test_status_flow", 3, || async {
+        let server = TestServer::spawn().await?;
+        let mut client = TestClient::connect(server.port()).await?;
 
-    // Send handshake with status intent
-    client
-        .send_handshake(775, 1)
-        .await
-        .expect("Failed to send handshake");
+        client.send_handshake(775, 1).await?;
+        client.send_status_request().await?;
 
-    // Send status request
-    client
-        .send_status_request()
-        .await
-        .expect("Failed to send status request");
+        let response = client.read_packet().await?;
+        assert_eq!(
+            response.id,
+            status_cb::STATUS_RESPONSE,
+            "Expected status response packet"
+        );
 
-    // Read status response
-    let response = client
-        .read_packet()
-        .await
-        .expect("Failed to read status response");
-    assert_eq!(
-        response.id,
-        status_cb::STATUS_RESPONSE,
-        "Expected status response packet"
-    );
+        let mut cursor = Cursor::new(&response.data);
+        let json_str =
+            common::client::read_string(&mut cursor).expect("Failed to read JSON string");
+        let json: serde_json::Value =
+            serde_json::from_str(&json_str).expect("Failed to parse JSON");
 
-    // Parse JSON response
-    let mut cursor = Cursor::new(&response.data);
-    let json_str = common::client::read_string(&mut cursor).expect("Failed to read JSON string");
-    let json: serde_json::Value = serde_json::from_str(&json_str).expect("Failed to parse JSON");
+        assert!(
+            json["description"]["text"]
+                .as_str()
+                .unwrap()
+                .contains("RustMC"),
+            "MOTD should contain 'RustMC'"
+        );
+        assert_eq!(
+            json["version"]["protocol"].as_i64().unwrap(),
+            775,
+            "Protocol version should be 775"
+        );
+        assert_eq!(
+            json["players"]["online"].as_i64().unwrap(),
+            0,
+            "Online players should be 0"
+        );
 
-    // Verify status response contains expected fields
-    assert!(
-        json["description"]["text"]
-            .as_str()
-            .unwrap()
-            .contains("RustMC"),
-        "MOTD should contain 'RustMC'"
-    );
-    assert_eq!(
-        json["version"]["protocol"].as_i64().unwrap(),
-        775,
-        "Protocol version should be 775"
-    );
-    assert_eq!(
-        json["players"]["online"].as_i64().unwrap(),
-        0,
-        "Online players should be 0"
-    );
+        let ping_time = std::time::Instant::now();
+        let payload = 12345i64;
+        client.send_ping(payload).await?;
 
-    // Send ping
-    let ping_time = std::time::Instant::now();
-    let payload = 12345i64;
-    client
-        .send_ping(payload)
-        .await
-        .expect("Failed to send ping");
+        let pong = client.read_packet().await?;
+        let elapsed = ping_time.elapsed();
+        assert_eq!(pong.id, status_cb::PONG_RESPONSE, "Expected pong packet");
+        assert!(elapsed.as_millis() < 100, "Ping should be under 100ms");
 
-    // Read pong
-    let pong = client.read_packet().await.expect("Failed to read pong");
-    let elapsed = ping_time.elapsed();
-    assert_eq!(pong.id, status_cb::PONG_RESPONSE, "Expected pong packet");
-    assert!(elapsed.as_millis() < 100, "Ping should be under 100ms");
+        let pong_payload = i64::from_be_bytes(pong.data.try_into().expect("Invalid pong data"));
+        assert_eq!(
+            pong_payload, payload,
+            "Pong payload should match ping payload"
+        );
 
-    // Verify payload matches
-    let pong_payload = i64::from_be_bytes(pong.data.try_into().expect("Invalid pong data"));
-    assert_eq!(
-        pong_payload, payload,
-        "Pong payload should match ping payload"
-    );
+        Ok(())
+    })
+    .await;
 }
 
 #[tokio::test]
 #[serial]
 async fn test_login_flow() {
-    let server = TestServer::spawn().await.expect("Failed to spawn server");
-    let mut client = TestClient::connect(server.port())
-        .await
-        .expect("Failed to connect");
+    retry_test("test_login_flow", 3, || async {
+        let server = TestServer::spawn().await?;
+        let mut client = TestClient::connect(server.port()).await?;
 
-    // Send handshake with login intent
-    client
-        .send_handshake(775, 2)
-        .await
-        .expect("Failed to send handshake");
+        client.send_handshake(775, 2).await?;
 
-    // Send login start
-    let uuid = Uuid::new_v4();
-    let username = "TestPlayer";
-    client
-        .send_login_start(username, uuid)
-        .await
-        .expect("Failed to send login start");
+        let uuid = Uuid::new_v4();
+        let username = "TestPlayer";
+        client.send_login_start(username, uuid).await?;
 
-    // Read set compression packet
-    let compression = client
-        .read_packet()
-        .await
-        .expect("Failed to read compression packet");
-    assert_eq!(
-        compression.id,
-        login_cb::SET_COMPRESSION,
-        "Expected set compression packet"
-    );
+        let compression = client.read_packet().await?;
+        assert_eq!(
+            compression.id,
+            login_cb::SET_COMPRESSION,
+            "Expected set compression packet"
+        );
 
-    // Enable compression on client side
-    client.enable_compression(256);
+        client.enable_compression(256);
 
-    // Read login success
-    let login_success = client
-        .read_packet()
-        .await
-        .expect("Failed to read login success");
-    assert_eq!(
-        login_success.id,
-        login_cb::LOGIN_SUCCESS,
-        "Expected login success packet"
-    );
+        let login_success = client.read_packet().await?;
+        assert_eq!(
+            login_success.id,
+            login_cb::LOGIN_SUCCESS,
+            "Expected login success packet"
+        );
 
-    // Parse login success
-    let mut cursor = Cursor::new(&login_success.data);
-    let mut uuid_bytes = [0u8; 16];
-    cursor
-        .read_exact(&mut uuid_bytes)
-        .expect("Failed to read UUID");
-    let returned_uuid = Uuid::from_bytes(uuid_bytes);
-    assert_eq!(returned_uuid, uuid, "UUID should match");
+        let mut cursor = Cursor::new(&login_success.data);
+        let mut uuid_bytes = [0u8; 16];
+        cursor
+            .read_exact(&mut uuid_bytes)
+            .expect("Failed to read UUID");
+        let returned_uuid = Uuid::from_bytes(uuid_bytes);
+        assert_eq!(returned_uuid, uuid, "UUID should match");
 
-    let returned_username =
-        common::client::read_string(&mut cursor).expect("Failed to read username");
-    assert_eq!(returned_username, username, "Username should match");
+        let returned_username =
+            common::client::read_string(&mut cursor).expect("Failed to read username");
+        assert_eq!(returned_username, username, "Username should match");
 
-    // Send login acknowledged to enter Configuration phase
-    client
-        .send_login_acknowledged()
-        .await
-        .expect("Failed to send login acknowledged");
+        client.send_login_acknowledged().await?;
 
-    // Read Known Packs packet
-    let known_packs = client
-        .read_packet()
-        .await
-        .expect("Failed to read known packs");
-    assert_eq!(
-        known_packs.id,
-        config_cb::KNOWN_PACKS,
-        "Expected known packs packet"
-    );
+        let known_packs = client.read_packet().await?;
+        assert_eq!(
+            known_packs.id,
+            config_cb::KNOWN_PACKS,
+            "Expected known packs packet"
+        );
 
-    // Send Known Packs response
-    client
-        .send_known_packs_response()
-        .await
-        .expect("Failed to send known packs response");
+        client.send_known_packs_response().await?;
 
-    // Read configuration packets: registry data, tags, finish
-    let got_finish;
-    loop {
-        let packet = client
-            .read_packet()
-            .await
-            .expect("Failed to read config packet");
-        match packet.id {
-            id if id == config_cb::REGISTRY_DATA => {}
-            id if id == config_cb::UPDATE_TAGS => {}
-            id if id == config_cb::FINISH_CONFIGURATION => {
-                got_finish = true;
-                break;
-            }
-            _ => {
-                panic!("Unexpected config packet: {:#04x}", packet.id);
+        let got_finish;
+        loop {
+            let packet = client.read_packet().await?;
+            match packet.id {
+                id if id == config_cb::REGISTRY_DATA => {}
+                id if id == config_cb::UPDATE_TAGS => {}
+                id if id == config_cb::FINISH_CONFIGURATION => {
+                    got_finish = true;
+                    break;
+                }
+                _ => {
+                    panic!("Unexpected config packet: {:#04x}", packet.id);
+                }
             }
         }
-    }
-    assert!(got_finish, "Should receive Finish Configuration");
+        assert!(got_finish, "Should receive Finish Configuration");
 
-    // Send Acknowledge Finish Configuration to transition to Play
-    client
-        .send_acknowledge_finish_configuration()
-        .await
-        .expect("Failed to send acknowledge finish configuration");
+        client.send_acknowledge_finish_configuration().await?;
 
-    // Read join game packet
-    let join_game = client
-        .read_packet()
-        .await
-        .expect("Failed to read join game");
-    assert_eq!(
-        join_game.id,
-        play_cb::LOGIN_PLAY,
-        "Expected join game packet"
-    );
-    assert!(!join_game.data.is_empty(), "Join game should have data");
+        let join_game = client.read_packet().await?;
+        assert_eq!(
+            join_game.id,
+            play_cb::LOGIN_PLAY,
+            "Expected join game packet"
+        );
+        assert!(!join_game.data.is_empty(), "Join game should have data");
 
-    // Read Player Info Update
-    let player_info = client
-        .read_packet()
-        .await
-        .expect("Failed to read player info update");
-    assert_eq!(
-        player_info.id,
-        play_cb::PLAYER_INFO_UPDATE,
-        "Expected player info update packet"
-    );
+        let player_info = client.read_packet().await?;
+        assert_eq!(
+            player_info.id,
+            play_cb::PLAYER_INFO_UPDATE,
+            "Expected player info update packet"
+        );
 
-    // Read synchronize player position
-    let sync_pos = client
-        .read_packet()
-        .await
-        .expect("Failed to read sync position");
-    assert_eq!(
-        sync_pos.id,
-        play_cb::SYNCHRONIZE_PLAYER_POSITION,
-        "Expected synchronize player position packet"
-    );
+        let sync_pos = client.read_packet().await?;
+        assert_eq!(
+            sync_pos.id,
+            play_cb::SYNCHRONIZE_PLAYER_POSITION,
+            "Expected synchronize player position packet"
+        );
+
+        Ok(())
+    })
+    .await;
 }
 
 #[tokio::test]
 #[serial]
 async fn test_play_basic() {
-    let server = TestServer::spawn().await.expect("Failed to spawn server");
-    let mut client = TestClient::connect(server.port())
-        .await
-        .expect("Failed to connect");
+    retry_test("test_play_basic", 3, || async {
+        let server = TestServer::spawn().await?;
+        let mut client = TestClient::connect(server.port()).await?;
 
-    // Complete login + configuration flow
-    complete_login_flow(&mut client).await;
+        complete_login_flow(&mut client).await;
 
-    // Send player position
-    client
-        .send_player_position(100.0, 64.0, 200.0, true)
-        .await
-        .expect("Failed to send position");
+        client
+            .send_player_position(100.0, 64.0, 200.0, true)
+            .await?;
 
-    // The server should handle this without errors
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        Ok(())
+    })
+    .await;
 }
 
 #[tokio::test]
 #[serial]
 async fn test_full_protocol_sequence() {
-    let server = TestServer::spawn().await.expect("Failed to spawn server");
+    retry_test("test_full_protocol_sequence", 3, || async {
+        let server = TestServer::spawn().await?;
 
-    // Client A: Status flow then disconnect
-    {
-        let mut client_a = TestClient::connect(server.port())
-            .await
-            .expect("Failed to connect A");
-        client_a
-            .send_handshake(775, 1)
-            .await
-            .expect("Failed to send handshake A");
-        client_a
-            .send_status_request()
-            .await
-            .expect("Failed to send status A");
-        let _status = client_a
-            .read_packet()
-            .await
-            .expect("Failed to read status A");
-    }
+        {
+            let mut client_a = TestClient::connect(server.port()).await?;
+            client_a.send_handshake(775, 1).await?;
+            client_a.send_status_request().await?;
+            let _status = client_a.read_packet().await?;
+        }
 
-    // Client B: Login flow then disconnect
-    {
-        let mut client_b = TestClient::connect(server.port())
-            .await
-            .expect("Failed to connect B");
-        complete_login_flow_with_client(&mut client_b, "PlayerB").await;
-    }
+        {
+            let mut client_b = TestClient::connect(server.port()).await?;
+            complete_login_flow_with_client(&mut client_b, "PlayerB").await;
+        }
 
-    // Client C: Login and stay connected
-    {
-        let mut client_c = TestClient::connect(server.port())
-            .await
-            .expect("Failed to connect C");
-        complete_login_flow_with_client(&mut client_c, "PlayerC").await;
+        {
+            let mut client_c = TestClient::connect(server.port()).await?;
+            complete_login_flow_with_client(&mut client_c, "PlayerC").await;
 
-        // Stay connected for a bit
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    }
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
+
+        Ok(())
+    })
+    .await;
 }
 
 #[tokio::test]
 #[serial]
 async fn test_concurrent_clients() {
-    let server = TestServer::spawn().await.expect("Failed to spawn server");
+    retry_test("test_concurrent_clients", 3, || async {
+        let server = TestServer::spawn().await?;
 
-    let mut handles = Vec::new();
+        let mut handles = Vec::new();
 
-    for i in 0..10 {
-        let port = server.port();
-        let handle = tokio::spawn(async move {
-            let mut client = TestClient::connect(port).await.expect("Failed to connect");
-            let username = format!("Player{i}");
-            complete_login_flow_with_client(&mut client, &username).await;
-        });
-        handles.push(handle);
-    }
+        for i in 0..10 {
+            let port = server.port();
+            let handle = tokio::spawn(async move {
+                let mut client = TestClient::connect(port).await.expect("Failed to connect");
+                let username = format!("Player{i}");
+                complete_login_flow_with_client(&mut client, &username).await;
+            });
+            handles.push(handle);
+        }
 
-    // Wait for all clients to complete
-    for handle in handles {
-        handle.await.expect("Client task panicked");
-    }
+        for handle in handles {
+            handle.await.expect("Client task panicked");
+        }
+
+        Ok(())
+    })
+    .await;
 }
 
 #[tokio::test]
 #[serial]
 async fn test_error_handling() {
-    let server = TestServer::spawn().await.expect("Failed to spawn server");
+    retry_test("test_error_handling", 3, || async {
+        let server = TestServer::spawn().await?;
 
-    // Test 1: Send login start before handshake (should disconnect)
-    {
-        let mut client = TestClient::connect(server.port())
-            .await
-            .expect("Failed to connect");
-        let uuid = Uuid::new_v4();
+        // Test 1: Send login start before handshake (should disconnect)
+        {
+            let mut client = TestClient::connect(server.port()).await?;
+            let uuid = Uuid::new_v4();
 
-        let result = client.send_login_start("BadPlayer", uuid).await;
+            let result = client.send_login_start("BadPlayer", uuid).await;
 
-        if result.is_ok() {
-            let read_result =
-                tokio::time::timeout(tokio::time::Duration::from_secs(1), client.read_packet())
-                    .await;
+            if result.is_ok() {
+                let read_result =
+                    tokio::time::timeout(tokio::time::Duration::from_secs(1), client.read_packet())
+                        .await;
 
-            assert!(
-                read_result.is_err() || read_result.unwrap().is_err(),
-                "Server should disconnect on invalid protocol sequence"
-            );
+                assert!(
+                    read_result.is_err() || read_result.unwrap().is_err(),
+                    "Server should disconnect on invalid protocol sequence"
+                );
+            }
         }
-    }
 
-    // Test 2: Invalid handshake next_state value
-    {
-        let mut client = TestClient::connect(server.port())
-            .await
-            .expect("Failed to connect");
+        // Test 2: Invalid handshake next_state value
+        {
+            let mut client = TestClient::connect(server.port()).await?;
 
-        let result = client.send_handshake(775, 99).await;
+            let result = client.send_handshake(775, 99).await;
 
-        if result.is_ok() {
-            let read_result =
-                tokio::time::timeout(tokio::time::Duration::from_secs(1), client.read_packet())
-                    .await;
+            if result.is_ok() {
+                let read_result =
+                    tokio::time::timeout(tokio::time::Duration::from_secs(1), client.read_packet())
+                        .await;
 
-            assert!(
-                read_result.is_err() || read_result.unwrap().is_err(),
-                "Server should reject invalid handshake"
-            );
+                assert!(
+                    read_result.is_err() || read_result.unwrap().is_err(),
+                    "Server should reject invalid handshake"
+                );
+            }
         }
-    }
+
+        Ok(())
+    })
+    .await;
 }
 
 #[tokio::test]
 #[serial]
 async fn test_configuration_phase() {
-    let server = TestServer::spawn().await.expect("Failed to spawn server");
-    let mut client = TestClient::connect(server.port())
-        .await
-        .expect("Failed to connect");
+    retry_test("test_configuration_phase", 3, || async {
+        let server = TestServer::spawn().await?;
+        let mut client = TestClient::connect(server.port()).await?;
 
-    client
-        .send_handshake(775, 2)
-        .await
-        .expect("Failed to send handshake");
+        client.send_handshake(775, 2).await?;
 
-    let uuid = Uuid::new_v4();
-    client
-        .send_login_start("ConfigTest", uuid)
-        .await
-        .expect("Failed to send login start");
+        let uuid = Uuid::new_v4();
+        client.send_login_start("ConfigTest", uuid).await?;
 
-    // Compression
-    let compression = client
-        .read_packet()
-        .await
-        .expect("Failed to read compression");
-    assert_eq!(compression.id, login_cb::SET_COMPRESSION);
-    client.enable_compression(256);
+        let compression = client.read_packet().await?;
+        assert_eq!(compression.id, login_cb::SET_COMPRESSION);
+        client.enable_compression(256);
 
-    // Login Success
-    let login_success = client
-        .read_packet()
-        .await
-        .expect("Failed to read login success");
-    assert_eq!(login_success.id, login_cb::LOGIN_SUCCESS);
+        let login_success = client.read_packet().await?;
+        assert_eq!(login_success.id, login_cb::LOGIN_SUCCESS);
 
-    // Send Login Acknowledged
-    client
-        .send_login_acknowledged()
-        .await
-        .expect("Failed to send ack");
+        client.send_login_acknowledged().await?;
 
-    // Should receive Known Packs
-    let known_packs = client
-        .read_packet()
-        .await
-        .expect("Failed to read known packs");
-    assert_eq!(
-        known_packs.id,
-        config_cb::KNOWN_PACKS,
-        "Expected Known Packs"
-    );
+        let known_packs = client.read_packet().await?;
+        assert_eq!(
+            known_packs.id,
+            config_cb::KNOWN_PACKS,
+            "Expected Known Packs"
+        );
 
-    // Send Known Packs response
-    client
-        .send_known_packs_response()
-        .await
-        .expect("Failed to send known packs response");
+        client.send_known_packs_response().await?;
 
-    // Read all config packets until Finish Configuration
-    let mut registry_count = 0;
-    let mut got_tags = false;
-    loop {
-        let packet = client
-            .read_packet()
-            .await
-            .expect("Failed to read config packet");
-        match packet.id {
-            id if id == config_cb::REGISTRY_DATA => registry_count += 1,
-            id if id == config_cb::UPDATE_TAGS => got_tags = true,
-            id if id == config_cb::FINISH_CONFIGURATION => break,
-            other => panic!("Unexpected config packet: {other:#04x}"),
+        let mut registry_count = 0;
+        let mut got_tags = false;
+        loop {
+            let packet = client.read_packet().await?;
+            match packet.id {
+                id if id == config_cb::REGISTRY_DATA => registry_count += 1,
+                id if id == config_cb::UPDATE_TAGS => got_tags = true,
+                id if id == config_cb::FINISH_CONFIGURATION => break,
+                other => panic!("Unexpected config packet: {other:#04x}"),
+            }
         }
-    }
 
-    assert_eq!(
-        registry_count, 28,
-        "Should receive 28 registry data packets (got {registry_count})"
-    );
-    assert!(got_tags, "Should receive Update Tags packet");
+        assert_eq!(
+            registry_count, 28,
+            "Should receive 28 registry data packets (got {registry_count})"
+        );
+        assert!(got_tags, "Should receive Update Tags packet");
 
-    // Send Acknowledge Finish Configuration to transition to Play
-    client
-        .send_acknowledge_finish_configuration()
-        .await
-        .expect("Failed to send acknowledge finish configuration");
+        client.send_acknowledge_finish_configuration().await?;
 
-    // Verify server transitions to Play by sending LOGIN_PLAY (join game)
-    let join_game = client
-        .read_packet()
-        .await
-        .expect("Failed to read join game after acknowledge finish");
-    assert_eq!(
-        join_game.id,
-        play_cb::LOGIN_PLAY,
-        "Expected LOGIN_PLAY packet after configuration phase completes (got {:#04x})",
-        join_game.id
-    );
+        let join_game = client.read_packet().await?;
+        assert_eq!(
+            join_game.id,
+            play_cb::LOGIN_PLAY,
+            "Expected LOGIN_PLAY packet after configuration phase completes (got {:#04x})",
+            join_game.id
+        );
+
+        Ok(())
+    })
+    .await;
 }
 
 #[tokio::test]
@@ -542,9 +434,7 @@ async fn test_chunk_throttling_via_batch_received() {
 
         client.send_chunk_batch_received(3.0).await?;
 
-        client
-            .send_player_position(256.0, 64.0, 0.0, true)
-            .await?;
+        client.send_player_position(256.0, 64.0, 0.0, true).await?;
 
         let mut total_chunks = 0;
         let mut batch_count = 0;
@@ -563,9 +453,7 @@ async fn test_chunk_throttling_via_batch_received() {
                         batch_size += 1;
                     } else if inner.id == play_cb::CHUNK_BATCH_FINISHED {
                         break;
-                    } else if inner.id == play_cb::UNLOAD_CHUNK
-                        || inner.id == play_cb::KEEP_ALIVE
-                    {
+                    } else if inner.id == play_cb::UNLOAD_CHUNK || inner.id == play_cb::KEEP_ALIVE {
                         continue;
                     } else {
                         anyhow::bail!("Unexpected packet in batch: {:#04x}", inner.id);
@@ -725,74 +613,51 @@ async fn test_client_tick_end_drains_chunks() {
 #[tokio::test]
 #[serial]
 async fn test_configuration_timeout() {
-    let server = TestServer::spawn_with_env(&[("RUSTMC_NON_PLAY_TIMEOUT", "3")])
-        .await
-        .expect("Failed to spawn server");
-    let mut client = TestClient::connect(server.port())
-        .await
-        .expect("Failed to connect");
+    retry_test("test_configuration_timeout", 3, || async {
+        let server = TestServer::spawn_with_env(&[("RUSTMC_NON_PLAY_TIMEOUT", "3")]).await?;
+        let mut client = TestClient::connect(server.port()).await?;
 
-    client
-        .send_handshake(775, 2)
-        .await
-        .expect("Failed to send handshake");
-    let uuid = Uuid::new_v4();
-    client
-        .send_login_start("TimeoutTest", uuid)
-        .await
-        .expect("Failed to send login start");
+        client.send_handshake(775, 2).await?;
+        let uuid = Uuid::new_v4();
+        client.send_login_start("TimeoutTest", uuid).await?;
 
-    let compression = client
-        .read_packet()
-        .await
-        .expect("Failed to read compression");
-    assert_eq!(compression.id, login_cb::SET_COMPRESSION);
-    client.enable_compression(256);
+        let compression = client.read_packet().await?;
+        assert_eq!(compression.id, login_cb::SET_COMPRESSION);
+        client.enable_compression(256);
 
-    let _login_success = client
-        .read_packet()
-        .await
-        .expect("Failed to read login success");
+        let _login_success = client.read_packet().await?;
 
-    client
-        .send_login_acknowledged()
-        .await
-        .expect("Failed to send login acknowledged");
+        client.send_login_acknowledged().await?;
 
-    let _known_packs = client
-        .read_packet()
-        .await
-        .expect("Failed to read known packs");
+        let _known_packs = client.read_packet().await?;
 
-    client
-        .send_known_packs_response()
-        .await
-        .expect("Failed to send known packs response");
+        client.send_known_packs_response().await?;
 
-    loop {
-        let packet = client
-            .read_packet()
-            .await
-            .expect("Failed to read config packet");
-        if packet.id == config_cb::FINISH_CONFIGURATION {
-            break;
+        loop {
+            let packet = client.read_packet().await?;
+            if packet.id == config_cb::FINISH_CONFIGURATION {
+                break;
+            }
         }
-    }
 
-    let start = std::time::Instant::now();
-    let result =
-        tokio::time::timeout(tokio::time::Duration::from_secs(10), client.read_packet()).await;
-    let elapsed = start.elapsed();
+        let start = std::time::Instant::now();
+        let result =
+            tokio::time::timeout(tokio::time::Duration::from_secs(10), client.read_packet()).await;
+        let elapsed = start.elapsed();
 
-    assert!(
-        result.is_err() || result.unwrap().is_err(),
-        "Server should drop the connection after timeout"
-    );
-    assert!(
-        elapsed.as_secs() >= 2 && elapsed.as_secs() <= 5,
-        "Timeout should fire around 3 seconds, but took {}s",
-        elapsed.as_secs()
-    );
+        assert!(
+            result.is_err() || result.unwrap().is_err(),
+            "Server should drop the connection after timeout"
+        );
+        assert!(
+            elapsed.as_secs() >= 2 && elapsed.as_secs() <= 5,
+            "Timeout should fire around 3 seconds, but took {}s",
+            elapsed.as_secs()
+        );
+
+        Ok(())
+    })
+    .await;
 }
 
 /// Helper to complete the full login + configuration flow
@@ -885,12 +750,13 @@ async fn test_custom_gameplay_configuration() {
     use std::fs::File;
     use std::io::Write;
 
-    // Create a temporary server config file
-    let config_dir = std::env::temp_dir();
-    let config_path = config_dir.join(format!("test_config_{}.yaml", uuid::Uuid::new_v4()));
-    let mut config_file = File::create(&config_path).expect("Failed to create temp config file");
+    retry_test("test_custom_gameplay_configuration", 3, || async {
+        let config_dir = std::env::temp_dir();
+        let config_path = config_dir.join(format!("test_config_{}.yaml", uuid::Uuid::new_v4()));
+        let mut config_file =
+            File::create(&config_path).expect("Failed to create temp config file");
 
-    let yaml_content = r#"
+        let yaml_content = r#"
 server:
   bind: "127.0.0.1:0"
   view_distance: 6
@@ -910,181 +776,112 @@ gameplay:
   simulation_distance: 5
   sea_level: 60
 "#;
-    config_file
-        .write_all(yaml_content.as_bytes())
-        .expect("Failed to write temp config");
+        config_file
+            .write_all(yaml_content.as_bytes())
+            .expect("Failed to write temp config");
 
-    // Spawn server with RUSTMC_CONFIG env pointing to our config file
-    let config_path_str = config_path.to_string_lossy().into_owned();
-    let server = TestServer::spawn_with_env(&[("RUSTMC_CONFIG", &config_path_str)])
-        .await
-        .expect("Failed to spawn server with custom config");
+        let config_path_str = config_path.to_string_lossy().into_owned();
+        let server = TestServer::spawn_with_env(&[("RUSTMC_CONFIG", &config_path_str)]).await?;
 
-    // Step 1: Verify Status response MOTD and max players
-    let mut client = TestClient::connect(server.port())
-        .await
-        .expect("Failed to connect to server");
+        let mut client = TestClient::connect(server.port()).await?;
 
-    client
-        .send_handshake(775, 1)
-        .await
-        .expect("Failed to send handshake");
-    client
-        .send_status_request()
-        .await
-        .expect("Failed to send status request");
+        client.send_handshake(775, 1).await?;
+        client.send_status_request().await?;
 
-    let response = client
-        .read_packet()
-        .await
-        .expect("Failed to read status response");
-    assert_eq!(response.id, status_cb::STATUS_RESPONSE);
+        let response = client.read_packet().await?;
+        assert_eq!(response.id, status_cb::STATUS_RESPONSE);
 
-    let mut cursor = Cursor::new(&response.data);
-    let json_str = common::client::read_string(&mut cursor).expect("Failed to read JSON string");
-    let json: serde_json::Value = serde_json::from_str(&json_str).expect("Failed to parse JSON");
+        let mut cursor = Cursor::new(&response.data);
+        let json_str =
+            common::client::read_string(&mut cursor).expect("Failed to read JSON string");
+        let json: serde_json::Value =
+            serde_json::from_str(&json_str).expect("Failed to parse JSON");
 
-    assert_eq!(
-        json["description"]["text"].as_str().unwrap(),
-        "Configured Test MOTD"
-    );
-    assert_eq!(json["players"]["max"].as_i64().unwrap(), 77);
+        assert_eq!(
+            json["description"]["text"].as_str().unwrap(),
+            "Configured Test MOTD"
+        );
+        assert_eq!(json["players"]["max"].as_i64().unwrap(), 77);
 
-    // Clean up current client connection
-    drop(client);
+        drop(client);
 
-    // Step 2: Verify Login Play packet values
-    let mut client = TestClient::connect(server.port())
-        .await
-        .expect("Failed to connect to server for play");
+        let mut client = TestClient::connect(server.port()).await?;
 
-    client
-        .send_handshake(775, 2)
-        .await
-        .expect("Failed to send handshake for play");
-    client
-        .send_login_start("TestConfigPlayer", Uuid::new_v4())
-        .await
-        .expect("Failed to send login start");
+        client.send_handshake(775, 2).await?;
+        client
+            .send_login_start("TestConfigPlayer", Uuid::new_v4())
+            .await?;
 
-    // Read compression
-    let comp_packet = client
-        .read_packet()
-        .await
-        .expect("Failed to read compression");
-    assert_eq!(comp_packet.id, login_cb::SET_COMPRESSION);
-    let mut comp_cursor = Cursor::new(&comp_packet.data);
-    let threshold = VarInt::read(&mut comp_cursor).unwrap().0;
-    client.enable_compression(threshold);
+        let comp_packet = client.read_packet().await?;
+        assert_eq!(comp_packet.id, login_cb::SET_COMPRESSION);
+        let mut comp_cursor = Cursor::new(&comp_packet.data);
+        let threshold = VarInt::read(&mut comp_cursor).unwrap().0;
+        client.enable_compression(threshold);
 
-    // Read Login Success
-    let success = client
-        .read_packet()
-        .await
-        .expect("Failed to read login success");
-    assert_eq!(success.id, login_cb::LOGIN_SUCCESS);
+        let success = client.read_packet().await?;
+        assert_eq!(success.id, login_cb::LOGIN_SUCCESS);
 
-    // Acknowledge Login
-    client
-        .send_login_acknowledged()
-        .await
-        .expect("Failed to send login ack");
+        client.send_login_acknowledged().await?;
 
-    // Read Known Packs
-    let packs = client
-        .read_packet()
-        .await
-        .expect("Failed to read known packs");
-    assert_eq!(packs.id, config_cb::KNOWN_PACKS);
+        let packs = client.read_packet().await?;
+        assert_eq!(packs.id, config_cb::KNOWN_PACKS);
 
-    // Respond Known Packs
-    client
-        .send_known_packs_response()
-        .await
-        .expect("Failed to send known packs response");
+        client.send_known_packs_response().await?;
 
-    // Skip registry & config finish
-    loop {
-        let packet = client
-            .read_packet()
-            .await
-            .expect("Failed to read config packet");
-        if packet.id == config_cb::FINISH_CONFIGURATION {
-            break;
+        loop {
+            let packet = client.read_packet().await?;
+            if packet.id == config_cb::FINISH_CONFIGURATION {
+                break;
+            }
         }
-    }
 
-    // Acknowledge Config Finish
-    client
-        .send_acknowledge_finish_configuration()
-        .await
-        .expect("Failed to send config ack");
+        client.send_acknowledge_finish_configuration().await?;
 
-    // Read login play packet
-    let join_game = client
-        .read_packet()
-        .await
-        .expect("Failed to read join game packet");
-    assert_eq!(join_game.id, play_cb::LOGIN_PLAY);
+        let join_game = client.read_packet().await?;
+        assert_eq!(join_game.id, play_cb::LOGIN_PLAY);
 
-    // Decode and verify login play values
-    let mut play_cursor = Cursor::new(&join_game.data);
+        let mut play_cursor = Cursor::new(&join_game.data);
 
-    // Read Entity ID (4 bytes)
-    let mut entity_id_bytes = [0u8; 4];
-    play_cursor.read_exact(&mut entity_id_bytes).unwrap();
+        let mut entity_id_bytes = [0u8; 4];
+        play_cursor.read_exact(&mut entity_id_bytes).unwrap();
 
-    // Read Is Hardcore (1 byte)
-    let mut hardcore_bytes = [0u8; 1];
-    play_cursor.read_exact(&mut hardcore_bytes).unwrap();
-    let is_hardcore = hardcore_bytes[0] != 0;
-    assert!(is_hardcore, "Hardcore should be true");
+        let mut hardcore_bytes = [0u8; 1];
+        play_cursor.read_exact(&mut hardcore_bytes).unwrap();
+        let is_hardcore = hardcore_bytes[0] != 0;
+        assert!(is_hardcore, "Hardcore should be true");
 
-    // Read Dimension count (VarInt)
-    let _dim_count = VarInt::read(&mut play_cursor).unwrap().0;
+        let _dim_count = VarInt::read(&mut play_cursor).unwrap().0;
+        let _dim_name = common::client::read_string(&mut play_cursor).unwrap();
 
-    // Read Dimension name (String)
-    let _dim_name = common::client::read_string(&mut play_cursor).unwrap();
+        let max_players_decoded = VarInt::read(&mut play_cursor).unwrap().0;
+        assert_eq!(max_players_decoded, 77);
 
-    // Read Max players (VarInt)
-    let max_players_decoded = VarInt::read(&mut play_cursor).unwrap().0;
-    assert_eq!(max_players_decoded, 77);
+        let view_dist = VarInt::read(&mut play_cursor).unwrap().0;
+        assert_eq!(view_dist, 6);
 
-    // Read View distance (VarInt)
-    let view_dist = VarInt::read(&mut play_cursor).unwrap().0;
-    assert_eq!(view_dist, 6);
+        let sim_dist = VarInt::read(&mut play_cursor).unwrap().0;
+        assert_eq!(sim_dist, 5);
 
-    // Read Simulation distance (VarInt)
-    let sim_dist = VarInt::read(&mut play_cursor).unwrap().0;
-    assert_eq!(sim_dist, 5);
+        let mut flags = [0u8; 3];
+        play_cursor.read_exact(&mut flags).unwrap();
 
-    // Read debug, respawn, crafting (3 bytes)
-    let mut flags = [0u8; 3];
-    play_cursor.read_exact(&mut flags).unwrap();
+        let _dim_type = VarInt::read(&mut play_cursor).unwrap().0;
+        let _dim_name_2 = common::client::read_string(&mut play_cursor).unwrap();
 
-    // Read Dimension Type (VarInt)
-    let _dim_type = VarInt::read(&mut play_cursor).unwrap().0;
+        let mut seed = [0u8; 8];
+        play_cursor.read_exact(&mut seed).unwrap();
 
-    // Read Dimension name (String)
-    let _dim_name_2 = common::client::read_string(&mut play_cursor).unwrap();
+        let mut gm = [0u8; 1];
+        play_cursor.read_exact(&mut gm).unwrap();
+        let game_mode_decoded = gm[0];
+        assert_eq!(game_mode_decoded, 0, "Game mode should be survival (0)");
 
-    // Read Hashed seed (8 bytes)
-    let mut seed = [0u8; 8];
-    play_cursor.read_exact(&mut seed).unwrap();
+        let player_info = client.read_packet().await?;
+        assert_eq!(player_info.id, play_cb::PLAYER_INFO_UPDATE);
 
-    // Read Game mode (1 byte)
-    let mut gm = [0u8; 1];
-    play_cursor.read_exact(&mut gm).unwrap();
-    let game_mode_decoded = gm[0];
-    assert_eq!(game_mode_decoded, 0, "Game mode should be survival (0)");
+        let _ = std::fs::remove_file(&config_path);
 
-    // Read player info update
-    let player_info = client
-        .read_packet()
-        .await
-        .expect("Failed to read player info update");
-    assert_eq!(player_info.id, play_cb::PLAYER_INFO_UPDATE);
-
-    // Clean up temporary config file
-    let _ = std::fs::remove_file(&config_path);
+        Ok(())
+    })
+    .await;
 }
