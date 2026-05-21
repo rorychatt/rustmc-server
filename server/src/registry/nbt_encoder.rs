@@ -1,8 +1,6 @@
 use serde_json::Value;
 use std::io::{self, Write};
 
-/// Float fields scoped by (parent_key, field_name) to avoid false positives
-/// when field names like "offset" appear in non-registry contexts.
 const FLOAT_FIELDS: &[(&str, &str)] = &[
     ("", "temperature"),
     ("", "downfall"),
@@ -10,10 +8,30 @@ const FLOAT_FIELDS: &[(&str, &str)] = &[
     ("effects", "music_volume"),
     ("mood_sound", "offset"),
     ("", "ambient_light"),
+    ("effect", "factor"),
+    ("effect", "volume"),
+    ("effect", "speed"),
+    ("horizontal_velocity", "movement_scale"),
+    ("vertical_position", "offset"),
+    ("pitch", "min_inclusive"),
+    ("pitch", "max_inclusive"),
+    ("pitch", "min_exclusive"),
+    ("pitch", "max_exclusive"),
+];
+
+const DOUBLE_FIELDS: &[(&str, &str)] = &[
+    ("", "coordinate_scale"),
 ];
 
 fn is_float_field(parent: &str, name: &str) -> bool {
+    if name == "base" || name == "per_level_above_first" {
+        return parent != "min_cost" && parent != "max_cost";
+    }
     FLOAT_FIELDS.contains(&(parent, name))
+}
+
+fn is_double_field(parent: &str, name: &str) -> bool {
+    DOUBLE_FIELDS.contains(&(parent, name))
 }
 
 pub fn json_to_nbt(value: &Value) -> io::Result<Vec<u8>> {
@@ -57,9 +75,12 @@ fn write_named_tag(
 }
 
 fn get_tag_type_for_field(parent: &str, name: &str, value: &Value) -> u8 {
-    if let Value::Number(n) = value {
-        if n.is_i64() && is_float_field(parent, name) {
+    if let Value::Number(_) = value {
+        if is_float_field(parent, name) {
             return 0x05; // TAG_Float
+        }
+        if is_double_field(parent, name) {
+            return 0x06; // TAG_Double
         }
     }
     get_tag_type(value)
@@ -72,9 +93,14 @@ fn write_tag_payload_for_field(
     value: &Value,
 ) -> io::Result<()> {
     if let Value::Number(n) = value {
-        if n.is_i64() && is_float_field(parent, name) {
-            let f = n.as_i64().unwrap() as f32;
+        if is_float_field(parent, name) {
+            let f = n.as_f64().unwrap_or(0.0) as f32;
             writer.write_all(&f.to_be_bytes())?;
+            return Ok(());
+        }
+        if is_double_field(parent, name) {
+            let d = n.as_f64().unwrap_or(0.0);
+            writer.write_all(&d.to_be_bytes())?;
             return Ok(());
         }
     }
