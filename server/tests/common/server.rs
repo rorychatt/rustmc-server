@@ -17,6 +17,7 @@ impl TestServer {
         Self::spawn_with_ops(None).await
     }
 
+    #[allow(dead_code)]
     pub async fn spawn_with_ops(ops_content: Option<&str>) -> anyhow::Result<Self> {
         let ops_file = if let Some(content) = ops_content {
             let count = FILE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
