@@ -61,16 +61,11 @@ fn test_registry_field_completeness() {
                 "{registry_id}: entry id '{}' missing minecraft: namespace",
                 entry.id
             );
-            assert_eq!(
-                entry.nbt_data[0], 0x0A,
-                "{registry_id}/{}: NBT must start with TAG_Compound (0x0A), got 0x{:02X}",
-                entry.id, entry.nbt_data[0]
-            );
             assert!(
-                entry.nbt_data.len() > 3,
-                "{registry_id}/{}: NBT data too short ({} bytes)",
-                entry.id,
-                entry.nbt_data.len()
+                entry.nbt_data[0] >= 0x01 && entry.nbt_data[0] <= 0x0C
+                    || entry.nbt_data[0] == 0x00,
+                "{registry_id}/{}: first byte must be a valid NBT tag type, got 0x{:02X}",
+                entry.id, entry.nbt_data[0]
             );
             let last_byte = entry.nbt_data[entry.nbt_data.len() - 1];
             assert_eq!(

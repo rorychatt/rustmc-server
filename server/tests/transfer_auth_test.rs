@@ -1,6 +1,9 @@
 mod common;
 
-use common::{retry_test, TestClient, TestServer};
+use common::{
+    retry_test, try_complete_login_flow_with_uuid, try_drain_initial_play_packets, TestClient,
+    TestServer,
+};
 use rustmc_server::protocol::packet_ids;
 use uuid::Uuid;
 
@@ -33,7 +36,7 @@ async fn test_transfer_sends_cookie_token() {
 
         let mut client = TestClient::connect(server_a.port()).await?;
 
-        try_complete_login_flow_with_uuid(&mut client, op_uuid).await?;
+        try_complete_login_flow_with_uuid(&mut client, "TransferAuthTest", op_uuid).await?;
         try_drain_initial_play_packets(&mut client).await?;
 
         let target_host = "127.0.0.1";
@@ -86,7 +89,7 @@ async fn test_transfer_without_secret_skips_token() {
 
         let mut client = TestClient::connect(server_a.port()).await?;
 
-        try_complete_login_flow_with_uuid(&mut client, op_uuid).await?;
+        try_complete_login_flow_with_uuid(&mut client, "TransferAuthTest", op_uuid).await?;
         try_drain_initial_play_packets(&mut client).await?;
 
         let target_host = "127.0.0.1";
@@ -105,53 +108,6 @@ async fn test_transfer_without_secret_skips_token() {
         Ok(())
     })
     .await;
-}
-
-async fn try_complete_login_flow_with_uuid(
-    client: &mut TestClient,
-    uuid: Uuid,
-) -> anyhow::Result<()> {
-    client.send_handshake(775, 2).await?;
-    client.send_login_start("TransferAuthTest", uuid).await?;
-
-    let _compression = client.read_packet().await?;
-    client.enable_compression(256);
-
-    let _login_success = client.read_packet().await?;
-
-    client.send_login_acknowledged().await?;
-
-    let _known_packs = client.read_packet().await?;
-
-    client.send_known_packs_response().await?;
-
-    loop {
-        let packet = client.read_packet().await?;
-        if packet.id == config_cb::FINISH_CONFIGURATION {
-            break;
-        }
-    }
-
-    client.send_acknowledge_finish_configuration().await?;
-
-    loop {
-        let packet = client.read_packet().await?;
-        if packet.id == play_cb::GAME_EVENT {
-            break;
-        }
-    }
-
-    Ok(())
-}
-
-async fn try_drain_initial_play_packets(client: &mut TestClient) -> anyhow::Result<()> {
-    loop {
-        let packet = client.read_packet().await?;
-        if packet.id == play_cb::CHUNK_BATCH_FINISHED {
-            break;
-        }
-    }
-    Ok(())
 }
 
 async fn complete_login_flow_and_check_cookie_request(client: &mut TestClient) {

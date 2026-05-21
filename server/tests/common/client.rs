@@ -76,6 +76,7 @@ impl TestClient {
         self.send_packet(config_sb::ACKNOWLEDGE_FINISH, &[]).await
     }
 
+    #[allow(dead_code)]
     pub async fn send_player_position(
         &mut self,
         x: f64,
