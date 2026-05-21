@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn test_build_generates_valid_lookup_tables() {
-        assert!(BLOCK_COUNT > 1000);
+        const { assert!(BLOCK_COUNT > 1000) };
         assert!(BLOCKS.get("minecraft:air").is_some());
         assert!(BLOCKS.get("minecraft:stone").is_some());
         let air = BLOCKS.get("minecraft:air").unwrap();
