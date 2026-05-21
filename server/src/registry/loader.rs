@@ -300,7 +300,7 @@ mod tests {
             load_registry("minecraft:painting_variant", 775)
                 .unwrap()
                 .len(),
-            50
+            51
         );
         assert_eq!(
             load_registry("minecraft:wolf_variant", 775).unwrap().len(),
@@ -323,7 +323,7 @@ mod tests {
         );
         assert_eq!(
             load_registry("minecraft:enchantment", 775).unwrap().len(),
-            42
+            43
         );
         assert_eq!(
             load_registry("minecraft:jukebox_song", 775).unwrap().len(),
@@ -338,13 +338,13 @@ mod tests {
             load_registry("minecraft:pig_sound_variant", 775)
                 .unwrap()
                 .len(),
-            1
+            3
         );
         assert_eq!(
             load_registry("minecraft:wolf_sound_variant", 775)
                 .unwrap()
                 .len(),
-            1
+            7
         );
         assert_eq!(
             load_registry("minecraft:frog_variant", 775).unwrap().len(),
@@ -358,19 +358,19 @@ mod tests {
             load_registry("minecraft:cat_sound_variant", 775)
                 .unwrap()
                 .len(),
-            1
+            2
         );
         assert_eq!(
             load_registry("minecraft:cow_sound_variant", 775)
                 .unwrap()
                 .len(),
-            1
+            2
         );
         assert_eq!(
             load_registry("minecraft:zombie_nautilus_variant", 775)
                 .unwrap()
                 .len(),
-            1
+            2
         );
         assert_eq!(
             load_registry("minecraft:chicken_variant", 775)
@@ -382,7 +382,7 @@ mod tests {
             load_registry("minecraft:chicken_sound_variant", 775)
                 .unwrap()
                 .len(),
-            1
+            2
         );
         assert_eq!(
             load_registry("minecraft:cow_variant", 775).unwrap().len(),
