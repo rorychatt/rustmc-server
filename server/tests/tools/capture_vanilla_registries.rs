@@ -35,6 +35,20 @@ use rustmc_server::registry::ALL_REGISTRY_IDS;
 const PROTOCOL_VERSION: i32 = 775;
 const REGISTRY_DATA_PACKET_ID: i32 = 0x07;
 
+const BOOL_BYTE_FIELDS: &[&str] = &[
+    "bed_works",
+    "decal",
+    "has_ceiling",
+    "has_precipitation",
+    "has_raids",
+    "has_skylight",
+    "natural",
+    "piglin_safe",
+    "replace_current_music",
+    "respawn_anchor_works",
+    "ultrawarm",
+];
+
 fn write_varint(buf: &mut Vec<u8>, mut value: i32) {
     loop {
         let byte = (value & 0x7F) as u8;
@@ -302,7 +316,7 @@ fn parse_nbt_compound_to_json(buf: &[u8], offset: &mut usize) -> io::Result<serd
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         *offset += name_len;
 
-        let value = parse_nbt_payload_to_json(buf, offset, child_type)?;
+        let value = parse_nbt_payload_to_json(buf, offset, child_type, &name)?;
         map.insert(name, value);
     }
 
@@ -313,6 +327,7 @@ fn parse_nbt_payload_to_json(
     buf: &[u8],
     offset: &mut usize,
     tag_type: u8,
+    field_name: &str,
 ) -> io::Result<serde_json::Value> {
     match tag_type {
         0x01 => {
@@ -322,11 +337,8 @@ fn parse_nbt_payload_to_json(
             }
             let b = buf[*offset];
             *offset += 1;
-            // Treat 0/1 as boolean per Minecraft convention
-            if b == 0 {
-                Ok(serde_json::Value::Bool(false))
-            } else if b == 1 {
-                Ok(serde_json::Value::Bool(true))
+            if (b == 0 || b == 1) && BOOL_BYTE_FIELDS.contains(&field_name) {
+                Ok(serde_json::Value::Bool(b == 1))
             } else {
                 Ok(serde_json::json!(b as i8))
             }
@@ -472,7 +484,7 @@ fn parse_nbt_payload_to_json(
             *offset += 4;
             let mut arr = Vec::with_capacity(count as usize);
             for _ in 0..count {
-                arr.push(parse_nbt_payload_to_json(buf, offset, elem_type)?);
+                arr.push(parse_nbt_payload_to_json(buf, offset, elem_type, "")?);
             }
             Ok(serde_json::Value::Array(arr))
         }
@@ -563,9 +575,7 @@ fn parse_nbt_payload_to_json(
     }
 }
 
-fn parse_registry_data_packet_full(
-    data: &[u8],
-) -> io::Result<(String, Vec<serde_json::Value>)> {
+fn parse_registry_data_packet_full(data: &[u8]) -> io::Result<(String, Vec<serde_json::Value>)> {
     let mut offset = 0;
     let registry_id = read_string_from_buf(data, &mut offset)?;
     let entry_count = read_varint_from_buf(data, &mut offset)? as usize;
@@ -804,8 +814,7 @@ fn capture_vanilla_registry_data() {
                 writer.write_packet(&Packet::new(0x03, vec![])).unwrap();
             }
             REGISTRY_DATA_PACKET_ID => {
-                let (reg_id, entries) =
-                    parse_registry_data_packet_full(&packet.data).unwrap();
+                let (reg_id, entries) = parse_registry_data_packet_full(&packet.data).unwrap();
                 println!("Captured {}: {} entries", reg_id, entries.len());
                 registries.insert(reg_id, entries);
             }
@@ -945,7 +954,7 @@ mod tests {
         let mut nbt = Vec::new();
         nbt.push(0x0A); // TAG_Compound root
         nbt.extend_from_slice(&0u16.to_be_bytes()); // empty root name
-        // String field: "name" = "test"
+                                                    // String field: "name" = "test"
         nbt.push(0x08); // TAG_String
         nbt.extend_from_slice(&4u16.to_be_bytes()); // name len
         nbt.extend_from_slice(b"name");
@@ -1017,7 +1026,7 @@ mod tests {
         nbt.push(0x0A);
         nbt.extend_from_slice(&0u16.to_be_bytes());
 
-        // Byte (bool true)
+        // Byte (not in BOOL_BYTE_FIELDS, stays as integer)
         nbt.push(0x01);
         nbt.extend_from_slice(&4u16.to_be_bytes());
         nbt.extend_from_slice(b"flag");
@@ -1051,7 +1060,7 @@ mod tests {
 
         let mut offset = 0;
         let result = parse_nbt_to_json(&nbt, &mut offset).unwrap();
-        assert_eq!(result["flag"], true);
+        assert_eq!(result["flag"], 1);
         assert_eq!(result["short"], 256);
         assert_eq!(result["long"], 9999999999i64);
         assert_eq!(result["float"], 1.5);
@@ -1120,5 +1129,26 @@ mod tests {
         let downfall = decoded["downfall"].as_f64().unwrap();
         assert!((downfall - 0.4).abs() < 0.001);
         assert_eq!(decoded["effects"]["fog_color"], 12638463);
+    }
+
+    #[test]
+    fn test_parse_nbt_byte_field_not_in_bool_list_stays_integer() {
+        let nbt = build_nbt_compound(&[("variant_id", 0x01, &[1])]);
+        let mut offset = 0;
+        let result = parse_nbt_to_json(&nbt, &mut offset).unwrap();
+        assert_eq!(result["variant_id"], 1);
+    }
+
+    #[test]
+    fn test_parse_nbt_byte_field_in_bool_list_stays_boolean() {
+        let nbt = build_nbt_compound(&[("has_precipitation", 0x01, &[1])]);
+        let mut offset = 0;
+        let result = parse_nbt_to_json(&nbt, &mut offset).unwrap();
+        assert_eq!(result["has_precipitation"], true);
+
+        let nbt_false = build_nbt_compound(&[("ultrawarm", 0x01, &[0])]);
+        let mut offset = 0;
+        let result = parse_nbt_to_json(&nbt_false, &mut offset).unwrap();
+        assert_eq!(result["ultrawarm"], false);
     }
 }
