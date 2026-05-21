@@ -56,6 +56,9 @@ pub fn json_to_nbt(value: &Value) -> io::Result<Vec<u8>> {
     let mut data = Vec::new();
     match value {
         Value::Object(_) => {
+            data.push(0x0A); // TAG_Compound
+            data.push(0x00); // Empty name length (MSB)
+            data.push(0x00); // Empty name length (LSB)
             write_compound_payload(&mut data, "", value)?;
         }
         _ => {
@@ -491,13 +494,12 @@ mod tests {
     }
 
     #[test]
-    fn test_network_nbt_no_root_header() {
+    fn test_network_nbt_has_root_header() {
         let value = json!({"key": "value"});
         let nbt = json_to_nbt(&value).unwrap();
-        assert!(
-            !(nbt[0] == 0x0A && nbt[1] == 0x00 && nbt[2] == 0x00),
-            "Network NBT must not start with root compound header (0x0A 0x00 0x00)"
-        );
+        assert_eq!(nbt[0], 0x0A); // TAG_Compound
+        assert_eq!(nbt[1], 0x00); // Root name length (MSB)
+        assert_eq!(nbt[2], 0x00); // Root name length (LSB)
     }
 
     #[test]
@@ -511,7 +513,7 @@ mod tests {
     fn test_network_nbt_empty_object() {
         let value = json!({});
         let nbt = json_to_nbt(&value).unwrap();
-        assert_eq!(nbt, vec![0x00], "Empty compound should be just TAG_End");
+        assert_eq!(nbt, vec![0x0A, 0x00, 0x00, 0x00], "Empty compound should be root compound + TAG_End");
     }
 
     #[test]

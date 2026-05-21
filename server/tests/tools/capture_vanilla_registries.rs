@@ -111,7 +111,34 @@ fn write_string(buf: &mut Vec<u8>, s: &str) {
 }
 
 fn skip_nbt(buf: &[u8], offset: &mut usize) -> io::Result<()> {
-    skip_nbt_payload(buf, offset, 0x0A)
+    if *offset >= buf.len() {
+        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "NBT: no data"));
+    }
+    let tag_type = buf[*offset];
+    *offset += 1;
+
+    if tag_type == 0x00 {
+        return Ok(());
+    }
+
+    if tag_type != 0x0A {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("NBT root must be TAG_Compound (0x0A), got 0x{tag_type:02X}"),
+        ));
+    }
+
+    // Network NBT: root compound has an empty name (2-byte length)
+    if *offset + 2 > buf.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "NBT root name",
+        ));
+    }
+    let name_len = u16::from_be_bytes([buf[*offset], buf[*offset + 1]]) as usize;
+    *offset += 2 + name_len;
+
+    skip_nbt_payload(buf, offset, tag_type)
 }
 
 fn skip_nbt_payload(buf: &[u8], offset: &mut usize, tag_type: u8) -> io::Result<()> {
@@ -248,6 +275,33 @@ fn skip_nbt_payload(buf: &[u8], offset: &mut usize, tag_type: u8) -> io::Result<
 }
 
 fn parse_nbt_to_json(buf: &[u8], offset: &mut usize) -> io::Result<serde_json::Value> {
+    if *offset >= buf.len() {
+        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "NBT: no data"));
+    }
+    let tag_type = buf[*offset];
+    *offset += 1;
+
+    if tag_type == 0x00 {
+        return Ok(serde_json::Value::Null);
+    }
+
+    if tag_type != 0x0A {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("NBT root must be TAG_Compound (0x0A), got 0x{tag_type:02X}"),
+        ));
+    }
+
+    // Network NBT: root compound has an empty name (2-byte length)
+    if *offset + 2 > buf.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "NBT root name",
+        ));
+    }
+    let name_len = u16::from_be_bytes([buf[*offset], buf[*offset + 1]]) as usize;
+    *offset += 2 + name_len;
+
     parse_nbt_compound_to_json(buf, offset)
 }
 
@@ -1062,6 +1116,8 @@ mod tests {
 
     fn build_nbt_compound(fields: &[(&str, u8, &[u8])]) -> Vec<u8> {
         let mut buf = Vec::new();
+        buf.push(0x0A); // TAG_Compound root
+        buf.extend_from_slice(&0u16.to_be_bytes()); // empty root name
         for &(name, tag_type, payload) in fields {
             buf.push(tag_type);
             buf.extend_from_slice(&(name.len() as u16).to_be_bytes());
@@ -1075,6 +1131,8 @@ mod tests {
     #[test]
     fn test_parse_nbt_simple_compound() {
         let mut nbt = Vec::new();
+        nbt.push(0x0A); // TAG_Compound root
+        nbt.extend_from_slice(&0u16.to_be_bytes()); // empty root name
         // String field: "name" = "test"
         nbt.push(0x08); // TAG_String
         nbt.extend_from_slice(&4u16.to_be_bytes()); // name len
@@ -1097,6 +1155,8 @@ mod tests {
     #[test]
     fn test_parse_nbt_nested_compound() {
         let mut nbt = Vec::new();
+        nbt.push(0x0A); // root compound
+        nbt.extend_from_slice(&0u16.to_be_bytes());
         // Nested compound: "inner" = { "msg": "hi" }
         nbt.push(0x0A); // TAG_Compound
         nbt.extend_from_slice(&5u16.to_be_bytes());
@@ -1117,6 +1177,8 @@ mod tests {
     #[test]
     fn test_parse_nbt_list() {
         let mut nbt = Vec::new();
+        nbt.push(0x0A); // root compound
+        nbt.extend_from_slice(&0u16.to_be_bytes());
         // List field: "items" = [1, 2, 3]
         nbt.push(0x09); // TAG_List
         nbt.extend_from_slice(&5u16.to_be_bytes());
@@ -1140,6 +1202,8 @@ mod tests {
     #[test]
     fn test_parse_nbt_all_primitive_types() {
         let mut nbt = Vec::new();
+        nbt.push(0x0A);
+        nbt.extend_from_slice(&0u16.to_be_bytes());
 
         // Byte (not in BOOL_BYTE_FIELDS, stays as integer)
         nbt.push(0x01);
@@ -1208,7 +1272,7 @@ mod tests {
         let encoded = json_to_nbt(&original).unwrap();
 
         let mut offset = 0;
-        let decoded = parse_nbt_compound_to_json(&encoded, &mut offset).unwrap();
+        let decoded = parse_nbt_to_json(&encoded, &mut offset).unwrap();
 
         assert_eq!(decoded["asset_id"], "minecraft:all_black");
         let conditions = decoded["spawn_conditions"].as_array().unwrap();
@@ -1236,7 +1300,7 @@ mod tests {
         let encoded = json_to_nbt(&original).unwrap();
 
         let mut offset = 0;
-        let decoded = parse_nbt_compound_to_json(&encoded, &mut offset).unwrap();
+        let decoded = parse_nbt_to_json(&encoded, &mut offset).unwrap();
 
         assert_eq!(decoded["has_precipitation"], true);
         let temp = decoded["temperature"].as_f64().unwrap();
