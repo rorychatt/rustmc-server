@@ -1,8 +1,11 @@
-//! Standalone tool to capture registry entry ordering from a vanilla Minecraft 1.21.4 server.
+//! Standalone tool to capture registry entry ordering and data from a vanilla Minecraft 1.21.4 server.
 //!
 //! Connects to a vanilla server, completes handshake → login → configuration,
 //! captures all Registry Data packets (0x07), and writes the ordered entry IDs
 //! to `server/tests/data/vanilla_registry_order.json`.
+//!
+//! The `capture_vanilla_registry_data` test additionally captures full NBT data
+//! and writes complete registry files to `server/data/registries/v775/`.
 //!
 //! Supports servers with compression enabled (default `network-compression-threshold=256`).
 //!
@@ -11,7 +14,11 @@
 //! Start a vanilla 1.21.4 server with `online-mode=false`, then run:
 //!
 //! ```sh
-//! VANILLA_HOST=127.0.0.1 VANILLA_PORT=25565 cargo test --test capture_vanilla_registries -- --ignored
+//! # Capture ordering only:
+//! VANILLA_HOST=127.0.0.1 VANILLA_PORT=25565 cargo test --test capture_vanilla_registries -- --ignored capture_vanilla_registry_ordering
+//!
+//! # Capture full registry data (IDs + NBT):
+//! VANILLA_HOST=127.0.0.1 VANILLA_PORT=25565 cargo test --test capture_vanilla_registries -- --ignored capture_vanilla_registry_data
 //! ```
 //!
 //! Environment variables:
@@ -236,6 +243,358 @@ fn skip_nbt_payload(buf: &[u8], offset: &mut usize, tag_type: u8) -> io::Result<
     }
 }
 
+fn parse_nbt_to_json(buf: &[u8], offset: &mut usize) -> io::Result<serde_json::Value> {
+    if *offset >= buf.len() {
+        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "NBT: no data"));
+    }
+    let tag_type = buf[*offset];
+    *offset += 1;
+
+    if tag_type == 0x00 {
+        return Ok(serde_json::Value::Null);
+    }
+
+    if tag_type != 0x0A {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("NBT root must be TAG_Compound (0x0A), got 0x{tag_type:02X}"),
+        ));
+    }
+
+    // Network NBT: root compound has an empty name (2-byte length)
+    if *offset + 2 > buf.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "NBT root name",
+        ));
+    }
+    let name_len = u16::from_be_bytes([buf[*offset], buf[*offset + 1]]) as usize;
+    *offset += 2 + name_len;
+
+    parse_nbt_compound_to_json(buf, offset)
+}
+
+fn parse_nbt_compound_to_json(buf: &[u8], offset: &mut usize) -> io::Result<serde_json::Value> {
+    let mut map = serde_json::Map::new();
+
+    loop {
+        if *offset >= buf.len() {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "NBT compound"));
+        }
+        let child_type = buf[*offset];
+        *offset += 1;
+        if child_type == 0x00 {
+            break;
+        }
+
+        if *offset + 2 > buf.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "NBT compound name",
+            ));
+        }
+        let name_len = u16::from_be_bytes([buf[*offset], buf[*offset + 1]]) as usize;
+        *offset += 2;
+        if *offset + name_len > buf.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "NBT compound name data",
+            ));
+        }
+        let name = String::from_utf8(buf[*offset..*offset + name_len].to_vec())
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        *offset += name_len;
+
+        let value = parse_nbt_payload_to_json(buf, offset, child_type)?;
+        map.insert(name, value);
+    }
+
+    Ok(serde_json::Value::Object(map))
+}
+
+fn parse_nbt_payload_to_json(
+    buf: &[u8],
+    offset: &mut usize,
+    tag_type: u8,
+) -> io::Result<serde_json::Value> {
+    match tag_type {
+        0x01 => {
+            // TAG_Byte → bool (0/1) or integer
+            if *offset >= buf.len() {
+                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "NBT byte"));
+            }
+            let b = buf[*offset];
+            *offset += 1;
+            // Treat 0/1 as boolean per Minecraft convention
+            if b == 0 {
+                Ok(serde_json::Value::Bool(false))
+            } else if b == 1 {
+                Ok(serde_json::Value::Bool(true))
+            } else {
+                Ok(serde_json::json!(b as i8))
+            }
+        }
+        0x02 => {
+            // TAG_Short
+            if *offset + 2 > buf.len() {
+                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "NBT short"));
+            }
+            let v = i16::from_be_bytes([buf[*offset], buf[*offset + 1]]);
+            *offset += 2;
+            Ok(serde_json::json!(v))
+        }
+        0x03 => {
+            // TAG_Int
+            if *offset + 4 > buf.len() {
+                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "NBT int"));
+            }
+            let v = i32::from_be_bytes([
+                buf[*offset],
+                buf[*offset + 1],
+                buf[*offset + 2],
+                buf[*offset + 3],
+            ]);
+            *offset += 4;
+            Ok(serde_json::json!(v))
+        }
+        0x04 => {
+            // TAG_Long
+            if *offset + 8 > buf.len() {
+                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "NBT long"));
+            }
+            let v = i64::from_be_bytes([
+                buf[*offset],
+                buf[*offset + 1],
+                buf[*offset + 2],
+                buf[*offset + 3],
+                buf[*offset + 4],
+                buf[*offset + 5],
+                buf[*offset + 6],
+                buf[*offset + 7],
+            ]);
+            *offset += 8;
+            Ok(serde_json::json!(v))
+        }
+        0x05 => {
+            // TAG_Float → f64 (via f32 for vanilla precision)
+            if *offset + 4 > buf.len() {
+                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "NBT float"));
+            }
+            let v = f32::from_be_bytes([
+                buf[*offset],
+                buf[*offset + 1],
+                buf[*offset + 2],
+                buf[*offset + 3],
+            ]);
+            *offset += 4;
+            Ok(serde_json::json!(v as f64))
+        }
+        0x06 => {
+            // TAG_Double
+            if *offset + 8 > buf.len() {
+                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "NBT double"));
+            }
+            let v = f64::from_be_bytes([
+                buf[*offset],
+                buf[*offset + 1],
+                buf[*offset + 2],
+                buf[*offset + 3],
+                buf[*offset + 4],
+                buf[*offset + 5],
+                buf[*offset + 6],
+                buf[*offset + 7],
+            ]);
+            *offset += 8;
+            Ok(serde_json::json!(v))
+        }
+        0x07 => {
+            // TAG_Byte_Array
+            if *offset + 4 > buf.len() {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "NBT byte array len",
+                ));
+            }
+            let len = i32::from_be_bytes([
+                buf[*offset],
+                buf[*offset + 1],
+                buf[*offset + 2],
+                buf[*offset + 3],
+            ]) as usize;
+            *offset += 4;
+            if *offset + len > buf.len() {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "NBT byte array data",
+                ));
+            }
+            let arr: Vec<serde_json::Value> = buf[*offset..*offset + len]
+                .iter()
+                .map(|&b| serde_json::json!(b as i8))
+                .collect();
+            *offset += len;
+            Ok(serde_json::Value::Array(arr))
+        }
+        0x08 => {
+            // TAG_String
+            if *offset + 2 > buf.len() {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "NBT string len",
+                ));
+            }
+            let len = u16::from_be_bytes([buf[*offset], buf[*offset + 1]]) as usize;
+            *offset += 2;
+            if *offset + len > buf.len() {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "NBT string data",
+                ));
+            }
+            let s = String::from_utf8(buf[*offset..*offset + len].to_vec())
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            *offset += len;
+            Ok(serde_json::Value::String(s))
+        }
+        0x09 => {
+            // TAG_List
+            if *offset + 5 > buf.len() {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "NBT list header",
+                ));
+            }
+            let elem_type = buf[*offset];
+            *offset += 1;
+            let count = i32::from_be_bytes([
+                buf[*offset],
+                buf[*offset + 1],
+                buf[*offset + 2],
+                buf[*offset + 3],
+            ]);
+            *offset += 4;
+            let mut arr = Vec::with_capacity(count as usize);
+            for _ in 0..count {
+                arr.push(parse_nbt_payload_to_json(buf, offset, elem_type)?);
+            }
+            Ok(serde_json::Value::Array(arr))
+        }
+        0x0A => {
+            // TAG_Compound
+            parse_nbt_compound_to_json(buf, offset)
+        }
+        0x0B => {
+            // TAG_Int_Array
+            if *offset + 4 > buf.len() {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "NBT int array len",
+                ));
+            }
+            let count = i32::from_be_bytes([
+                buf[*offset],
+                buf[*offset + 1],
+                buf[*offset + 2],
+                buf[*offset + 3],
+            ]) as usize;
+            *offset += 4;
+            if *offset + count * 4 > buf.len() {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "NBT int array data",
+                ));
+            }
+            let arr: Vec<serde_json::Value> = (0..count)
+                .map(|i| {
+                    let start = *offset + i * 4;
+                    let v = i32::from_be_bytes([
+                        buf[start],
+                        buf[start + 1],
+                        buf[start + 2],
+                        buf[start + 3],
+                    ]);
+                    serde_json::json!(v)
+                })
+                .collect();
+            *offset += count * 4;
+            Ok(serde_json::Value::Array(arr))
+        }
+        0x0C => {
+            // TAG_Long_Array
+            if *offset + 4 > buf.len() {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "NBT long array len",
+                ));
+            }
+            let count = i32::from_be_bytes([
+                buf[*offset],
+                buf[*offset + 1],
+                buf[*offset + 2],
+                buf[*offset + 3],
+            ]) as usize;
+            *offset += 4;
+            if *offset + count * 8 > buf.len() {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "NBT long array data",
+                ));
+            }
+            let arr: Vec<serde_json::Value> = (0..count)
+                .map(|i| {
+                    let start = *offset + i * 8;
+                    let v = i64::from_be_bytes([
+                        buf[start],
+                        buf[start + 1],
+                        buf[start + 2],
+                        buf[start + 3],
+                        buf[start + 4],
+                        buf[start + 5],
+                        buf[start + 6],
+                        buf[start + 7],
+                    ]);
+                    serde_json::json!(v)
+                })
+                .collect();
+            *offset += count * 8;
+            Ok(serde_json::Value::Array(arr))
+        }
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Unknown NBT tag type: 0x{tag_type:02X}"),
+        )),
+    }
+}
+
+fn parse_registry_data_packet_full(
+    data: &[u8],
+) -> io::Result<(String, Vec<serde_json::Value>)> {
+    let mut offset = 0;
+    let registry_id = read_string_from_buf(data, &mut offset)?;
+    let entry_count = read_varint_from_buf(data, &mut offset)? as usize;
+    let mut entries = Vec::with_capacity(entry_count);
+
+    for _ in 0..entry_count {
+        let entry_id = read_string_from_buf(data, &mut offset)?;
+
+        if offset >= data.len() {
+            entries.push(serde_json::json!({"id": entry_id}));
+            break;
+        }
+        let has_data = data[offset] != 0;
+        offset += 1;
+
+        if has_data {
+            let nbt_value = parse_nbt_to_json(data, &mut offset)?;
+            entries.push(serde_json::json!({"id": entry_id, "data": nbt_value}));
+        } else {
+            entries.push(serde_json::json!({"id": entry_id}));
+        }
+    }
+
+    Ok((registry_id, entries))
+}
+
 fn parse_registry_data_packet(
     data: &[u8],
 ) -> io::Result<(String, Vec<RegistryEntry>)> {
@@ -345,7 +704,7 @@ fn capture_vanilla_registry_ordering() {
 
     // Filter entries within each registry to only those in our data files
     let data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data/registries/v775");
-    let registry_to_file: HashMap<&str, &str> = registry_to_file_map();
+    let registry_to_file = registry_to_file_mapping();
 
     for (registry_id, entries) in registries.iter_mut() {
         if let Some(&filename) = registry_to_file.get(registry_id.as_str()) {
@@ -392,7 +751,7 @@ fn capture_vanilla_registry_ordering() {
     println!("Written registry NBT data to {}", data_path.display());
 }
 
-fn registry_to_file_map() -> HashMap<&'static str, &'static str> {
+fn registry_to_file_mapping() -> HashMap<&'static str, &'static str> {
     [
         ("minecraft:banner_pattern", "banner_pattern.json"),
         ("minecraft:chat_type", "chat_type.json"),
@@ -433,6 +792,103 @@ fn registry_to_file_map() -> HashMap<&'static str, &'static str> {
     .collect()
 }
 
+#[test]
+#[ignore]
+fn capture_vanilla_registry_data() {
+    let host = std::env::var("VANILLA_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let port: u16 = std::env::var("VANILLA_PORT")
+        .unwrap_or_else(|_| "25565".to_string())
+        .parse()
+        .expect("VANILLA_PORT must be a valid port number");
+
+    let stream =
+        TcpStream::connect(format!("{host}:{port}")).expect("Failed to connect to vanilla server");
+    let mut reader = PacketReader::new(stream.try_clone().unwrap());
+    let mut writer = PacketWriter::new(stream);
+
+    // Handshake (state=2 for Login)
+    let mut handshake_data = Vec::new();
+    write_varint(&mut handshake_data, PROTOCOL_VERSION);
+    write_string(&mut handshake_data, &host);
+    handshake_data.extend_from_slice(&port.to_be_bytes());
+    write_varint(&mut handshake_data, 2);
+    writer
+        .write_packet(&Packet::new(0x00, handshake_data))
+        .unwrap();
+
+    // Login Start
+    let mut login_data = Vec::new();
+    write_string(&mut login_data, "RegistryCapture");
+    login_data.extend_from_slice(&[0u8; 16]);
+    writer.write_packet(&Packet::new(0x00, login_data)).unwrap();
+
+    let mut registries: HashMap<String, Vec<serde_json::Value>> = HashMap::new();
+
+    loop {
+        let packet = reader.read_packet().unwrap();
+
+        match packet.id {
+            0x03 if registries.is_empty() => {
+                let mut offset = 0;
+                let threshold = read_varint_from_buf(&packet.data, &mut offset).unwrap();
+                reader.set_compression_threshold(threshold);
+                writer.set_compression_threshold(threshold);
+                println!("Compression enabled with threshold {threshold}");
+            }
+            0x02 => {
+                writer.write_packet(&Packet::new(0x03, vec![])).unwrap();
+            }
+            REGISTRY_DATA_PACKET_ID => {
+                let (reg_id, entries) =
+                    parse_registry_data_packet_full(&packet.data).unwrap();
+                println!("Captured {}: {} entries", reg_id, entries.len());
+                registries.insert(reg_id, entries);
+            }
+            0x03 => {
+                break;
+            }
+            0x0E => {
+                let mut response = Vec::new();
+                write_varint(&mut response, 0);
+                writer.write_packet(&Packet::new(0x07, response)).unwrap();
+            }
+            _ => {}
+        }
+    }
+
+    let registry_to_file = registry_to_file_mapping();
+    let data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data/registries/v775");
+
+    for (registry_id, entries) in &registries {
+        let Some(&filename) = registry_to_file.get(registry_id.as_str()) else {
+            println!("Skipping {registry_id}: no file mapping");
+            continue;
+        };
+
+        // Write in compact format: one JSON object per line
+        let mut output = String::from("[\n");
+        for (i, entry) in entries.iter().enumerate() {
+            output.push_str("  ");
+            output.push_str(&serde_json::to_string(entry).unwrap());
+            if i < entries.len() - 1 {
+                output.push(',');
+            }
+            output.push('\n');
+        }
+        output.push_str("]\n");
+
+        let file_path = data_dir.join(filename);
+        std::fs::write(&file_path, &output).unwrap();
+        println!("Written {filename}: {} entries", entries.len());
+    }
+
+    println!(
+        "\nCapture complete: {} registries written to {}",
+        registries.len(),
+        data_dir.display()
+    );
+}
+
 fn rekey_entry(entry: &serde_json::Value) -> serde_json::Value {
     let obj = entry.as_object().unwrap();
     let mut new_obj = serde_json::Map::with_capacity(obj.len());
@@ -454,8 +910,7 @@ fn reorder_registry_files_to_match_vanilla() {
         serde_json::from_str(include_str!("../../tests/data/vanilla_registry_order.json")).unwrap();
 
     let data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data/registries/v775");
-
-    let registry_to_file: HashMap<&str, &str> = registry_to_file_map();
+    let registry_to_file = registry_to_file_mapping();
 
     for (registry_id, expected_order) in &snapshot {
         let Some(&filename) = registry_to_file.get(registry_id.as_str()) else {
@@ -513,7 +968,7 @@ fn validate_registry_nbt_data() {
         serde_json::from_str(&snapshot_str).unwrap();
 
     let data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data/registries/v775");
-    let registry_to_file = registry_to_file_map();
+    let registry_to_file = registry_to_file_mapping();
 
     let mut mismatches = Vec::new();
     let mut missing_in_ours = Vec::new();
@@ -626,4 +1081,206 @@ fn validate_registry_nbt_data() {
         "{} NBT data mismatches detected",
         mismatches.len()
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn build_nbt_compound(fields: &[(&str, u8, &[u8])]) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.push(0x0A); // TAG_Compound root
+        buf.extend_from_slice(&0u16.to_be_bytes()); // empty root name
+        for &(name, tag_type, payload) in fields {
+            buf.push(tag_type);
+            buf.extend_from_slice(&(name.len() as u16).to_be_bytes());
+            buf.extend_from_slice(name.as_bytes());
+            buf.extend_from_slice(payload);
+        }
+        buf.push(0x00); // TAG_End
+        buf
+    }
+
+    #[test]
+    fn test_parse_nbt_simple_compound() {
+        let mut nbt = Vec::new();
+        nbt.push(0x0A); // TAG_Compound root
+        nbt.extend_from_slice(&0u16.to_be_bytes()); // empty root name
+        // String field: "name" = "test"
+        nbt.push(0x08); // TAG_String
+        nbt.extend_from_slice(&4u16.to_be_bytes()); // name len
+        nbt.extend_from_slice(b"name");
+        nbt.extend_from_slice(&4u16.to_be_bytes()); // value len
+        nbt.extend_from_slice(b"test");
+        // Int field: "value" = 42
+        nbt.push(0x03); // TAG_Int
+        nbt.extend_from_slice(&5u16.to_be_bytes());
+        nbt.extend_from_slice(b"value");
+        nbt.extend_from_slice(&42i32.to_be_bytes());
+        nbt.push(0x00); // TAG_End
+
+        let mut offset = 0;
+        let result = parse_nbt_to_json(&nbt, &mut offset).unwrap();
+        assert_eq!(result["name"], "test");
+        assert_eq!(result["value"], 42);
+    }
+
+    #[test]
+    fn test_parse_nbt_nested_compound() {
+        let mut nbt = Vec::new();
+        nbt.push(0x0A); // root compound
+        nbt.extend_from_slice(&0u16.to_be_bytes());
+        // Nested compound: "inner" = { "msg": "hi" }
+        nbt.push(0x0A); // TAG_Compound
+        nbt.extend_from_slice(&5u16.to_be_bytes());
+        nbt.extend_from_slice(b"inner");
+        nbt.push(0x08); // TAG_String
+        nbt.extend_from_slice(&3u16.to_be_bytes());
+        nbt.extend_from_slice(b"msg");
+        nbt.extend_from_slice(&2u16.to_be_bytes());
+        nbt.extend_from_slice(b"hi");
+        nbt.push(0x00); // end inner
+        nbt.push(0x00); // end root
+
+        let mut offset = 0;
+        let result = parse_nbt_to_json(&nbt, &mut offset).unwrap();
+        assert_eq!(result["inner"]["msg"], "hi");
+    }
+
+    #[test]
+    fn test_parse_nbt_list() {
+        let mut nbt = Vec::new();
+        nbt.push(0x0A); // root compound
+        nbt.extend_from_slice(&0u16.to_be_bytes());
+        // List field: "items" = [1, 2, 3]
+        nbt.push(0x09); // TAG_List
+        nbt.extend_from_slice(&5u16.to_be_bytes());
+        nbt.extend_from_slice(b"items");
+        nbt.push(0x03); // element type: TAG_Int
+        nbt.extend_from_slice(&3i32.to_be_bytes()); // count
+        nbt.extend_from_slice(&1i32.to_be_bytes());
+        nbt.extend_from_slice(&2i32.to_be_bytes());
+        nbt.extend_from_slice(&3i32.to_be_bytes());
+        nbt.push(0x00); // end root
+
+        let mut offset = 0;
+        let result = parse_nbt_to_json(&nbt, &mut offset).unwrap();
+        let items = result["items"].as_array().unwrap();
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0], 1);
+        assert_eq!(items[1], 2);
+        assert_eq!(items[2], 3);
+    }
+
+    #[test]
+    fn test_parse_nbt_all_primitive_types() {
+        let mut nbt = Vec::new();
+        nbt.push(0x0A);
+        nbt.extend_from_slice(&0u16.to_be_bytes());
+
+        // Byte (bool true)
+        nbt.push(0x01);
+        nbt.extend_from_slice(&4u16.to_be_bytes());
+        nbt.extend_from_slice(b"flag");
+        nbt.push(1);
+
+        // Short
+        nbt.push(0x02);
+        nbt.extend_from_slice(&5u16.to_be_bytes());
+        nbt.extend_from_slice(b"short");
+        nbt.extend_from_slice(&256i16.to_be_bytes());
+
+        // Long
+        nbt.push(0x04);
+        nbt.extend_from_slice(&4u16.to_be_bytes());
+        nbt.extend_from_slice(b"long");
+        nbt.extend_from_slice(&9999999999i64.to_be_bytes());
+
+        // Float
+        nbt.push(0x05);
+        nbt.extend_from_slice(&5u16.to_be_bytes());
+        nbt.extend_from_slice(b"float");
+        nbt.extend_from_slice(&1.5f32.to_be_bytes());
+
+        // Double
+        nbt.push(0x06);
+        nbt.extend_from_slice(&6u16.to_be_bytes());
+        nbt.extend_from_slice(b"double");
+        nbt.extend_from_slice(&1.23456f64.to_be_bytes());
+
+        nbt.push(0x00);
+
+        let mut offset = 0;
+        let result = parse_nbt_to_json(&nbt, &mut offset).unwrap();
+        assert_eq!(result["flag"], true);
+        assert_eq!(result["short"], 256);
+        assert_eq!(result["long"], 9999999999i64);
+        assert_eq!(result["float"], 1.5);
+        assert_eq!(result["double"], 1.23456f64);
+    }
+
+    #[test]
+    fn test_parse_nbt_empty_compound() {
+        let nbt = build_nbt_compound(&[]);
+        let mut offset = 0;
+        let result = parse_nbt_to_json(&nbt, &mut offset).unwrap();
+        assert_eq!(result, json!({}));
+    }
+
+    #[test]
+    fn test_parse_nbt_roundtrip_with_encoder() {
+        let original = json!({
+            "asset_id": "minecraft:all_black",
+            "spawn_conditions": [
+                {
+                    "context": {
+                        "min_light": 0,
+                        "max_light": 15
+                    },
+                    "chance": 0.0625
+                }
+            ]
+        });
+
+        let encoded = json_to_nbt(&original).unwrap();
+
+        let mut offset = 0;
+        let decoded = parse_nbt_to_json(&encoded, &mut offset).unwrap();
+
+        assert_eq!(decoded["asset_id"], "minecraft:all_black");
+        let conditions = decoded["spawn_conditions"].as_array().unwrap();
+        assert_eq!(conditions.len(), 1);
+        assert_eq!(conditions[0]["context"]["min_light"], 0);
+        assert_eq!(conditions[0]["context"]["max_light"], 15);
+        let chance = conditions[0]["chance"].as_f64().unwrap();
+        assert!((chance - 0.0625).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_parse_nbt_roundtrip_biome() {
+        let original = json!({
+            "has_precipitation": true,
+            "temperature": 0.8,
+            "downfall": 0.4,
+            "effects": {
+                "fog_color": 12638463,
+                "water_color": 4159204,
+                "water_fog_color": 329011,
+                "sky_color": 7972607
+            }
+        });
+
+        let encoded = json_to_nbt(&original).unwrap();
+
+        let mut offset = 0;
+        let decoded = parse_nbt_to_json(&encoded, &mut offset).unwrap();
+
+        assert_eq!(decoded["has_precipitation"], true);
+        let temp = decoded["temperature"].as_f64().unwrap();
+        assert!((temp - 0.8).abs() < 0.001);
+        let downfall = decoded["downfall"].as_f64().unwrap();
+        assert!((downfall - 0.4).abs() < 0.001);
+        assert_eq!(decoded["effects"]["fog_color"], 12638463);
+    }
 }

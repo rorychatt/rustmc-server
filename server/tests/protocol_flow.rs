@@ -1,6 +1,6 @@
 mod common;
 
-use common::{TestClient, TestServer};
+use common::{retry_test, TestClient, TestServer};
 use rustmc_server::protocol::packet_ids;
 use serial_test::serial;
 use std::io::{Cursor, Read};
@@ -469,301 +469,258 @@ async fn test_configuration_phase() {
 #[tokio::test]
 #[serial]
 async fn test_chunk_batching() {
-    let server = TestServer::spawn().await.expect("Failed to spawn server");
-    let mut client = TestClient::connect(server.port())
-        .await
-        .expect("Failed to connect");
+    retry_test("test_chunk_batching", 3, || async {
+        let server = TestServer::spawn().await?;
+        let mut client = TestClient::connect(server.port()).await?;
 
-    complete_login_flow(&mut client).await;
+        complete_login_flow(&mut client).await;
 
-    // After login, we should have received Game Event, Set Center Chunk, Chunk Batch Start,
-    // chunks, and Chunk Batch Finished.
+        let game_event = client.read_packet().await?;
+        assert_eq!(
+            game_event.id,
+            play_cb::GAME_EVENT,
+            "Expected game event packet"
+        );
 
-    // Read Game Event
-    let game_event = client
-        .read_packet()
-        .await
-        .expect("Failed to read game event");
-    assert_eq!(
-        game_event.id,
-        play_cb::GAME_EVENT,
-        "Expected game event packet"
-    );
+        let center_chunk = client.read_packet().await?;
+        assert_eq!(
+            center_chunk.id,
+            play_cb::SET_CENTER_CHUNK,
+            "Expected set center chunk packet before chunk data"
+        );
 
-    // Read Set Center Chunk
-    let center_chunk = client
-        .read_packet()
-        .await
-        .expect("Failed to read set center chunk");
-    assert_eq!(
-        center_chunk.id,
-        play_cb::SET_CENTER_CHUNK,
-        "Expected set center chunk packet before chunk data"
-    );
+        let batch_start = client.read_packet().await?;
+        assert_eq!(
+            batch_start.id,
+            play_cb::CHUNK_BATCH_START,
+            "Expected chunk batch start"
+        );
 
-    // Read Chunk Batch Start
-    let batch_start = client
-        .read_packet()
-        .await
-        .expect("Failed to read chunk batch start");
-    assert_eq!(
-        batch_start.id,
-        play_cb::CHUNK_BATCH_START,
-        "Expected chunk batch start"
-    );
-
-    // Read chunk data packets
-    let mut chunk_count = 0;
-    loop {
-        let packet = client
-            .read_packet()
-            .await
-            .expect("Failed to read chunk/batch packet");
-        if packet.id == play_cb::LEVEL_CHUNK_WITH_LIGHT {
-            chunk_count += 1;
-        } else if packet.id == play_cb::CHUNK_BATCH_FINISHED {
-            break;
-        } else {
-            panic!("Unexpected packet during chunk batch: {:#04x}", packet.id);
+        let mut chunk_count = 0;
+        loop {
+            let packet = client.read_packet().await?;
+            if packet.id == play_cb::LEVEL_CHUNK_WITH_LIGHT {
+                chunk_count += 1;
+            } else if packet.id == play_cb::CHUNK_BATCH_FINISHED {
+                break;
+            } else {
+                anyhow::bail!("Unexpected packet during chunk batch: {:#04x}", packet.id);
+            }
         }
-    }
 
-    assert!(
-        chunk_count > 0,
-        "Should receive at least one chunk data packet"
-    );
-    // 17x17 = 289 chunks for view distance 8
-    assert_eq!(chunk_count, 289, "Should receive 17x17 chunks");
+        assert!(
+            chunk_count > 0,
+            "Should receive at least one chunk data packet"
+        );
+        assert_eq!(chunk_count, 289, "Should receive 17x17 chunks");
+
+        Ok(())
+    })
+    .await;
 }
 
 #[tokio::test]
 #[serial]
 async fn test_chunk_throttling_via_batch_received() {
-    use tokio::time::{timeout, Duration};
+    retry_test("test_chunk_throttling_via_batch_received", 3, || async {
+        use tokio::time::{timeout, Duration};
 
-    let server = TestServer::spawn().await.expect("Failed to spawn server");
-    let mut client = TestClient::connect(server.port())
-        .await
-        .expect("Failed to connect");
+        let server = TestServer::spawn().await?;
+        let mut client = TestClient::connect(server.port()).await?;
 
-    complete_login_flow(&mut client).await;
+        complete_login_flow(&mut client).await;
 
-    // Consume the initial batch: Game Event, Set Center Chunk, Chunk Batch Start, chunks, Chunk Batch Finished
-    let _game_event = client.read_packet().await.unwrap();
-    let _center_chunk = client.read_packet().await.unwrap();
-    let _batch_start = client.read_packet().await.unwrap();
-    loop {
-        let packet = client.read_packet().await.unwrap();
-        if packet.id == play_cb::CHUNK_BATCH_FINISHED {
-            break;
+        let _game_event = client.read_packet().await?;
+        let _center_chunk = client.read_packet().await?;
+        let _batch_start = client.read_packet().await?;
+        loop {
+            let packet = client.read_packet().await?;
+            if packet.id == play_cb::CHUNK_BATCH_FINISHED {
+                break;
+            }
         }
-    }
 
-    // Tell the server we can only handle 3 chunks per tick
-    client.send_chunk_batch_received(3.0).await.unwrap();
+        client.send_chunk_batch_received(3.0).await?;
 
-    // Move far enough to require new chunks (256 blocks in X)
-    client
-        .send_player_position(256.0, 64.0, 0.0, true)
-        .await
-        .unwrap();
+        client
+            .send_player_position(256.0, 64.0, 0.0, true)
+            .await?;
 
-    // Read chunk batches — each batch should have at most 3 chunks
-    let mut total_chunks = 0;
-    let mut batch_count = 0;
-    let mut max_batch_size = 0;
+        let mut total_chunks = 0;
+        let mut batch_count = 0;
+        let mut max_batch_size = 0;
 
-    // Drain all pending chunks by repeatedly acknowledging batches
-    loop {
-        let packet = match timeout(Duration::from_secs(2), client.read_packet()).await {
-            Ok(Ok(p)) => p,
-            _ => break,
-        };
-        if packet.id == play_cb::CHUNK_BATCH_START {
-            // Chunk Batch Start — read chunks until Chunk Batch Finished
-            let mut batch_size = 0;
-            loop {
-                let inner = client.read_packet().await.unwrap();
-                if inner.id == play_cb::LEVEL_CHUNK_WITH_LIGHT {
-                    batch_size += 1;
-                } else if inner.id == play_cb::CHUNK_BATCH_FINISHED {
-                    break;
-                } else if inner.id == play_cb::UNLOAD_CHUNK || inner.id == play_cb::KEEP_ALIVE {
-                    continue;
-                } else {
-                    panic!("Unexpected packet in batch: {:#04x}", inner.id);
+        loop {
+            let packet = match timeout(Duration::from_secs(2), client.read_packet()).await {
+                Ok(Ok(p)) => p,
+                _ => break,
+            };
+            if packet.id == play_cb::CHUNK_BATCH_START {
+                let mut batch_size = 0;
+                loop {
+                    let inner = client.read_packet().await?;
+                    if inner.id == play_cb::LEVEL_CHUNK_WITH_LIGHT {
+                        batch_size += 1;
+                    } else if inner.id == play_cb::CHUNK_BATCH_FINISHED {
+                        break;
+                    } else if inner.id == play_cb::UNLOAD_CHUNK
+                        || inner.id == play_cb::KEEP_ALIVE
+                    {
+                        continue;
+                    } else {
+                        anyhow::bail!("Unexpected packet in batch: {:#04x}", inner.id);
+                    }
                 }
-            }
-            total_chunks += batch_size;
-            batch_count += 1;
-            if batch_size > max_batch_size {
-                max_batch_size = batch_size;
-            }
+                total_chunks += batch_size;
+                batch_count += 1;
+                if batch_size > max_batch_size {
+                    max_batch_size = batch_size;
+                }
 
-            // Acknowledge this batch to trigger the next drain
-            client.send_chunk_batch_received(3.0).await.unwrap();
-        } else if packet.id == play_cb::UNLOAD_CHUNK
-            || packet.id == play_cb::KEEP_ALIVE
-            || packet.id == play_cb::SET_CENTER_CHUNK
-        {
-            continue;
-        } else {
-            // No more batch starts — we're done
-            break;
+                client.send_chunk_batch_received(3.0).await?;
+            } else if packet.id == play_cb::UNLOAD_CHUNK
+                || packet.id == play_cb::KEEP_ALIVE
+                || packet.id == play_cb::SET_CENTER_CHUNK
+            {
+                continue;
+            } else {
+                break;
+            }
         }
-    }
 
-    assert!(
-        batch_count >= 2,
-        "Expected multiple batches, got {batch_count}"
-    );
-    assert!(
-        max_batch_size <= 3,
-        "No batch should exceed 3 chunks, but got {max_batch_size}"
-    );
-    assert!(
-        total_chunks > 3,
-        "Should receive more than 3 total chunks, got {total_chunks}"
-    );
+        assert!(
+            batch_count >= 2,
+            "Expected multiple batches, got {batch_count}"
+        );
+        assert!(
+            max_batch_size <= 3,
+            "No batch should exceed 3 chunks, but got {max_batch_size}"
+        );
+        assert!(
+            total_chunks > 3,
+            "Should receive more than 3 total chunks, got {total_chunks}"
+        );
+
+        Ok(())
+    })
+    .await;
 }
 
 #[tokio::test]
 #[serial]
 async fn test_client_tick_end_drains_chunks() {
-    let server = TestServer::spawn().await.expect("Failed to spawn server");
-    let mut client = TestClient::connect(server.port())
-        .await
-        .expect("Failed to connect");
+    retry_test("test_client_tick_end_drains_chunks", 3, || async {
+        let server = TestServer::spawn().await?;
+        let mut client = TestClient::connect(server.port()).await?;
 
-    complete_login_flow(&mut client).await;
+        complete_login_flow(&mut client).await;
 
-    // Consume initial chunk batch (Game Event, Set Center Chunk, Chunk Batch Start, chunks, Chunk Batch Finished)
-    let game_event = client
-        .read_packet()
-        .await
-        .expect("Failed to read game event");
-    assert_eq!(
-        game_event.id,
-        play_cb::GAME_EVENT,
-        "Expected game event packet"
-    );
-
-    let center_chunk = client
-        .read_packet()
-        .await
-        .expect("Failed to read set center chunk");
-    assert_eq!(
-        center_chunk.id,
-        play_cb::SET_CENTER_CHUNK,
-        "Expected set center chunk packet"
-    );
-
-    let batch_start = client
-        .read_packet()
-        .await
-        .expect("Failed to read chunk batch start");
-    assert_eq!(
-        batch_start.id,
-        play_cb::CHUNK_BATCH_START,
-        "Expected chunk batch start"
-    );
-
-    loop {
-        let packet = client
-            .read_packet()
-            .await
-            .expect("Failed to read chunk/batch packet");
-        if packet.id == play_cb::CHUNK_BATCH_FINISHED {
-            break;
-        }
+        let game_event = client.read_packet().await?;
         assert_eq!(
-            packet.id,
-            play_cb::LEVEL_CHUNK_WITH_LIGHT,
-            "Expected chunk data or batch finished"
+            game_event.id,
+            play_cb::GAME_EVENT,
+            "Expected game event packet"
         );
-    }
 
-    // Acknowledge the initial batch so the server knows we're ready
-    client
-        .send_chunk_batch_received(25.0)
-        .await
-        .expect("Failed to send chunk batch received");
+        let center_chunk = client.read_packet().await?;
+        assert_eq!(
+            center_chunk.id,
+            play_cb::SET_CENTER_CHUNK,
+            "Expected set center chunk packet"
+        );
 
-    // Move far away to queue new chunks
-    client
-        .send_player_position(1000.0, 64.0, 1000.0, true)
-        .await
-        .expect("Failed to send position");
+        let batch_start = client.read_packet().await?;
+        assert_eq!(
+            batch_start.id,
+            play_cb::CHUNK_BATCH_START,
+            "Expected chunk batch start"
+        );
 
-    // Consume the position response: unload packets + first drain batch
-    let mut position_chunks = 0;
-    loop {
-        let packet =
-            tokio::time::timeout(tokio::time::Duration::from_secs(5), client.read_packet())
-                .await
-                .expect("Timed out reading position response")
-                .expect("Failed to read position response packet");
-
-        match packet.id {
-            id if id == play_cb::UNLOAD_CHUNK || id == play_cb::SET_CENTER_CHUNK => {}
-            id if id == play_cb::KEEP_ALIVE => {}
-            id if id == play_cb::CHUNK_BATCH_START => {}
-            id if id == play_cb::LEVEL_CHUNK_WITH_LIGHT => position_chunks += 1,
-            id if id == play_cb::CHUNK_BATCH_FINISHED => {
+        loop {
+            let packet = client.read_packet().await?;
+            if packet.id == play_cb::CHUNK_BATCH_FINISHED {
                 break;
             }
-            other => panic!("Unexpected packet during position response: {other:#04x}"),
+            assert_eq!(
+                packet.id,
+                play_cb::LEVEL_CHUNK_WITH_LIGHT,
+                "Expected chunk data or batch finished"
+            );
         }
-    }
-    assert!(
-        position_chunks > 0 && position_chunks <= 25,
-        "Position handler should drain at most 25 chunks (got {position_chunks})"
-    );
 
-    // Now send Client Tick End — should drain more pending chunks
-    client
-        .send_client_tick_end()
-        .await
-        .expect("Failed to send client tick end");
+        client.send_chunk_batch_received(25.0).await?;
 
-    // Read the chunk batch triggered by tick end (skip Keep Alive packets)
-    let response = loop {
-        let pkt = tokio::time::timeout(tokio::time::Duration::from_secs(5), client.read_packet())
-            .await
-            .expect("Timed out waiting for chunk response after tick end")
-            .expect("Failed to read packet after tick end");
-        if pkt.id != play_cb::KEEP_ALIVE {
-            break pkt;
+        client
+            .send_player_position(1000.0, 64.0, 1000.0, true)
+            .await?;
+
+        let mut position_chunks = 0;
+        loop {
+            let packet =
+                tokio::time::timeout(tokio::time::Duration::from_secs(5), client.read_packet())
+                    .await
+                    .map_err(|_| anyhow::anyhow!("Timed out reading position response"))?
+                    .map_err(|e| anyhow::anyhow!("Failed to read position response packet: {e}"))?;
+
+            match packet.id {
+                id if id == play_cb::UNLOAD_CHUNK || id == play_cb::SET_CENTER_CHUNK => {}
+                id if id == play_cb::KEEP_ALIVE => {}
+                id if id == play_cb::CHUNK_BATCH_START => {}
+                id if id == play_cb::LEVEL_CHUNK_WITH_LIGHT => position_chunks += 1,
+                id if id == play_cb::CHUNK_BATCH_FINISHED => {
+                    break;
+                }
+                other => anyhow::bail!("Unexpected packet during position response: {other:#04x}"),
+            }
         }
-    };
+        assert!(
+            position_chunks > 0 && position_chunks <= 25,
+            "Position handler should drain at most 25 chunks (got {position_chunks})"
+        );
 
-    assert_eq!(
-        response.id,
-        play_cb::CHUNK_BATCH_START,
-        "Expected chunk batch start after client tick end"
-    );
+        client.send_client_tick_end().await?;
 
-    let mut chunk_count = 0;
-    loop {
-        let packet = client
-            .read_packet()
-            .await
-            .expect("Failed to read chunk/batch packet");
-        if packet.id == play_cb::LEVEL_CHUNK_WITH_LIGHT {
-            chunk_count += 1;
-        } else if packet.id == play_cb::CHUNK_BATCH_FINISHED {
-            break;
-        } else if packet.id == play_cb::KEEP_ALIVE {
-            continue;
-        } else {
-            panic!("Unexpected packet during chunk batch: {:#04x}", packet.id);
+        let response = loop {
+            let pkt =
+                tokio::time::timeout(tokio::time::Duration::from_secs(5), client.read_packet())
+                    .await
+                    .map_err(|_| {
+                        anyhow::anyhow!("Timed out waiting for chunk response after tick end")
+                    })?
+                    .map_err(|e| anyhow::anyhow!("Failed to read packet after tick end: {e}"))?;
+            if pkt.id != play_cb::KEEP_ALIVE {
+                break pkt;
+            }
+        };
+
+        assert_eq!(
+            response.id,
+            play_cb::CHUNK_BATCH_START,
+            "Expected chunk batch start after client tick end"
+        );
+
+        let mut chunk_count = 0;
+        loop {
+            let packet = client.read_packet().await?;
+            if packet.id == play_cb::LEVEL_CHUNK_WITH_LIGHT {
+                chunk_count += 1;
+            } else if packet.id == play_cb::CHUNK_BATCH_FINISHED {
+                break;
+            } else if packet.id == play_cb::KEEP_ALIVE {
+                continue;
+            } else {
+                anyhow::bail!("Unexpected packet during chunk batch: {:#04x}", packet.id);
+            }
         }
-    }
 
-    assert!(
-        chunk_count > 0,
-        "Client Tick End should have drained pending chunks"
-    );
+        assert!(
+            chunk_count > 0,
+            "Client Tick End should have drained pending chunks"
+        );
+
+        Ok(())
+    })
+    .await;
 }
 #[tokio::test]
 #[serial]

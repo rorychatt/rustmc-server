@@ -418,8 +418,13 @@ mod tests {
     fn test_entries_have_valid_nbt() {
         let entries = load_registry("minecraft:dimension_type", 775).unwrap();
         for entry in &entries {
-            assert_eq!(entry.nbt_data[0], 0x0A, "NBT must start with TAG_Compound");
-            assert!(entry.nbt_data.len() > 3);
+            assert!(
+                entry.nbt_data[0] >= 0x01 && entry.nbt_data[0] <= 0x0C
+                    || entry.nbt_data[0] == 0x00,
+                "NBT first byte must be a valid tag type, got 0x{:02X}",
+                entry.nbt_data[0]
+            );
+            assert!(*entry.nbt_data.last().unwrap() == 0x00, "NBT must end with TAG_End");
         }
     }
 

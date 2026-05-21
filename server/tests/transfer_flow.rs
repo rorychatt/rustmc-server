@@ -1,10 +1,12 @@
 mod common;
 
-use common::{retry_test, TestClient, TestServer};
+use common::{
+    retry_test, try_complete_login_flow, try_complete_login_flow_with_uuid,
+    try_drain_initial_play_packets, TestClient, TestServer,
+};
 use rustmc_server::protocol::packet_ids;
 use uuid::Uuid;
 
-use packet_ids::configuration::clientbound as config_cb;
 use packet_ids::play::clientbound as play_cb;
 
 const OP_UUID: &str = "069a79f4-44e9-4726-a5be-fca90e38aaf5";
@@ -24,7 +26,7 @@ async fn test_transfer_packet_sent() {
 
         let mut client = TestClient::connect(server_a.port()).await?;
 
-        try_complete_login_flow_with_uuid(&mut client, op_uuid).await?;
+        try_complete_login_flow_with_uuid(&mut client, "TransferTest", op_uuid).await?;
         try_drain_initial_play_packets(&mut client).await?;
 
         let target_host = "127.0.0.1";
@@ -41,7 +43,7 @@ async fn test_transfer_packet_sent() {
         assert_eq!(port, target_port);
 
         let mut client_b = TestClient::connect(server_b.port()).await?;
-        try_complete_login_flow(&mut client_b).await?;
+        try_complete_login_flow(&mut client_b, "TransferTest").await?;
 
         Ok(())
     })
@@ -55,7 +57,7 @@ async fn test_transfer_denied_without_permission() {
 
         let mut client = TestClient::connect(server.port()).await?;
 
-        try_complete_login_flow(&mut client).await?;
+        try_complete_login_flow(&mut client, "TransferTest").await?;
         try_drain_initial_play_packets(&mut client).await?;
 
         client.send_chat_command("transfer localhost 25565").await?;
@@ -88,7 +90,7 @@ async fn test_transfer_invalid_command() {
 
         let mut client = TestClient::connect(server.port()).await?;
 
-        try_complete_login_flow_with_uuid(&mut client, op_uuid).await?;
+        try_complete_login_flow_with_uuid(&mut client, "TransferTest", op_uuid).await?;
         try_drain_initial_play_packets(&mut client).await?;
 
         client.send_chat_command("transfer localhost").await?;
@@ -102,76 +104,4 @@ async fn test_transfer_invalid_command() {
         Ok(())
     })
     .await;
-}
-
-async fn try_complete_login_flow(client: &mut TestClient) -> anyhow::Result<()> {
-    try_complete_login_flow_with_uuid(client, Uuid::new_v4()).await
-}
-
-async fn try_complete_login_flow_with_uuid(
-    client: &mut TestClient,
-    uuid: Uuid,
-) -> anyhow::Result<()> {
-    client.send_handshake(775, 2).await?;
-    client.send_login_start("TransferTest", uuid).await?;
-
-    let _compression = client.read_packet().await?;
-    client.enable_compression(256);
-
-    let _login_success = client.read_packet().await?;
-
-    client.send_login_acknowledged().await?;
-
-    let _known_packs = client.read_packet().await?;
-
-    client.send_known_packs_response().await?;
-
-    loop {
-        let packet = client.read_packet().await?;
-        if packet.id == config_cb::FINISH_CONFIGURATION {
-            break;
-        }
-    }
-
-    client.send_acknowledge_finish_configuration().await?;
-
-    let _join_game = client.read_packet().await?;
-
-    let _player_info = client.read_packet().await?;
-
-    let _sync_pos = client.read_packet().await?;
-
-    Ok(())
-}
-
-async fn try_drain_initial_play_packets(client: &mut TestClient) -> anyhow::Result<()> {
-    let game_event = client.read_packet().await?;
-    assert_eq!(
-        game_event.id,
-        play_cb::GAME_EVENT,
-        "Expected game event packet"
-    );
-
-    let center_chunk = client.read_packet().await?;
-    assert_eq!(
-        center_chunk.id,
-        play_cb::SET_CENTER_CHUNK,
-        "Expected set center chunk packet"
-    );
-
-    let batch_start = client.read_packet().await?;
-    assert_eq!(
-        batch_start.id,
-        play_cb::CHUNK_BATCH_START,
-        "Expected chunk batch start"
-    );
-
-    loop {
-        let packet = client.read_packet().await?;
-        if packet.id == play_cb::CHUNK_BATCH_FINISHED {
-            break;
-        }
-    }
-
-    Ok(())
 }

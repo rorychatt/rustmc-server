@@ -260,7 +260,7 @@ mod block_state_tests {
                         panic!("Block {name} state has undeclared property {key}")
                     });
                     assert!(
-                        allowed_values.contains(&value),
+                        allowed_values.contains(value),
                         "Block {name} property {key}={value} not in allowed values"
                     );
                 }
