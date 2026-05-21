@@ -97,6 +97,17 @@ impl TestServer {
 
         let temp_world = tempfile::tempdir().unwrap();
 
+        let mut ops_file = ops_file;
+        if ops_file.is_none() && !extra_env.iter().any(|(k, _)| *k == "RUSTMC_OPS") {
+            let path = std::env::temp_dir().join(format!(
+                "rustmc_ops_{}_{:?}_{count}.toml",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            std::fs::write(&path, "")?;
+            ops_file = Some(path);
+        }
+
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_rustmc-server"));
         cmd.env("RUSTMC_BIND", "127.0.0.1:0")
             .env("RUSTMC_PORT_FILE", &port_file)
@@ -106,6 +117,10 @@ impl TestServer {
             .env("RUSTMC_NON_PLAY_TIMEOUT", "300")
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
+
+        if let Some(ref path) = ops_file {
+            cmd.env("RUSTMC_OPS", path.to_string_lossy().into_owned());
+        }
 
         for (key, value) in extra_env {
             cmd.env(key, value);
