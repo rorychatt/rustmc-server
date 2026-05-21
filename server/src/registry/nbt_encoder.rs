@@ -27,11 +27,29 @@ fn is_float_field(parent: &str, name: &str) -> bool {
     if name == "base" || name == "per_level_above_first" {
         return parent != "min_cost" && parent != "max_cost";
     }
+    if name == "volume"
+        || name == "pitch"
+        || name == "speed"
+        || name == "added"
+        || name == "amount"
+        || name == "duration"
+        || name == "radius"
+        || name == "values"
+    {
+        return true;
+    }
+    if name == "offset" {
+        return parent == "mood_sound" || parent == "vertical_position" || parent == "effects";
+    }
     FLOAT_FIELDS.contains(&(parent, name))
 }
 
 fn is_double_field(parent: &str, name: &str) -> bool {
     DOUBLE_FIELDS.contains(&(parent, name))
+}
+
+fn is_long_field(_parent: &str, name: &str) -> bool {
+    name == "fixed_time"
 }
 
 pub fn json_to_nbt(value: &Value) -> io::Result<Vec<u8>> {
@@ -82,6 +100,9 @@ fn get_tag_type_for_field(parent: &str, name: &str, value: &Value) -> u8 {
         if is_double_field(parent, name) {
             return 0x06; // TAG_Double
         }
+        if is_long_field(parent, name) {
+            return 0x04; // TAG_Long
+        }
     }
     get_tag_type(value)
 }
@@ -103,13 +124,27 @@ fn write_tag_payload_for_field(
             writer.write_all(&d.to_be_bytes())?;
             return Ok(());
         }
+        if is_long_field(parent, name) {
+            let l = n.as_i64().unwrap_or(0);
+            writer.write_all(&l.to_be_bytes())?;
+            return Ok(());
+        }
     }
-    write_tag_payload(writer, name, value)
+    write_tag_payload(writer, parent, name, value)
 }
 
-fn get_unified_array_type(arr: &[Value]) -> u8 {
+fn get_unified_array_type(parent: &str, name: &str, arr: &[Value]) -> u8 {
     if arr.is_empty() {
         return 0x00;
+    }
+    if is_float_field(parent, name) {
+        return 0x05; // TAG_Float
+    }
+    if is_double_field(parent, name) {
+        return 0x06; // TAG_Double
+    }
+    if is_long_field(parent, name) {
+        return 0x04; // TAG_Long
     }
     let all_numbers = arr.iter().all(|v| v.is_number());
     if all_numbers {
@@ -147,6 +182,7 @@ fn get_unified_array_type(arr: &[Value]) -> u8 {
 fn write_tag_payload_with_type(
     writer: &mut Vec<u8>,
     parent: &str,
+    name: &str,
     value: &Value,
     expected_type: u8,
 ) -> io::Result<()> {
@@ -211,11 +247,11 @@ fn write_tag_payload_with_type(
                     writer.push(0x00);
                     writer.write_all(&0i32.to_be_bytes())?;
                 } else {
-                    let sub_elem_type = get_unified_array_type(sub_arr);
+                    let sub_elem_type = get_unified_array_type(parent, name, sub_arr);
                     writer.push(sub_elem_type);
                     writer.write_all(&(sub_arr.len() as i32).to_be_bytes())?;
                     for item in sub_arr {
-                        write_tag_payload_with_type(writer, parent, item, sub_elem_type)?;
+                        write_tag_payload_with_type(writer, parent, name, item, sub_elem_type)?;
                     }
                 }
             } else {
@@ -224,22 +260,36 @@ fn write_tag_payload_with_type(
             }
         }
         0x0A => {
-            write_compound_payload(writer, parent, value)?;
+            write_compound_payload(writer, name, value)?;
         }
         _ => {
-            write_tag_payload(writer, parent, value)?;
+            write_tag_payload(writer, parent, name, value)?;
         }
     }
     Ok(())
 }
 
-fn write_tag_payload(writer: &mut Vec<u8>, parent: &str, value: &Value) -> io::Result<()> {
+fn write_tag_payload(
+    writer: &mut Vec<u8>,
+    parent: &str,
+    name: &str,
+    value: &Value,
+) -> io::Result<()> {
     match value {
         Value::Bool(b) => {
             writer.push(if *b { 1 } else { 0 });
         }
         Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
+            if is_float_field(parent, name) {
+                let f = n.as_f64().unwrap_or(0.0) as f32;
+                writer.write_all(&f.to_be_bytes())?;
+            } else if is_double_field(parent, name) {
+                let d = n.as_f64().unwrap_or(0.0);
+                writer.write_all(&d.to_be_bytes())?;
+            } else if is_long_field(parent, name) {
+                let l = n.as_i64().unwrap_or(0);
+                writer.write_all(&l.to_be_bytes())?;
+            } else if let Some(i) = n.as_i64() {
                 if i >= i32::MIN as i64 && i <= i32::MAX as i64 {
                     writer.write_all(&(i as i32).to_be_bytes())?;
                 } else {
@@ -262,16 +312,16 @@ fn write_tag_payload(writer: &mut Vec<u8>, parent: &str, value: &Value) -> io::R
                 writer.push(0x00); // TAG_End type for empty list
                 writer.write_all(&0i32.to_be_bytes())?;
             } else {
-                let elem_type = get_unified_array_type(arr);
+                let elem_type = get_unified_array_type(parent, name, arr);
                 writer.push(elem_type);
                 writer.write_all(&(arr.len() as i32).to_be_bytes())?;
                 for item in arr {
-                    write_tag_payload_with_type(writer, parent, item, elem_type)?;
+                    write_tag_payload_with_type(writer, parent, name, item, elem_type)?;
                 }
             }
         }
         Value::Object(_) => {
-            write_compound_payload(writer, parent, value)?;
+            write_compound_payload(writer, name, value)?;
         }
         Value::Null => {
             writer.push(0x00); // TAG_End for null
@@ -475,9 +525,9 @@ mod tests {
 
     #[test]
     fn test_array_mixed_floats_coerced_to_double() {
-        let value = json!({"values": [1.2, 1.75, 2.2]});
+        let value = json!({"mixed_doubles": [1.2, 1.75, 2.2]});
         let nbt = json_to_nbt(&value).unwrap();
-        let name = b"values";
+        let name = b"mixed_doubles";
         let pos = nbt.windows(name.len()).position(|w| w == name).unwrap();
         assert_eq!(nbt[pos - 2 - 1], 0x09); // TAG_List
         let list_payload_start = pos + name.len();
@@ -485,5 +535,28 @@ mod tests {
         assert_eq!(&nbt[list_payload_start + 1..list_payload_start + 5], &3i32.to_be_bytes());
         let values_start = list_payload_start + 5;
         assert_eq!(nbt.len() - 1 - values_start, 24); // 24 bytes of double payload + 1 byte TAG_End
+    }
+
+    #[test]
+    fn test_values_array_coerced_to_float() {
+        let value = json!({"values": [1.2, 1.75, 2.2]});
+        let nbt = json_to_nbt(&value).unwrap();
+        let name = b"values";
+        let pos = nbt.windows(name.len()).position(|w| w == name).unwrap();
+        assert_eq!(nbt[pos - 2 - 1], 0x09); // TAG_List
+        let list_payload_start = pos + name.len();
+        assert_eq!(nbt[list_payload_start], 0x05); // elem_type: TAG_Float
+        assert_eq!(&nbt[list_payload_start + 1..list_payload_start + 5], &3i32.to_be_bytes());
+        let values_start = list_payload_start + 5;
+        assert_eq!(nbt.len() - 1 - values_start, 12); // 12 bytes of float payload + 1 byte TAG_End
+    }
+
+    #[test]
+    fn test_fixed_time_coerced_to_long() {
+        let value = json!({"fixed_time": 6000});
+        let nbt = json_to_nbt(&value).unwrap();
+        let name = b"fixed_time";
+        let pos = nbt.windows(name.len()).position(|w| w == name).unwrap();
+        assert_eq!(nbt[pos - 2 - 1], 0x04); // TAG_Long
     }
 }
