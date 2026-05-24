@@ -2,10 +2,17 @@ use std::io::Write;
 
 use plugin_bridge::java_plugin::JavaPlugin;
 
+fn get_test_dir() -> std::path::PathBuf {
+    let test_dir = std::env::current_dir().unwrap().join("target").join("test-tmp");
+    std::fs::create_dir_all(&test_dir).unwrap();
+    test_dir
+}
+
 fn create_test_jar(plugin_yml_content: &str) -> tempfile::NamedTempFile {
+    let test_dir = get_test_dir();
     let file = tempfile::Builder::new()
         .suffix(".jar")
-        .tempfile()
+        .tempfile_in(&test_dir)
         .expect("Failed to create temp file");
 
     let mut zip = zip::ZipWriter::new(std::io::BufWriter::new(file.as_file()));
@@ -82,9 +89,10 @@ fn test_parse_plugin_yml_missing_main() {
 
 #[test]
 fn test_parse_invalid_jar() {
+    let test_dir = get_test_dir();
     let file = tempfile::Builder::new()
         .suffix(".jar")
-        .tempfile()
+        .tempfile_in(&test_dir)
         .expect("Failed to create temp file");
     std::io::Write::write_all(&mut file.as_file(), b"not a zip file").unwrap();
 
@@ -94,9 +102,10 @@ fn test_parse_invalid_jar() {
 
 #[test]
 fn test_parse_jar_without_plugin_yml() {
+    let test_dir = get_test_dir();
     let file = tempfile::Builder::new()
         .suffix(".jar")
-        .tempfile()
+        .tempfile_in(&test_dir)
         .expect("Failed to create temp file");
 
     let mut zip = zip::ZipWriter::new(std::io::BufWriter::new(file.as_file()));

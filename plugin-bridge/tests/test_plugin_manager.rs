@@ -2,6 +2,12 @@ use std::sync::Arc;
 
 use plugin_bridge::{EventBus, Plugin, PluginManager, PluginMeta};
 
+fn get_test_dir() -> std::path::PathBuf {
+    let test_dir = std::env::current_dir().unwrap().join("target").join("test-tmp");
+    std::fs::create_dir_all(&test_dir).unwrap();
+    test_dir
+}
+
 struct MockPlugin {
     meta: PluginMeta,
 }
@@ -22,7 +28,8 @@ impl Plugin for MockPlugin {
 
 #[test]
 fn test_discover_empty_directory() {
-    let dir = tempfile::tempdir().unwrap();
+    let test_dir = get_test_dir();
+    let dir = tempfile::tempdir_in(&test_dir).unwrap();
     let event_bus = Arc::new(EventBus::new());
     let mut manager = PluginManager::new(event_bus);
 
@@ -34,7 +41,8 @@ fn test_discover_empty_directory() {
 
 #[test]
 fn test_discover_nonexistent_directory_creates_it() {
-    let dir = tempfile::tempdir().unwrap();
+    let test_dir = get_test_dir();
+    let dir = tempfile::tempdir_in(&test_dir).unwrap();
     let plugin_dir = dir.path().join("plugins");
     let event_bus = Arc::new(EventBus::new());
     let mut manager = PluginManager::new(event_bus);
@@ -89,7 +97,8 @@ fn test_disable_all_plugins() {
 
 #[test]
 fn test_discover_with_non_jar_files() {
-    let dir = tempfile::tempdir().unwrap();
+    let test_dir = get_test_dir();
+    let dir = tempfile::tempdir_in(&test_dir).unwrap();
     std::fs::write(dir.path().join("readme.txt"), "not a plugin").unwrap();
     std::fs::write(dir.path().join("config.yml"), "config: true").unwrap();
 
