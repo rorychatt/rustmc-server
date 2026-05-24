@@ -23,26 +23,39 @@ impl JavaPlugin {
             .context("Failed to get current working directory")?;
         let canonical_current = std::fs::canonicalize(&current_dir)?;
 
+        // 1. Lexical Check
+        if jar_path.to_string_lossy().contains("..") {
+            bail!("Path traversal attempt detected in JAR path: {}", jar_path.display());
+        }
+
+        // 2. Component Validation
         if jar_path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
             bail!("Path traversal attempt detected in JAR path: {}", jar_path.display());
         }
 
+        // 3. Resolve Path
         let resolved = if jar_path.is_absolute() {
             jar_path.to_path_buf()
         } else {
             canonical_current.join(jar_path)
         };
 
+        // 4. Prefix and Strip-Prefix check on resolved path
         if !resolved.starts_with(&canonical_current) {
             bail!("Path traversal detected: resolved path escapes base directory");
         }
+        let _ = resolved.strip_prefix(&canonical_current)
+            .map_err(|_| anyhow::anyhow!("Path traversal detected: resolved path escapes base directory"))?;
 
         let canonical_path = std::fs::canonicalize(&resolved)
             .with_context(|| format!("Failed to canonicalize JAR path: {}", resolved.display()))?;
 
+        // 5. Prefix and Strip-Prefix check on canonical path
         if !canonical_path.starts_with(&canonical_current) {
             bail!("Path traversal detected: canonical path escapes base directory");
         }
+        let _ = canonical_path.strip_prefix(&canonical_current)
+            .map_err(|_| anyhow::anyhow!("Path traversal detected: canonical path escapes base directory"))?;
 
         let meta = Self::parse_plugin_yml(&canonical_path)
             .with_context(|| format!("Failed to parse plugin.yml from {}", canonical_path.display()))?;
@@ -102,26 +115,39 @@ impl JavaPlugin {
             .context("Failed to get current working directory")?;
         let canonical_current = std::fs::canonicalize(&current_dir)?;
 
+        // 1. Lexical Check
+        if jar_path.to_string_lossy().contains("..") {
+            bail!("Path traversal attempt detected in JAR path: {}", jar_path.display());
+        }
+
+        // 2. Component Validation
         if jar_path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
             bail!("Path traversal attempt detected in JAR path: {}", jar_path.display());
         }
 
+        // 3. Resolve Path
         let resolved = if jar_path.is_absolute() {
             jar_path.to_path_buf()
         } else {
             canonical_current.join(jar_path)
         };
 
+        // 4. Prefix and Strip-Prefix check on resolved path
         if !resolved.starts_with(&canonical_current) {
             bail!("Path traversal detected: resolved path escapes base directory");
         }
+        let _ = resolved.strip_prefix(&canonical_current)
+            .map_err(|_| anyhow::anyhow!("Path traversal detected: resolved path escapes base directory"))?;
 
         let canonical_path = std::fs::canonicalize(&resolved)
             .with_context(|| format!("Failed to canonicalize JAR path: {}", resolved.display()))?;
 
+        // 5. Prefix and Strip-Prefix check on canonical path
         if !canonical_path.starts_with(&canonical_current) {
             bail!("Path traversal detected: canonical path escapes base directory");
         }
+        let _ = canonical_path.strip_prefix(&canonical_current)
+            .map_err(|_| anyhow::anyhow!("Path traversal detected: canonical path escapes base directory"))?;
 
         Self::parse_plugin_yml(&canonical_path)
     }
@@ -131,26 +157,39 @@ impl JavaPlugin {
             .context("Failed to get current working directory")?;
         let canonical_current = std::fs::canonicalize(&current_dir)?;
 
+        // 1. Lexical Check
+        if jar_path.to_string_lossy().contains("..") {
+            bail!("Path traversal attempt detected in JAR path: {}", jar_path.display());
+        }
+
+        // 2. Component Validation
         if jar_path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
             bail!("Path traversal attempt detected in JAR path: {}", jar_path.display());
         }
 
+        // 3. Resolve Path
         let resolved = if jar_path.is_absolute() {
             jar_path.to_path_buf()
         } else {
             canonical_current.join(jar_path)
         };
 
+        // 4. Prefix and Strip-Prefix check on resolved path
         if !resolved.starts_with(&canonical_current) {
             bail!("Path traversal detected: resolved path escapes base directory");
         }
+        let _ = resolved.strip_prefix(&canonical_current)
+            .map_err(|_| anyhow::anyhow!("Path traversal detected: resolved path escapes base directory"))?;
 
         let canonical_path = std::fs::canonicalize(&resolved)
             .with_context(|| format!("Failed to canonicalize JAR path: {}", resolved.display()))?;
 
+        // 5. Prefix and Strip-Prefix check on canonical path
         if !canonical_path.starts_with(&canonical_current) {
             bail!("Path traversal detected: canonical path escapes base directory");
         }
+        let _ = canonical_path.strip_prefix(&canonical_current)
+            .map_err(|_| anyhow::anyhow!("Path traversal detected: canonical path escapes base directory"))?;
 
         let file = std::fs::File::open(&canonical_path)
             .with_context(|| format!("Failed to open JAR: {}", canonical_path.display()))?;
