@@ -1,0 +1,471 @@
+{
+  "header": {
+    "title": "RustMC",
+    "version": "v26.1.2",
+    "protocol": "Minecraft 26.1.2 Protocol v775",
+    "github": "GitHub Repository"
+  },
+  "nav": {
+    "sections": "Documentation Sections",
+    "navigation": "Navigation",
+    "overview": "Overview",
+    "architecture": "Server Architecture",
+    "world": "World & Persistence",
+    "config": "Config Generator",
+    "protocol": "Protocol & Packets",
+    "transfer": "Server Transfer",
+    "security": "Security & Ops"
+  },
+  "overview": {
+    "hero": {
+      "badge": "High Performance Rust Core",
+      "title": "Custom Lightweight Minecraft Server In",
+      "title_highlight": "Rust",
+      "desc": "RustMC is a custom, highly modular, thread-safe Minecraft server built from the ground up in Rust. Designed to support Minecraft 26.1.2 (Protocol 775) status querying, handshakes, login compression, configuration syncing, and flat world multi-player sandbox interaction.",
+      "btn_explore": "Explore Server Architecture",
+      "btn_config": "Generate configuration"
+    },
+    "features": {
+      "tokio": {
+        "title": "Tokio Concurrency",
+        "desc": "Async multi-threading loops handle hundreds of concurrent player handshakes, tick cycles, and chunk streaming without frame drops."
+      },
+      "config": {
+        "title": "Dynamic YAML Configuration",
+        "desc": "Fully decoupled configuration parsing (similar to Paper/Spigot settings) dynamically maps MOTD, game mode, max players, pvp, flight flags, and limits."
+      },
+      "transfer": {
+        "title": "Cross-Server Transfers",
+        "desc": "Implements secure Cookie Transfer negotiation to authenticate and hand off player sessions between federated servers smoothly."
+      }
+    },
+    "quickstart": {
+      "title": "Quick Start Guide",
+      "desc": "Build and run the RustMC server binary locally. Follow the steps below:",
+      "clone": "# Clone the repository",
+      "build": "# Build the workspace in release mode",
+      "run": "# Run the server. It will auto-create a default server.yaml configuration"
+    }
+  },
+  "architecture": {
+    "title": "Core Server Architecture",
+    "desc": "RustMC implements a highly concurrent network handler structured around Tokio tasks, actor channels, and shared synchronized memory regions.",
+    "splitting": {
+      "title": "Connection Reader & Writer Splitting",
+      "desc": "Upon accepting a TCP client socket, RustMC splits the stream into a <0>Reader</0> loop and a <1>Writer</1> loop. This eliminates read/write thread contention. The Reader loop decodes packets, processes clientbound commands, and communicates state changes to a centralized loop via Tokio channels, while the Writer actor flushes outbound packet buffers."
+    },
+    "state": {
+      "title": "In-Memory Shared World State",
+      "desc": "World layouts, player metadata registries, and blocks configuration are managed in memory, wrapped in thread-safe shared references: <0>Arc&lt;RwLock&lt;WorldState&gt;&gt;</0>. Multiple reader threads can retrieve player position changes simultaneously, while write locks are only requested during tick updates, ensuring minimal mutex contention."
+    },
+    "broadcasting": {
+      "title": "Event Broadcasting",
+      "desc": "The server utilizes a centralized <0>tokio::sync::broadcast</0> channel to propagate text chat, joint alerts, server notices, and player movement synchronization updates to all connection loops.",
+      "flow_title": "Connection Actor loop flow:",
+      "step_1": "Accepts TCP socket connection.",
+      "step_2": "Launches connection worker actor task.",
+      "step_3": "Awaits handshake packet to parse next stage (Status or Login).",
+      "step_4": "Authenticates player & configures compression.",
+      "step_5": "Transitions client connection into Play phase.",
+      "step_6": "Subscribes to global server broadcast channel."
+    }
+  },
+  "world": {
+    "title": "World Generation & Chunk Persistence",
+    "desc": "RustMC implements a high-performance world orchestration system that handles custom world generation, dynamic spawn height detection, asynchronous chunk serialization via Zlib compression, and robust automated backups.",
+    "generators": {
+      "title": "World Generators",
+      "desc": "The server supports two world generation styles, configurable via the <0>world_type</0> parameter in <1>server.yaml</1>:",
+      "flat": "<0>Flat World (<1>flat</1>):</0> Generates a uniform layered terrain consisting of 1 Bedrock, 2 Dirt, and 1 Grass block at the configured <2>sea_level</2> (default Y=63). Ideal for testing and lightweight lobby setups.",
+      "normal": "<0>Normal World (<1>normal</1>):</0> Utilizes a noise generator based on a pseudo-random number seed (specified by <2>seed</2>) to produce natural terrain contours, hills, and valleys that emulate standard Minecraft environments."
+    },
+    "spawn": {
+      "title": "Spawn Height Detection",
+      "desc": "To prevent players from suffocating or falling endlessly into the void when spawning, RustMC implements an automated <0>Spawn Height Finder</0>:",
+      "step_1": "Computes the spawn chunk coordinate.",
+      "step_2": "Scans downward from the sky limit (Y=319) at the target (X, Z).",
+      "step_3": "Locates the first non-air block state.",
+      "step_4": "Ensures the block is solid (not air or fluid).",
+      "step_5": "Sets spawn position precisely on top of this block."
+    },
+    "persistence": {
+      "title": "Chunk Serialization & Compression",
+      "desc": "World chunks are persisted to disk inside the directory configured by <0>world_dir</0>. Each chunk is saved in its own file using a compressed JSON strategy to maximize space efficiency:",
+      "meta_title": "1. Metadata (level.json)",
+      "meta_desc": "Saves world-wide attributes including spawn coordinates (X, Y, Z), world seed, world type, difficulty, and sea level.",
+      "chunk_title": "2. Chunk Files (c.X.Z.json.zlib)",
+      "chunk_desc": "Individual chunk columns are serialized to JSON structure containing block state palettes, non-air block counts, and block arrays, then compressed using Zlib.",
+      "io_title": "3. Async File I/O",
+      "io_desc": "All reading and writing of compressed chunk data is performed using Rust's file system handles, ensuring integrity and speed.",
+      "layout_title": "// Directory layout on disk:",
+      "comment_meta": "# World configuration metadata",
+      "comment_chunks": "# Compressed chunk files",
+      "comment_c00": "# Chunk at (0, 0)",
+      "comment_c01": "# Chunk at (0, 1)",
+      "comment_c10": "# Chunk at (-1, 0)"
+    },
+    "tasks": {
+      "title": "Automated Background Tasks & Backups",
+      "desc": "RustMC manages persistence operations in the background using lightweight asynchronous Tokio loops, keeping the server main tick thread responsive:",
+      "autosave_title": "Periodic Autosave Loop",
+      "autosave_desc": "Runs in a background task at the frequency set by <0>save_interval_secs</0> (default: 300s). The loop acquires a read lock on the world state, identifies modified/dirty chunks, and serializes them asynchronously to avoid interrupting connection processing.",
+      "backup_title": "Automated Backups & Rotation",
+      "backup_desc": "Runs at the frequency set by <0>backup_interval_secs</0> (default: 3600s). The task creates a full copy of the world directory under <1>backups/backup_&lt;millisecond_timestamp&gt;/</1>. To prevent blocking the async runtime, I/O copying is offloaded to a thread pool via <2>tokio::task::spawn_blocking</2>.",
+      "prune_title": "Backup Pruning Policy",
+      "prune_desc": "To prevent the storage volume from filling up over time, the backup system enforces a pruning algorithm: after a successful backup, it scans the backups directory, sorts backups chronologically, and deletes the oldest folders so that only the latest <0>max_backups</0> (default: 5) are kept."
+    }
+  },
+  "protocol_tab": {
+    "title": "Minecraft Protocol Flow",
+    "desc": "Connections traverse a sequential multi-state workflow defined by the Minecraft networking protocol specification.",
+    "flow": {
+      "handshake_title": "1. Handshake",
+      "handshake_desc": "Port, Serverbound",
+      "status_title": "2. Status / Ping",
+      "status_desc": "Query & Latency",
+      "login_title": "3. Login",
+      "login_desc": "Auth & Compression",
+      "play_title": "4. Play Phase",
+      "play_desc": "Terrain Ticks & Chat"
+    }
+  },
+  "transfer_tab": {
+    "title": "Cross-Server Cookie Transfer Protocol",
+    "desc": "RustMC implements the modern Minecraft cookie transfer and redirection handshake to allow seamless hub-to-spoke network redirects.",
+    "steps": {
+      "negotiate_title": "Negotiate Transfer",
+      "negotiate_desc": "The source server sends a Transfer packet to the client, supplying the destination server hostname and port along with unique routing parameters.",
+      "store_title": "Store Cookie Token",
+      "store_desc": "Prior to the client transitioning, the source server posts a cryptographic verification token (cookie token) to the destination server's auth cache.",
+      "handoff_title": "Handoff Validation",
+      "handoff_desc": "Upon connecting to the destination server, the client transmits the verification token during the login sequence. The destination verifies it to restore state."
+    },
+    "flow_card": {
+      "title": "Cookie Validation Protocol Flow",
+      "desc": "The protocol secures transfers against session hijacking using HMAC signed request payloads exchanged between federated instances.",
+      "comment": "// Pseudo-code logic for verification on destination server:"
+    }
+  },
+  "security_tab": {
+    "title": "Security & Operator Permissions",
+    "desc": "RustMC implements rate limit protections on client streams and maps administration roles dynamically via the Operators system.",
+    "rate_limiting": {
+      "title": "Connection Rate Limiting",
+      "desc": "To prevent denial of service (DoS) and spamming, connection actors monitor inbound packets. If a player exceeds the configured <0>invalid_packet_threshold</0> within the window specified by <1>invalid_packet_window_secs</1>, the connection is instantly severed and blacklisted for the epoch."
+    },
+    "ops": {
+      "title": "Operators System (ops.toml)",
+      "desc": "Server operators are configured inside <0>ops.toml</0> using their username, UUID, and integer permission levels (1-4). On connection login, the server matches credentials and streams the operator rank down to the client to activate server commands."
+    },
+    "file_format": {
+      "title": "Operators File Format (ops.toml)"
+    }
+  },
+  "footer": {
+    "copyright": "© 2026 RustMC Server Project. Licensed under MIT. High-performance Minecraft gaming in Rust."
+  },
+  "packet_ref": {
+    "title": "Minecraft Protocol Packets",
+    "desc": "Interactive guide to Minecraft 26.1.2 (Protocol 775) packet framing implemented in RustMC.",
+    "placeholder": "Search packet name, ID, fields...",
+    "phases": {
+      "all": "All Phases",
+      "status": "Status",
+      "login": "Login",
+      "config": "Configuration",
+      "play": "Play"
+    },
+    "directions": {
+      "all": "All Directions",
+      "clientbound": "Clientbound (S → C)",
+      "serverbound": "Serverbound (C → S)"
+    },
+    "badges": {
+      "clientbound": "Clientbound",
+      "serverbound": "Serverbound"
+    },
+    "table": {
+      "field": "Field",
+      "type": "Type",
+      "desc": "Description"
+    },
+    "actions": {
+      "show": "Show Payload Schema",
+      "hide": "Hide Payload Schema"
+    },
+    "empty_payload": "Empty payload or dynamic data structure",
+    "no_matches": "No packets match the filter criteria."
+  },
+  "config_gen": {
+    "title": "Interactive Configuration Generator",
+    "desc": "Customize your RustMC settings using standard values, and instantly generate a matching `server.yaml` file.",
+    "reset": "Reset to Defaults",
+    "copy": "Copy Config",
+    "copied": "Copied!",
+    "section_suffix": "section"
+  },
+  "config": {
+    "groups": {
+      "server": {
+        "title": "server",
+        "description": "Core networking and server allocation configurations."
+      },
+      "rate_limit": {
+        "title": "rate_limit",
+        "description": "Connection rate limits and DDoS flood protection mechanisms."
+      },
+      "gameplay": {
+        "title": "gameplay",
+        "description": "Minecraft mechanics, world parameters, and rule enforcements."
+      }
+    },
+    "options": {
+      "bind": {
+        "name": "Bind Address",
+        "description": "The IP address and port that the RustMC server binds to."
+      },
+      "view_distance": {
+        "name": "View Distance",
+        "description": "The maximum chunk distance the server will stream to players."
+      },
+      "invalid_packet_threshold": {
+        "name": "Invalid Packet Threshold",
+        "description": "Maximum number of malformed or invalid packets allowed before dropping a connection."
+      },
+      "invalid_packet_window_secs": {
+        "name": "Window Duration (secs)",
+        "description": "The sliding time window in seconds during which invalid packets are accumulated."
+      },
+      "motd": {
+        "name": "Message of the Day (MOTD)",
+        "description": "The description of the server displayed in the client server list."
+      },
+      "max_players": {
+        "name": "Max Players",
+        "description": "The maximum concurrent players allowed to join the server."
+      },
+      "gamemode": {
+        "name": "Game Mode",
+        "description": "Initial game mode assigned to new players joining the world."
+      },
+      "difficulty": {
+        "name": "Difficulty",
+        "description": "Toggles structural threat levels and damage scales."
+      },
+      "pvp": {
+        "name": "PVP Enabled",
+        "description": "Allows players to deal combat damage to each other."
+      },
+      "allow_flight": {
+        "name": "Allow Flight",
+        "description": "Enables flight capabilities in survival modes, bypassing anti-cheat flags."
+      },
+      "hardcore": {
+        "name": "Hardcore Mode",
+        "description": "If active, players are permanently put in spectator mode upon dying."
+      },
+      "simulation_distance": {
+        "name": "Simulation Distance",
+        "description": "Ticking range of chunks surrounding the player."
+      },
+      "sea_level": {
+        "name": "Sea Level",
+        "description": "Base sea height level utilized during flat chunk generation."
+      },
+      "world_type": {
+        "name": "World Type",
+        "description": "Determines the world generation style. \"flat\" generates a flat grass plain, \"normal\" generates a noise-based surface."
+      },
+      "seed": {
+        "name": "World Seed",
+        "description": "Seed for random number generator utilized during normal noise terrain generation."
+      },
+      "world_dir": {
+        "name": "World Directory",
+        "description": "Directory path where the world state (chunks, level info) is saved and loaded."
+      },
+      "save_interval_secs": {
+        "name": "Save Interval (secs)",
+        "description": "Time interval in seconds between automatic background saving of modified chunks."
+      },
+      "backup_interval_secs": {
+        "name": "Backup Interval (secs)",
+        "description": "Time interval in seconds between automatic background backups of the world directory."
+      },
+      "max_backups": {
+        "name": "Max Backups",
+        "description": "Maximum number of automated backups to keep before older backups are pruned."
+      }
+    }
+  },
+  "packets": {
+    "Status": {
+      "Status Request": {
+        "name": "Status Request",
+        "description": "Sent by the client immediately after handshaking to request server status metadata."
+      },
+      "Status Response": {
+        "name": "Status Response",
+        "description": "Returns a JSON structure detailing the server version, maximum and current players, and MOTD.",
+        "fields": {
+          "JSON Response": "Serialized JSON string conforming to Minecraft status format."
+        }
+      },
+      "Ping Request": {
+        "name": "Ping Request",
+        "description": "Sent by the client to measure latency. Contains an arbitrary payload.",
+        "fields": {
+          "Payload": "64-bit integer timestamp or unique payload."
+        }
+      },
+      "Pong Response": {
+        "name": "Pong Response",
+        "description": "Sent by the server to respond to a Ping Request, echoing back the same payload.",
+        "fields": {
+          "Payload": "64-bit integer timestamp corresponding to the Ping Request."
+        }
+      }
+    },
+    "Login": {
+      "Hello (Login Start)": {
+        "name": "Hello (Login Start)",
+        "description": "Initiates the login flow. Specifies username and player UUID.",
+        "fields": {
+          "Name": "The player's username (maximum 16 characters).",
+          "UUID": "The player's unique 128-bit identifier."
+        }
+      },
+      "Login Compression": {
+        "name": "Login Compression",
+        "description": "Sent by the server to enable compression for all subsequent packet communications.",
+        "fields": {
+          "Threshold": "Packet size threshold (in bytes) above which packets are zlib-compressed."
+        }
+      },
+      "Login Finished": {
+        "name": "Login Finished",
+        "description": "Confirms successful authentication and transition out of the login phase.",
+        "fields": {
+          "UUID": "The authenticated player UUID.",
+          "Username": "The authenticated player username.",
+          "Properties Count": "Number of texture profile properties."
+        }
+      },
+      "Login Acknowledged": {
+        "name": "Login Acknowledged",
+        "description": "Acknowledges receipt of Login Finished and transitions client state to Configuration."
+      }
+    },
+    "Configuration": {
+      "Select Known Packs": {
+        "name": "Select Known Packs",
+        "description": "Server sends list of known data/resource packs for the client to confirm sync state.",
+        "fields": {
+          "Packs Count": "Number of declared resource/data packs."
+        }
+      },
+      "Select Known Packs Response": {
+        "name": "Select Known Packs Response",
+        "description": "Client responds with the subset of known packs that it actually has cached."
+      },
+      "Registry Data": {
+        "name": "Registry Data",
+        "description": "Transfers dimension types, biomes, chat types, and damage types registries in NBT formats.",
+        "fields": {
+          "Registry ID": "The namespace ID of the registry (e.g. minecraft:dimension_type).",
+          "Entries Count": "Number of elements in this registry."
+        }
+      },
+      "Update Tags": {
+        "name": "Update Tags",
+        "description": "Sends block, item, fluid, and entity tags configuration mappings to the client."
+      },
+      "Finish Configuration": {
+        "name": "Finish Configuration",
+        "description": "Sent by the server to signal completion of the configuration sync handshake."
+      },
+      "Acknowledge Finish Configuration": {
+        "name": "Acknowledge Finish Configuration",
+        "description": "Client acknowledges configuration completion and transitions the connection state to Play."
+      }
+    },
+    "Play": {
+      "Login (Play)": {
+        "name": "Login (Play)",
+        "description": "Initial state configuration packet entering the active gameplay world. Transmits world physics settings.",
+        "fields": {
+          "Entity ID": "The player's runtime entity ID.",
+          "Hardcore": "Whether the server is in hardcore mode.",
+          "Max Players": "The maximum player capacity.",
+          "View Distance": "The client's chunk view distance.",
+          "Simulation Distance": "The server's chunk ticking distance.",
+          "Game Mode": "The player's initial gamemode (Survival: 0, Creative: 1, etc.).",
+          "Sea Level": "The world sea height parameter."
+        }
+      },
+      "Set Entity Metadata": {
+        "name": "Set Entity Metadata",
+        "description": "Updates entity characteristics, such as visibility, equipment, or active pose."
+      },
+      "Player Position": {
+        "name": "Player Position",
+        "description": "Synchronizes or forces the client player's position and rotation coordinates.",
+        "fields": {
+          "X / Y / Z": "Coordinates in world space.",
+          "Yaw / Pitch": "Camera angles."
+        }
+      },
+      "Level Chunk With Light": {
+        "name": "Level Chunk With Light",
+        "description": "Transmits world voxel blocks, section structures, and lighting grids to the client.",
+        "fields": {
+          "Chunk X / Z": "Absolute grid coordinates of the loaded chunk."
+        }
+      },
+      "Chunk Batch Start": {
+        "name": "Chunk Batch Start",
+        "description": "Signals the start of a multi-chunk loading sequence, allowing the client to batch rendering."
+      },
+      "Chunk Batch Finished": {
+        "name": "Chunk Batch Finished",
+        "description": "Signals the termination of the current chunk loading sequence batch.",
+        "fields": {
+          "Batch Size": "Number of chunks transferred in this batch."
+        }
+      },
+      "Chunk Batch Received": {
+        "name": "Chunk Batch Received",
+        "description": "Sent by the client to confirm rendering and receipt of the chunk batch, throttling network throughput."
+      },
+      "Client Tick End": {
+        "name": "Client Tick End",
+        "description": "Sent by the client at the end of each local tick loop to trigger server update cycles."
+      },
+      "Player Loaded": {
+        "name": "Player Loaded",
+        "description": "Client signals that the local player has finished loading terrain and is ready for ticks."
+      },
+      "System Chat": {
+        "name": "System Chat",
+        "description": "Transmits text logs or system notices to the client chat UI.",
+        "fields": {
+          "Message": "Chat message formatted in Minecraft JSON Text component format."
+        }
+      },
+      "Keep Alive (Clientbound)": {
+        "name": "Keep Alive (Clientbound)",
+        "description": "Periodic server heartbeat to ensure connection viability.",
+        "fields": {
+          "Keep Alive ID": "Unique heartbeat identifier."
+        }
+      },
+      "Keep Alive (Serverbound)": {
+        "name": "Keep Alive (Serverbound)",
+        "description": "Heartbeat echo response from client validating connection vitality.",
+        "fields": {
+          "Keep Alive ID": "The matching identifier."
+        }
+      }
+    }
+  }
+}
