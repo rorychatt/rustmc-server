@@ -705,19 +705,20 @@ export default function App() {
                   <h3 className="text-base font-bold text-white">
                     {t("security_tab.rate_limiting.title")}
                   </h3>
-                  <p
-                    className="text-slate-400 text-xs leading-relaxed text-slate-400"
-                    dangerouslySetInnerHTML={{ __html: t("security_tab.rate_limiting.desc") }}
-                  />
+                  <p className="text-slate-400 text-xs leading-relaxed">
+                    <Trans
+                      i18nKey="security_tab.rate_limiting.desc"
+                      components={{ code: <code /> }}
+                    />
+                  </p>
                 </div>
 
                 {/* Operator roles */}
                 <div className="p-5 rounded-xl glass-panel space-y-3">
                   <h3 className="text-base font-bold text-white">{t("security_tab.ops.title")}</h3>
-                  <p
-                    className="text-slate-400 text-xs leading-relaxed text-slate-400"
-                    dangerouslySetInnerHTML={{ __html: t("security_tab.ops.desc") }}
-                  />
+                  <p className="text-slate-400 text-xs leading-relaxed">
+                    <Trans i18nKey="security_tab.ops.desc" components={{ code: <code /> }} />
+                  </p>
                 </div>
               </div>
 
