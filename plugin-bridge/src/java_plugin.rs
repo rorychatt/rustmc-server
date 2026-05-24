@@ -25,12 +25,12 @@ impl JavaPlugin {
 
         // 1. Lexical Check
         if jar_path.to_string_lossy().contains("..") {
-            bail!("Path traversal attempt detected in JAR path: {}", jar_path.display());
+            return Err(anyhow::anyhow!("Path traversal attempt detected in JAR path: {}", jar_path.display()));
         }
 
         // 2. Component Validation
         if jar_path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
-            bail!("Path traversal attempt detected in JAR path: {}", jar_path.display());
+            return Err(anyhow::anyhow!("Path traversal attempt detected in JAR path: {}", jar_path.display()));
         }
 
         // 3. Resolve Path
@@ -42,7 +42,7 @@ impl JavaPlugin {
 
         // 4. Prefix and Strip-Prefix check on resolved path
         if !resolved.starts_with(&canonical_current) {
-            bail!("Path traversal detected: resolved path escapes base directory");
+            return Err(anyhow::anyhow!("Path traversal detected: resolved path escapes base directory"));
         }
         let rel_resolved = resolved.strip_prefix(&canonical_current)
             .map_err(|_| anyhow::anyhow!("Path traversal detected: resolved path escapes base directory"))?;
@@ -53,7 +53,7 @@ impl JavaPlugin {
 
         // 5. Prefix and Strip-Prefix check on canonical path
         if !canonical_path.starts_with(&canonical_current) {
-            bail!("Path traversal detected: canonical path escapes base directory");
+            return Err(anyhow::anyhow!("Path traversal detected: canonical path escapes base directory"));
         }
         let rel_canonical = canonical_path.strip_prefix(&canonical_current)
             .map_err(|_| anyhow::anyhow!("Path traversal detected: canonical path escapes base directory"))?;
