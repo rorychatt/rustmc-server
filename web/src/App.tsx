@@ -433,10 +433,22 @@ export default function App() {
                     {t("world.generators.title")}
                   </h3>
                   <div className="space-y-3 text-slate-400 text-xs leading-relaxed">
-                    <p dangerouslySetInnerHTML={{ __html: t("world.generators.desc") }} />
+                    <p>
+                      <Trans i18nKey="world.generators.desc" components={{ code: <code /> }} />
+                    </p>
                     <ul className="list-disc list-inside space-y-2 pl-2">
-                      <li dangerouslySetInnerHTML={{ __html: t("world.generators.flat") }} />
-                      <li dangerouslySetInnerHTML={{ __html: t("world.generators.normal") }} />
+                      <li>
+                        <Trans
+                          i18nKey="world.generators.flat"
+                          components={{ strong: <strong />, code: <code /> }}
+                        />
+                      </li>
+                      <li>
+                        <Trans
+                          i18nKey="world.generators.normal"
+                          components={{ strong: <strong />, code: <code /> }}
+                        />
+                      </li>
                     </ul>
                   </div>
                 </div>
@@ -447,7 +459,9 @@ export default function App() {
                     {t("world.spawn.title")}
                   </h3>
                   <div className="space-y-3 text-slate-400 text-xs leading-relaxed">
-                    <p dangerouslySetInnerHTML={{ __html: t("world.spawn.desc") }} />
+                    <p>
+                      <Trans i18nKey="world.spawn.desc" components={{ strong: <strong /> }} />
+                    </p>
                     <ol className="list-decimal list-inside space-y-2 pl-2 font-mono text-[11px]">
                       <li>{t("world.spawn.step_1")}</li>
                       <li>{t("world.spawn.step_2")}</li>
@@ -465,10 +479,9 @@ export default function App() {
                   <Database className="text-cyan-400 w-5 h-5" />
                   {t("world.persistence.title")}
                 </h3>
-                <p
-                  className="text-slate-400 text-sm leading-relaxed"
-                  dangerouslySetInnerHTML={{ __html: t("world.persistence.desc") }}
-                />
+                <p className="text-slate-400 text-sm leading-relaxed">
+                  <Trans i18nKey="world.persistence.desc" components={{ code: <code /> }} />
+                </p>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
                   <div className="p-4 rounded-lg bg-slate-950/40 border border-slate-800/60 text-xs space-y-2">
@@ -536,29 +549,26 @@ export default function App() {
                     <h4 className="text-sm font-bold text-white">
                       {t("world.tasks.autosave_title")}
                     </h4>
-                    <p
-                      className="text-slate-400 text-xs leading-relaxed"
-                      dangerouslySetInnerHTML={{ __html: t("world.tasks.autosave_desc") }}
-                    />
+                    <p className="text-slate-400 text-xs leading-relaxed">
+                      <Trans i18nKey="world.tasks.autosave_desc" components={{ code: <code /> }} />
+                    </p>
                   </div>
 
                   <div className="p-5 rounded-lg bg-slate-950/40 border border-slate-800/60 space-y-3">
                     <h4 className="text-sm font-bold text-white">
                       {t("world.tasks.backup_title")}
                     </h4>
-                    <p
-                      className="text-slate-400 text-xs leading-relaxed"
-                      dangerouslySetInnerHTML={{ __html: t("world.tasks.backup_desc") }}
-                    />
+                    <p className="text-slate-400 text-xs leading-relaxed">
+                      <Trans i18nKey="world.tasks.backup_desc" components={{ code: <code /> }} />
+                    </p>
                   </div>
                 </div>
 
                 <div className="p-5 rounded-lg bg-slate-950/40 border border-slate-800/60 space-y-3">
                   <h4 className="text-sm font-bold text-white">{t("world.tasks.prune_title")}</h4>
-                  <p
-                    className="text-slate-400 text-xs leading-relaxed"
-                    dangerouslySetInnerHTML={{ __html: t("world.tasks.prune_desc") }}
-                  />
+                  <p className="text-slate-400 text-xs leading-relaxed">
+                    <Trans i18nKey="world.tasks.prune_desc" components={{ code: <code /> }} />
+                  </p>
                 </div>
               </div>
             </div>
