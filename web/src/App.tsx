@@ -23,9 +23,12 @@ import {
 type TabId = 'overview' | 'architecture' | 'world' | 'config' | 'protocol' | 'transfer' | 'security';
 
 export default function App() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [langMenuOpen, setLangMenuOpen] = useState(false);
+
+  const currentLanguage = i18n.language || 'en';
 
   const tabs = [
     { id: 'overview', name: t('nav.overview'), icon: BookOpen },
@@ -63,8 +66,45 @@ export default function App() {
           </div>
         </div>
 
-        {/* Desktop Links */}
-        <div className="hidden md:flex items-center gap-5">
+        {/* Language selector & Desktop Links */}
+        <div className="hidden md:flex items-center gap-4">
+          <div className="relative">
+            <button
+              onClick={() => setLangMenuOpen(!langMenuOpen)}
+              className="text-xs font-semibold text-slate-300 hover:text-white flex items-center gap-1.5 bg-slate-900/60 border border-slate-800 px-3 py-1.5 rounded-lg hover:bg-slate-800/60 transition-all focus:outline-none"
+            >
+              <Globe className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+              <span>{currentLanguage.startsWith('es') ? 'Español' : 'English'}</span>
+              <span className="text-[10px] text-slate-500">▼</span>
+            </button>
+            {langMenuOpen && (
+              <div className="absolute right-0 mt-2 w-32 rounded-lg bg-slate-950 border border-slate-800 shadow-xl overflow-hidden z-50 animate-fadeIn">
+                <button
+                  onClick={() => {
+                    i18n.changeLanguage('en');
+                    setLangMenuOpen(false);
+                  }}
+                  className={`w-full text-left px-3 py-2 text-xs hover:bg-slate-900 transition-colors ${
+                    currentLanguage.startsWith('en') ? 'text-cyan-400 font-bold bg-slate-900/50' : 'text-slate-300'
+                  }`}
+                >
+                  English
+                </button>
+                <button
+                  onClick={() => {
+                    i18n.changeLanguage('es');
+                    setLangMenuOpen(false);
+                  }}
+                  className={`w-full text-left px-3 py-2 text-xs hover:bg-slate-900 transition-colors ${
+                    currentLanguage.startsWith('es') ? 'text-cyan-400 font-bold bg-slate-900/50' : 'text-slate-300'
+                  }`}
+                >
+                  Español
+                </button>
+              </div>
+            )}
+          </div>
+
           <a
             href="https://github.com/rorychatt/rustmc-server"
             target="_blank"
@@ -88,7 +128,31 @@ export default function App() {
       {/* Mobile Drawer menu */}
       {mobileMenuOpen && (
         <div className="md:hidden fixed inset-0 z-30 bg-slate-950/95 backdrop-blur-lg pt-24 px-6 space-y-4">
-          <div className="text-xs uppercase tracking-wider text-slate-500 font-bold mb-2">{t('nav.sections')}</div>
+          <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-2">
+            <span className="text-xs uppercase tracking-wider text-slate-500 font-bold">{t('nav.sections')}</span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => i18n.changeLanguage('en')}
+                className={`px-2 py-1 rounded text-xs border ${
+                  currentLanguage.startsWith('en')
+                    ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30 font-bold'
+                    : 'bg-slate-900/40 text-slate-400 border-slate-800/60'
+                }`}
+              >
+                EN
+              </button>
+              <button
+                onClick={() => i18n.changeLanguage('es')}
+                className={`px-2 py-1 rounded text-xs border ${
+                  currentLanguage.startsWith('es')
+                    ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30 font-bold'
+                    : 'bg-slate-900/40 text-slate-400 border-slate-800/60'
+                }`}
+              >
+                ES
+              </button>
+            </div>
+          </div>
           {tabs.map(tab => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
