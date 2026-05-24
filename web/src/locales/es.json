@@ -5,6 +5,12 @@
     "protocol": "Protocolo Minecraft 26.1.2 v775",
     "github": "Repositorio GitHub"
   },
+  "languages": {
+    "en": "EN",
+    "es": "ES",
+    "english": "English",
+    "spanish": "Español"
+  },
   "nav": {
     "sections": "Secciones de Documentación",
     "navigation": "Navegación",
@@ -48,19 +54,19 @@
     }
   },
   "architecture": {
-    "title": "Core Server Architecture",
+    "title": "Arquitectura Central del Servidor",
     "desc": "RustMC implementa un manejador de red altamente concurrente estructurado en torno a tareas de Tokio, canales de actores y regiones de memoria compartida sincronizadas.",
     "splitting": {
       "title": "División de Lectores y Escritores de Conexión",
-      "desc": "Al aceptar un socket de cliente TCP, RustMC divide el flujo en un bucle <0>Reader</0> (Lector) y un bucle <1>Writer</1> (Escritor). Esto elimina la contención de hilos de lectura/escritura. El bucle Reader decodifica paquetes, procesa comandos del cliente y comunica cambios de estado a un bucle centralizado a través de canales de Tokio, mientras que el actor Writer vacía los búferes de paquetes salientes."
+      "desc": "Al aceptar un socket de cliente TCP, RustMC divide el flujo en un bucle <strong>Reader</strong> (Lector) y un bucle <strong>Writer</strong> (Escritor). Esto elimina la contención de hilos de lectura/escritura. El bucle Reader decodifica paquetes, procesa comandos del cliente y comunica cambios de estado a un bucle centralizado a través de canales de Tokio, mientras que el actor Writer vacía los búferes de paquetes salientes."
     },
     "state": {
       "title": "Estado del Mundo Compartido en Memoria",
-      "desc": "Los diseños del mundo, los registros de metadatos de los jugadores y la configuración de bloques se administran en memoria, envueltos en referencias compartidas seguras para hilos: <0>Arc&lt;RwLock&lt;WorldState&gt;&gt;</0>. Múltiples hilos lectores pueden recuperar cambios de posición de los jugadores simultáneamente, mientras que los bloqueos de escritura solo se solicitan durante las actualizaciones de ticks, lo que garantiza una contención mínima de mutex."
+      "desc": "Los diseños del mundo, los registros de metadatos de los jugadores y la configuración de bloques se administran en memoria, envueltos en referencias compartidas seguras para hilos: <code>Arc&lt;RwLock&lt;WorldState&gt;&gt;</code>. Múltiples hilos lectores pueden recuperar cambios de posición de los jugadores simultáneamente, mientras que los bloqueos de escritura solo se solicitan durante las actualizaciones de ticks, lo que garantiza una contención mínima de mutex."
     },
     "broadcasting": {
       "title": "Transmisión de Eventos",
-      "desc": "El servidor utiliza un canal centralizado <0>tokio::sync::broadcast</0> para propagar chats de texto, alertas conjuntas, avisos del servidor y actualizaciones de sincronización de movimiento de los jugadores a todos los bucles de conexión.",
+      "desc": "El servidor utiliza un canal centralizado <code>tokio::sync::broadcast</code> channel para propagar chats de texto, alertas conjuntas, avisos del servidor y actualizaciones de sincronización de movimiento de los jugadores a todos los bucles de conexión.",
       "flow_title": "Flujo del bucle del actor de conexión:",
       "step_1": "Acepta la conexión del socket TCP.",
       "step_2": "Inicia la tarea del actor del trabajador de conexión.",
@@ -75,13 +81,13 @@
     "desc": "RustMC implementa un sistema de orquestación de mundos de alto rendimiento que maneja la generación de mundos personalizados, la detección dinámica de la altura del spawn, la serialización asíncrona de chunks mediante compresión Zlib y copias de seguridad automáticas y robustas.",
     "generators": {
       "title": "Generadores de Mundos",
-      "desc": "El servidor admite dos estilos de generación de mundos, configurables mediante el parámetro <0>world_type</0> en <1>server.yaml</1>:",
-      "flat": "<0>Mundo Plano (<1>flat</1>):</0> Genera un terreno estructurado uniforme que consta de 1 Bedrock, 2 Tierra y 1 bloque de Césped a la altura configurada de <2>sea_level</2> (por defecto Y=63). Ideal para pruebas y configuraciones de lobbies ligeros.",
-      "normal": "<0>Mundo Normal (<1>normal</1>):</0> Utiliza un generador de ruido basado en una semilla de número pseudoaleatorio (especificada por <2>seed</2>) para producir contornos de terreno naturales, colinas y valles que emulan entornos estándar de Minecraft."
+      "desc": "El servidor admite dos estilos de generación de mundos, configurables mediante el parámetro <code>world_type</code> en <code>server.yaml</code>:",
+      "flat": "<strong>Mundo Plano (<code>flat</code>):</strong> Genera un terreno estructurado uniforme que consta de 1 Bedrock, 2 Tierra y 1 bloque de Césped a la altura configurada de <code>sea_level</code> (por defecto Y=63). Ideal para pruebas y configuraciones de lobbies ligeros.",
+      "normal": "<strong>Mundo Normal (<code>normal</code>):</strong> Utiliza un generador de ruido basado en una semilla de número pseudoaleatorio (especificada por <code>seed</code>) para producir contornos de terreno naturales, colinas y valles que emulan entornos estándar de Minecraft."
     },
     "spawn": {
       "title": "Detección de Altura del Spawn",
-      "desc": "Para evitar que los jugadores se asfixien o caigan infinitamente en el vacío al aparecer, RustMC implementa un detector automatizado de altura de spawn: <0>Spawn Height Finder</0>:",
+      "desc": "Para evitar que los jugadores se asfixien o caigan infinitamente en el vacío al aparecer, RustMC implementa un detector automatizado de altura de spawn: <strong>Spawn Height Finder</strong>:",
       "step_1": "Calcula la coordenada del chunk del spawn.",
       "step_2": "Escanea hacia abajo desde el límite del cielo (Y=319) en el objetivo (X, Z).",
       "step_3": "Localiza el primer estado de bloque que no sea aire.",
@@ -90,7 +96,7 @@
     },
     "persistence": {
       "title": "Serialización y Compresión de Chunks",
-      "desc": "Los chunks del mundo se persisten en el disco dentro del directorio configurado por <0>world_dir</0>. Cada chunk se guarda en su propio archivo utilizando una estrategia JSON comprimida para maximizar la eficiencia de espacio:",
+      "desc": "Los chunks del mundo se persisten en el disco dentro del directorio configurado por <code>world_dir</code>. Cada chunk se guarda en su propio archivo utilizando una estrategia JSON comprimida para maximizar la eficiencia de espacio:",
       "meta_title": "1. Metadatos (level.json)",
       "meta_desc": "Guarda atributos globales del mundo, incluidas las coordenadas de spawn (X, Y, Z), la semilla del mundo, el tipo de mundo, la dificultad y el nivel del mar.",
       "chunk_title": "2. Archivos de Chunk (c.X.Z.json.zlib)",
@@ -108,11 +114,11 @@
       "title": "Tareas en Segundo Plano y Copias de Seguridad",
       "desc": "RustMC gestiona las operaciones de persistencia en segundo plano mediante bucles asíncronos ligeros de Tokio, manteniendo receptivo el hilo de ticks principal del servidor:",
       "autosave_title": "Bucle de Autoguardado Periódico",
-      "autosave_desc": "Se ejecuta en una tarea en segundo plano con la frecuencia establecida por <0>save_interval_secs</0> (por defecto: 300s). El bucle adquiere un bloqueo de lectura sobre el estado del mundo, identifica chunks modificados/sucios y los serializa de forma asíncrona para evitar interrumpir el procesamiento de las conexiones.",
+      "autosave_desc": "Se ejecuta en una tarea en segundo plano con la frecuencia establecida por <code>save_interval_secs</code> (por defecto: 300s). El bucle adquiere un bloqueo de lectura sobre el estado del mundo, identifica chunks modificados/sucios y los serializa de forma asíncrona para evitar interrumpir el procesamiento de las conexiones.",
       "backup_title": "Copias de Seguridad Automáticas y Rotación",
-      "backup_desc": "Se ejecuta con la frecuencia establecida por <0>backup_interval_secs</0> (por defecto: 3600s). La tarea crea una copia completa del directorio del mundo en <1>backups/backup_&lt;millisecond_timestamp&gt;/</1>. Para evitar bloquear el tiempo de ejecución asíncrono, la copia de E/S se descarga a un grupo de hilos a través de <2>tokio::task::spawn_blocking</2>.",
+      "backup_desc": "Se ejecuta con la frecuencia establecida por <code>backup_interval_secs</code> (por defecto: 3600s). La tarea crea una copia completa del directorio del mundo en <code>backups/backup_&lt;millisecond_timestamp&gt;/</code>. Para evitar bloquear el tiempo de ejecución asíncrono, la copia de E/S se descarga a un grupo de hilos a través de <code>tokio::task::spawn_blocking</code>.",
       "prune_title": "Política de Purga de Copias de Seguridad",
-      "prune_desc": "Para evitar que el volumen de almacenamiento se llene con el tiempo, el sistema de copias de seguridad aplica un algoritmo de purga: después de una copia de seguridad exitosa, escanea el directorio de copias de seguridad, las ordena cronológicamente y elimina las carpetas más antiguas de modo que solo se mantengan las últimas <0>max_backups</0> (por defecto: 5)."
+      "prune_desc": "Para evitar que el volumen de almacenamiento se llene con el tiempo, el sistema de copias de seguridad aplica un algoritmo de purga: después de una copia de seguridad exitosa, escanea el directorio de copias de seguridad, las ordena cronológicamente y elimina las carpetas más antiguas de modo que solo se mantengan las últimas <code>max_backups</code> (por defecto: 5)."
     }
   },
   "protocol_tab": {
@@ -126,7 +132,8 @@
       "login_title": "3. Inicio de Sesión",
       "login_desc": "Autenticación y Compresión",
       "play_title": "4. Fase de Juego",
-      "play_desc": "Ticks de Terreno y Chat"
+      "play_desc": "Ticks de Terreno y Chat",
+      "or_arrow": "O ➔"
     }
   },
   "transfer_tab": {
@@ -142,7 +149,7 @@
     },
     "flow_card": {
       "title": "Flujo del Protocolo de Validación de Cookies",
-      "desc": "El protocolo asegura las transferencias contra el secuestro de sesiones utilizando cargas útiles de solicitudes firmadas por HMAC intercambiadas entre instancias federadas.",
+      "desc": "El protocolo asegura las transferencias contra el secuestro de sesiones utilizando cargas útiles de solicitudes firmadas por HMAC intercambadas entre instancias federadas.",
       "comment": "// Pseudo-código de lógica para la verificación en el servidor de destino:"
     }
   },
@@ -151,11 +158,11 @@
     "desc": "RustMC implementa protecciones de límite de velocidad en los flujos de clientes y asigna roles de administración dinámicamente a través del sistema de Operadores.",
     "rate_limiting": {
       "title": "Límite de Velocidad de Conexión",
-      "desc": "Para evitar la denegación de servicio (DoS) y el spam, los actores de conexión monitorean los paquetes entrantes. Si un jugador supera el <0>invalid_packet_threshold</0> configurado dentro de la ventana especificada por <1>invalid_packet_window_secs</1>, la conexión se corta instantáneamente y se incluye en la lista negra para la época."
+      "desc": "Para evitar la denegación de servicio (DoS) y el spam, los actores de conexión monitorean los paquetes entrantes. Si un jugador supera el <code>invalid_packet_threshold</code> configurado dentro de la ventana especificada por <code>invalid_packet_window_secs</code>, la conexión se corta instantáneamente y se incluye en la lista negra para la época."
     },
     "ops": {
       "title": "Sistema de Operadores (ops.toml)",
-      "desc": "Los operadores del servidor se configuran dentro de <0>ops.toml</0> utilizando su nombre de usuario, UUID y niveles de permiso enteros (1-4). Al iniciar sesión en la conexión, el servidor hace coincidir las credenciales y transmite el rango de operador al cliente para activar los comandos del servidor."
+      "desc": "Los operadores del servidor se configuran dentro de <code>ops.toml</code> utilizando su nombre de usuario, UUID y niveles de permiso enteros (1-4). Al iniciar sesión en la conexión, el servidor hace coincidir las credenciales y transmite el rango de operador al cliente para activar los comandos del servidor."
     },
     "file_format": {
       "title": "Formato de Archivo de Operadores (ops.toml)"
