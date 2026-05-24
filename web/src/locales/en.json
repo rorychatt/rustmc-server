@@ -5,6 +5,12 @@
     "protocol": "Minecraft 26.1.2 Protocol v775",
     "github": "GitHub Repository"
   },
+  "languages": {
+    "en": "EN",
+    "es": "ES",
+    "english": "English",
+    "spanish": "Español"
+  },
   "nav": {
     "sections": "Documentation Sections",
     "navigation": "Navigation",
@@ -52,15 +58,15 @@
     "desc": "RustMC implements a highly concurrent network handler structured around Tokio tasks, actor channels, and shared synchronized memory regions.",
     "splitting": {
       "title": "Connection Reader & Writer Splitting",
-      "desc": "Upon accepting a TCP client socket, RustMC splits the stream into a <0>Reader</0> loop and a <1>Writer</1> loop. This eliminates read/write thread contention. The Reader loop decodes packets, processes clientbound commands, and communicates state changes to a centralized loop via Tokio channels, while the Writer actor flushes outbound packet buffers."
+      "desc": "Upon accepting a TCP client socket, RustMC splits the stream into a <strong>Reader</strong> loop and a <strong>Writer</strong> loop. This eliminates read/write thread contention. The Reader loop decodes packets, processes clientbound commands, and communicates state changes to a centralized loop via Tokio channels, while the Writer actor flushes outbound packet buffers."
     },
     "state": {
       "title": "In-Memory Shared World State",
-      "desc": "World layouts, player metadata registries, and blocks configuration are managed in memory, wrapped in thread-safe shared references: <0>Arc&lt;RwLock&lt;WorldState&gt;&gt;</0>. Multiple reader threads can retrieve player position changes simultaneously, while write locks are only requested during tick updates, ensuring minimal mutex contention."
+      "desc": "World layouts, player metadata registries, and blocks configuration are managed in memory, wrapped in thread-safe shared references: <code>Arc&lt;RwLock&lt;WorldState&gt;&gt;</code>. Multiple reader threads can retrieve player position changes simultaneously, while write locks are only requested during tick updates, ensuring minimal mutex contention."
     },
     "broadcasting": {
       "title": "Event Broadcasting",
-      "desc": "The server utilizes a centralized <0>tokio::sync::broadcast</0> channel to propagate text chat, joint alerts, server notices, and player movement synchronization updates to all connection loops.",
+      "desc": "The server utilizes a centralized <code>tokio::sync::broadcast</code> channel to propagate text chat, joint alerts, server notices, and player movement synchronization updates to all connection loops.",
       "flow_title": "Connection Actor loop flow:",
       "step_1": "Accepts TCP socket connection.",
       "step_2": "Launches connection worker actor task.",
@@ -75,13 +81,13 @@
     "desc": "RustMC implements a high-performance world orchestration system that handles custom world generation, dynamic spawn height detection, asynchronous chunk serialization via Zlib compression, and robust automated backups.",
     "generators": {
       "title": "World Generators",
-      "desc": "The server supports two world generation styles, configurable via the <0>world_type</0> parameter in <1>server.yaml</1>:",
-      "flat": "<0>Flat World (<1>flat</1>):</0> Generates a uniform layered terrain consisting of 1 Bedrock, 2 Dirt, and 1 Grass block at the configured <2>sea_level</2> (default Y=63). Ideal for testing and lightweight lobby setups.",
-      "normal": "<0>Normal World (<1>normal</1>):</0> Utilizes a noise generator based on a pseudo-random number seed (specified by <2>seed</2>) to produce natural terrain contours, hills, and valleys that emulate standard Minecraft environments."
+      "desc": "The server supports two world generation styles, configurable via the <code>world_type</code> parameter in <code>server.yaml</code>:",
+      "flat": "<strong>Flat World (<code>flat</code>):</strong> Generates a uniform layered terrain consisting of 1 Bedrock, 2 Dirt, and 1 Grass block at the configured <code>sea_level</code> (default Y=63). Ideal for testing and lightweight lobby setups.",
+      "normal": "<strong>Normal World (<code>normal</code>):</strong> Utilizes a noise generator based on a pseudo-random number seed (specified by <code>seed</code>) to produce natural terrain contours, hills, and valleys that emulate standard Minecraft environments."
     },
     "spawn": {
       "title": "Spawn Height Detection",
-      "desc": "To prevent players from suffocating or falling endlessly into the void when spawning, RustMC implements an automated <0>Spawn Height Finder</0>:",
+      "desc": "To prevent players from suffocating or falling endlessly into the void when spawning, RustMC implements an automated <strong>Spawn Height Finder</strong>:",
       "step_1": "Computes the spawn chunk coordinate.",
       "step_2": "Scans downward from the sky limit (Y=319) at the target (X, Z).",
       "step_3": "Locates the first non-air block state.",
@@ -90,7 +96,7 @@
     },
     "persistence": {
       "title": "Chunk Serialization & Compression",
-      "desc": "World chunks are persisted to disk inside the directory configured by <0>world_dir</0>. Each chunk is saved in its own file using a compressed JSON strategy to maximize space efficiency:",
+      "desc": "World chunks are persisted to disk inside the directory configured by <code>world_dir</code>. Each chunk is saved in its own file using a compressed JSON strategy to maximize space efficiency:",
       "meta_title": "1. Metadata (level.json)",
       "meta_desc": "Saves world-wide attributes including spawn coordinates (X, Y, Z), world seed, world type, difficulty, and sea level.",
       "chunk_title": "2. Chunk Files (c.X.Z.json.zlib)",
@@ -108,11 +114,11 @@
       "title": "Automated Background Tasks & Backups",
       "desc": "RustMC manages persistence operations in the background using lightweight asynchronous Tokio loops, keeping the server main tick thread responsive:",
       "autosave_title": "Periodic Autosave Loop",
-      "autosave_desc": "Runs in a background task at the frequency set by <0>save_interval_secs</0> (default: 300s). The loop acquires a read lock on the world state, identifies modified/dirty chunks, and serializes them asynchronously to avoid interrupting connection processing.",
+      "autosave_desc": "Runs in a background task at the frequency set by <code>save_interval_secs</code> (default: 300s). The loop acquires a read lock on the world state, identifies modified/dirty chunks, and serializes them asynchronously to avoid interrupting connection processing.",
       "backup_title": "Automated Backups & Rotation",
-      "backup_desc": "Runs at the frequency set by <0>backup_interval_secs</0> (default: 3600s). The task creates a full copy of the world directory under <1>backups/backup_&lt;millisecond_timestamp&gt;/</1>. To prevent blocking the async runtime, I/O copying is offloaded to a thread pool via <2>tokio::task::spawn_blocking</2>.",
+      "backup_desc": "Runs at the frequency set by <code>backup_interval_secs</code> (default: 3600s). The task creates a full copy of the world directory under <code>backups/backup_&lt;millisecond_timestamp&gt;/</code>. To prevent blocking the async runtime, I/O copying is offloaded to a thread pool via <code>tokio::task::spawn_blocking</code>.",
       "prune_title": "Backup Pruning Policy",
-      "prune_desc": "To prevent the storage volume from filling up over time, the backup system enforces a pruning algorithm: after a successful backup, it scans the backups directory, sorts backups chronologically, and deletes the oldest folders so that only the latest <0>max_backups</0> (default: 5) are kept."
+      "prune_desc": "To prevent the storage volume from filling up over time, the backup system enforces a pruning algorithm: after a successful backup, it scans the backups directory, sorts backups chronologically, and deletes the oldest folders so that only the latest <code>max_backups</code> (default: 5) are kept."
     }
   },
   "protocol_tab": {
@@ -126,7 +132,8 @@
       "login_title": "3. Login",
       "login_desc": "Auth & Compression",
       "play_title": "4. Play Phase",
-      "play_desc": "Terrain Ticks & Chat"
+      "play_desc": "Terrain Ticks & Chat",
+      "or_arrow": "OR ➔"
     }
   },
   "transfer_tab": {
@@ -151,11 +158,11 @@
     "desc": "RustMC implements rate limit protections on client streams and maps administration roles dynamically via the Operators system.",
     "rate_limiting": {
       "title": "Connection Rate Limiting",
-      "desc": "To prevent denial of service (DoS) and spamming, connection actors monitor inbound packets. If a player exceeds the configured <0>invalid_packet_threshold</0> within the window specified by <1>invalid_packet_window_secs</1>, the connection is instantly severed and blacklisted for the epoch."
+      "desc": "To prevent denial of service (DoS) and spamming, connection actors monitor inbound packets. If a player exceeds the configured <code>invalid_packet_threshold</code> within the window specified by <code>invalid_packet_window_secs</code>, the connection is instantly severed and blacklisted for the epoch."
     },
     "ops": {
       "title": "Operators System (ops.toml)",
-      "desc": "Server operators are configured inside <0>ops.toml</0> using their username, UUID, and integer permission levels (1-4). On connection login, the server matches credentials and streams the operator rank down to the client to activate server commands."
+      "desc": "Server operators are configured inside <code>ops.toml</code> using their username, UUID, and integer permission levels (1-4). On connection login, the server matches credentials and streams the operator rank down to the client to activate server commands."
     },
     "file_format": {
       "title": "Operators File Format (ops.toml)"
