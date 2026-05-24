@@ -103,61 +103,11 @@ impl PluginManager {
         Ok(jvm)
     }
     pub fn discover_and_load(&mut self, plugin_dir: &str) -> Result<usize> {
-        if plugin_dir.contains("..") {
-            anyhow::bail!("Path traversal attempt detected in plugin directory: {}", plugin_dir);
-        }
-
         let current_dir = std::env::current_dir()
             .context("Failed to get current working directory")?;
         let canonical_current = std::fs::canonicalize(&current_dir)?;
-        let path = std::path::Path::new(plugin_dir);
-
-        if path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
-            anyhow::bail!("Path traversal attempt detected in plugin directory: {}", plugin_dir);
-        }
-
-        let resolved = if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            canonical_current.join(path)
-        };
-
-        if !resolved.starts_with(&canonical_current) {
-            anyhow::bail!("Path traversal detected: plugin directory escapes working directory");
-        }
-
-        let mut ancestor = resolved.as_path();
-        while !ancestor.exists() {
-            if let Some(parent) = ancestor.parent() {
-                ancestor = parent;
-            } else {
-                break;
-            }
-        }
-
-        let canonical_ancestor = if ancestor.exists() {
-            std::fs::canonicalize(ancestor)?
-        } else {
-            canonical_current.clone()
-        };
-
-        if !canonical_ancestor.starts_with(&canonical_current) {
-            anyhow::bail!("Path traversal detected: plugin directory escapes working directory");
-        }
-
-        let rel = resolved.strip_prefix(ancestor)
-            .map_err(|_| anyhow::anyhow!("Failed to resolve path relative to ancestor"))?;
-        if rel.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
-            anyhow::bail!("Path traversal attempt detected in relative path component");
-        }
-        let final_path = if rel.as_os_str().is_empty() {
-            canonical_ancestor
-        } else {
-            canonical_ancestor.join(rel)
-        };
-        if !final_path.starts_with(&canonical_current) {
-            anyhow::bail!("Path traversal detected: final path escapes working directory");
-        }
+        
+        let final_path = validate_and_sanitize_path(&canonical_current, std::path::Path::new(plugin_dir))?;
 
         if std::fs::metadata(&final_path).is_err() {
             info!("Plugin directory does not exist: {}, creating it", final_path.display());
