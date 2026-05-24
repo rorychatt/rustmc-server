@@ -130,26 +130,28 @@ impl PluginManager {
         if !resolved.starts_with(&canonical_current) {
             anyhow::bail!("Path traversal detected: resolved path escapes base directory");
         }
-        let _ = resolved.strip_prefix(&canonical_current)
+        let rel_resolved = resolved.strip_prefix(&canonical_current)
             .map_err(|_| anyhow::anyhow!("Path traversal detected: resolved path escapes base directory"))?;
+        let safe_resolved = canonical_current.join(rel_resolved);
 
-        if std::fs::metadata(&resolved).is_err() {
-            info!("Plugin directory does not exist: {}, creating it", resolved.display());
-            std::fs::create_dir_all(&resolved)?;
+        if std::fs::metadata(&safe_resolved).is_err() {
+            info!("Plugin directory does not exist: {}, creating it", safe_resolved.display());
+            std::fs::create_dir_all(&safe_resolved)?;
         }
 
-        let canonical_dir = std::fs::canonicalize(&resolved)
-            .with_context(|| format!("Failed to canonicalize plugin directory: {}", resolved.display()))?;
+        let canonical_dir = std::fs::canonicalize(&safe_resolved)
+            .with_context(|| format!("Failed to canonicalize plugin directory: {}", safe_resolved.display()))?;
 
         // 5. Prefix and Strip-Prefix check on canonicalized path
         if !canonical_dir.starts_with(&canonical_current) {
             anyhow::bail!("Path traversal detected: canonical path escapes base directory");
         }
-        let _ = canonical_dir.strip_prefix(&canonical_current)
+        let rel_canonical = canonical_dir.strip_prefix(&canonical_current)
             .map_err(|_| anyhow::anyhow!("Path traversal detected: canonical path escapes base directory"))?;
+        let safe_canonical_dir = canonical_current.join(rel_canonical);
 
         let mut jar_paths = Vec::new();
-        for entry in std::fs::read_dir(&canonical_dir)? {
+        for entry in std::fs::read_dir(&safe_canonical_dir)? {
             let entry = entry?;
             let file_path = entry.path();
             if file_path.extension().and_then(|e| e.to_str()) == Some("jar") {
@@ -160,18 +162,19 @@ impl PluginManager {
                 let canonical_file = std::fs::canonicalize(&file_path)
                     .with_context(|| format!("Failed to canonicalize plugin file: {}", file_path.display()))?;
                 
-                if !canonical_file.starts_with(&canonical_dir) {
+                if !canonical_file.starts_with(&safe_canonical_dir) {
                     anyhow::bail!(
                         "Path traversal detected! Plugin file {} is outside plugin directory {}",
                         canonical_file.display(),
-                        canonical_dir.display()
+                        safe_canonical_dir.display()
                     );
                 }
-                let _ = canonical_file.strip_prefix(&canonical_dir)
+                let rel_file = canonical_file.strip_prefix(&safe_canonical_dir)
                     .map_err(|_| anyhow::anyhow!("Path traversal detected: plugin file is outside plugin directory"))?;
+                let safe_file = safe_canonical_dir.join(rel_file);
 
-                info!("Found plugin JAR: {}", canonical_file.display());
-                jar_paths.push(canonical_file);
+                info!("Found plugin JAR: {}", safe_file.display());
+                jar_paths.push(safe_file);
             }
         }
 

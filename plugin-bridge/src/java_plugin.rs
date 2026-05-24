@@ -44,20 +44,22 @@ impl JavaPlugin {
         if !resolved.starts_with(&canonical_current) {
             bail!("Path traversal detected: resolved path escapes base directory");
         }
-        let _ = resolved.strip_prefix(&canonical_current)
+        let rel_resolved = resolved.strip_prefix(&canonical_current)
             .map_err(|_| anyhow::anyhow!("Path traversal detected: resolved path escapes base directory"))?;
+        let safe_resolved = canonical_current.join(rel_resolved);
 
-        let canonical_path = std::fs::canonicalize(&resolved)
-            .with_context(|| format!("Failed to canonicalize JAR path: {}", resolved.display()))?;
+        let canonical_path = std::fs::canonicalize(&safe_resolved)
+            .with_context(|| format!("Failed to canonicalize JAR path: {}", safe_resolved.display()))?;
 
         // 5. Prefix and Strip-Prefix check on canonical path
         if !canonical_path.starts_with(&canonical_current) {
             bail!("Path traversal detected: canonical path escapes base directory");
         }
-        let _ = canonical_path.strip_prefix(&canonical_current)
+        let rel_canonical = canonical_path.strip_prefix(&canonical_current)
             .map_err(|_| anyhow::anyhow!("Path traversal detected: canonical path escapes base directory"))?;
+        let safe_canonical = canonical_current.join(rel_canonical);
 
-        Ok(canonical_path)
+        Ok(safe_canonical)
     }
 
     pub fn new(jvm: &'static JavaVM, jar_path: &Path) -> Result<Self> {
