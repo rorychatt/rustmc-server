@@ -9,6 +9,62 @@ use super::events::EventBus;
 use super::java_plugin::JavaPlugin;
 use super::jvm::JvmManager;
 
+pub fn validate_and_sanitize_path(base_dir: &std::path::Path, path: &std::path::Path) -> Result<std::path::PathBuf> {
+    // 1. Check for parent directory components (e.g. `..`) to prevent path traversal attempts.
+    if path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        anyhow::bail!("Path traversal attempt detected: contains parent directory components");
+    }
+
+    // 2. Resolve the path. If it's relative, join it to the base directory.
+    let resolved = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        base_dir.join(path)
+    };
+
+    // 3. To handle symlinks and resolve everything, if the path (or its closest existing parent) exists,
+    // we can canonicalize it. Let's find the closest parent directory that exists.
+    let mut ancestor = resolved.as_path();
+    while !ancestor.exists() {
+        if let Some(parent) = ancestor.parent() {
+            ancestor = parent;
+        } else {
+            break;
+        }
+    }
+
+    let canonical_ancestor = if ancestor.exists() {
+        std::fs::canonicalize(ancestor)?
+    } else {
+        std::fs::canonicalize(base_dir)?
+    };
+
+    // Check if the canonical ancestor starts with the canonical base directory.
+    let canonical_base = std::fs::canonicalize(base_dir)?;
+    if !canonical_ancestor.starts_with(&canonical_base) {
+        anyhow::bail!("Path traversal detected: resolved path escapes the allowed base directory");
+    }
+
+    // Also verify that the final path (which may not exist yet) resolves to something inside base_dir.
+    if let Ok(rel) = resolved.strip_prefix(ancestor) {
+        if rel.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            anyhow::bail!("Path traversal attempt detected in relative path component");
+        }
+        let final_path = if rel.as_os_str().is_empty() {
+            canonical_ancestor
+        } else {
+            canonical_ancestor.join(rel)
+        };
+        if !final_path.starts_with(&canonical_base) {
+            anyhow::bail!("Path traversal detected: final path escapes the allowed base directory");
+        }
+        Ok(final_path)
+    } else {
+        anyhow::bail!("Failed to resolve path relative to ancestor");
+    }
+}
+
+
 #[derive(Debug, Clone)]
 pub struct PluginMeta {
     pub name: String,
@@ -46,42 +102,22 @@ impl PluginManager {
         self.jvm = Some(jvm);
         Ok(jvm)
     }
-
     pub fn discover_and_load(&mut self, plugin_dir: &str) -> Result<usize> {
-        let path = std::path::Path::new(plugin_dir);
-        if plugin_dir.contains("..") || path.components().any(|c| c == std::path::Component::ParentDir) {
-            anyhow::bail!("Path traversal attempt detected in plugin directory: {}", plugin_dir);
-        }
-
-        if std::fs::metadata(path).is_err() {
-            info!("Plugin directory does not exist: {}, creating it", path.display());
-            std::fs::create_dir_all(path)?;
-            return Ok(0);
-        }
-
-        let canonical_dir = std::fs::canonicalize(path)
-            .with_context(|| format!("Failed to canonicalize plugin directory: {}", path.display()))?;
-
         let current_dir = std::env::current_dir()
             .context("Failed to get current working directory")?;
         let canonical_current = std::fs::canonicalize(&current_dir)?;
+        let path = std::path::Path::new(plugin_dir);
 
-        if !canonical_dir.starts_with(&canonical_current) {
-            anyhow::bail!(
-                "Path traversal detected: plugin directory {} must reside within the server working directory",
-                canonical_dir.display()
-            );
+        let sanitized_path = validate_and_sanitize_path(&canonical_current, path)?;
+
+        if std::fs::metadata(&sanitized_path).is_err() {
+            info!("Plugin directory does not exist: {}, creating it", sanitized_path.display());
+            std::fs::create_dir_all(&sanitized_path)?;
+            return Ok(0);
         }
 
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                let canonical_parent = std::fs::canonicalize(parent)
-                    .with_context(|| format!("Failed to canonicalize parent of plugin directory: {}", parent.display()))?;
-                if !canonical_dir.starts_with(&canonical_parent) {
-                    anyhow::bail!("Path traversal detected: plugin directory escapes its parent directory");
-                }
-            }
-        }
+        let canonical_dir = std::fs::canonicalize(&sanitized_path)
+            .with_context(|| format!("Failed to canonicalize plugin directory: {}", sanitized_path.display()))?;
 
         let mut jar_paths = Vec::new();
         for entry in std::fs::read_dir(&canonical_dir)? {
