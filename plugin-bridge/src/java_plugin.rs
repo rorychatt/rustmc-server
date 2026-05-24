@@ -77,11 +77,17 @@ impl JavaPlugin {
     }
 
     fn parse_plugin_yml(jar_path: &Path) -> Result<PluginMeta> {
-        if jar_path.components().any(|c| c == std::path::Component::ParentDir) {
+        let jar_str = jar_path.to_string_lossy();
+        if jar_str.contains("..") || jar_path.components().any(|c| c == std::path::Component::ParentDir) {
             bail!("Path traversal detected in JAR path: {}", jar_path.display());
         }
-        let file = std::fs::File::open(jar_path)
-            .with_context(|| format!("Failed to open JAR: {}", jar_path.display()))?;
+        let canonical_path = jar_path.canonicalize()
+            .with_context(|| format!("Failed to canonicalize JAR path: {}", jar_path.display()))?;
+        if canonical_path.components().any(|c| c == std::path::Component::ParentDir) {
+            bail!("Path traversal detected in canonicalized JAR path: {}", canonical_path.display());
+        }
+        let file = std::fs::File::open(&canonical_path)
+            .with_context(|| format!("Failed to open JAR: {}", canonical_path.display()))?;
 
         let mut archive = zip::ZipArchive::new(file)
             .with_context(|| format!("Failed to read JAR as ZIP: {}", jar_path.display()))?;
