@@ -1,7 +1,7 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use jni::JavaVM;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{error, info, warn};
 
@@ -29,6 +29,17 @@ pub struct PluginManager {
     jvm: Option<&'static JavaVM>,
 }
 
+fn sanitize_plugin_path(plugin_dir: &str) -> Result<PathBuf> {
+    if plugin_dir.contains("..") {
+        anyhow::bail!("Path traversal attempt detected in plugin directory: {}", plugin_dir);
+    }
+    let path = PathBuf::from(plugin_dir);
+    if path.components().any(|c| c == std::path::Component::ParentDir) {
+        anyhow::bail!("Path traversal detected in plugin directory components: {}", plugin_dir);
+    }
+    Ok(path)
+}
+
 impl PluginManager {
     pub fn new(event_bus: Arc<EventBus>) -> Self {
         Self {
@@ -48,21 +59,15 @@ impl PluginManager {
     }
 
     pub fn discover_and_load(&mut self, plugin_dir: &str) -> Result<usize> {
-        if plugin_dir.contains("..") {
-            anyhow::bail!("Path traversal attempt detected in plugin directory: {}", plugin_dir);
-        }
-        let path = Path::new(plugin_dir);
-        if path.components().any(|c| c == std::path::Component::ParentDir) {
-            anyhow::bail!("Path traversal detected in plugin directory: {}", plugin_dir);
-        }
+        let path = sanitize_plugin_path(plugin_dir)?;
         if !path.exists() {
-            info!("Plugin directory does not exist: {plugin_dir}, creating it");
-            std::fs::create_dir_all(path)?;
+            info!("Plugin directory does not exist: {}, creating it", path.display());
+            std::fs::create_dir_all(&path)?;
             return Ok(0);
         }
 
         let canonical_dir = path.canonicalize()
-            .with_context(|| format!("Failed to canonicalize plugin directory: {plugin_dir}"))?;
+            .with_context(|| format!("Failed to canonicalize plugin directory: {}", path.display()))?;
 
         let mut jar_paths = Vec::new();
         for entry in std::fs::read_dir(&canonical_dir)? {
@@ -86,7 +91,7 @@ impl PluginManager {
         }
 
         if jar_paths.is_empty() {
-            info!("No plugin JARs found in {plugin_dir}");
+            info!("No plugin JARs found in {}", path.display());
             return Ok(0);
         }
 
