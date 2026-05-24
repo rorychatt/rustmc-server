@@ -29,6 +29,16 @@ impl JavaPlugin {
             bail!("Path traversal detected in canonicalized JAR path: {}", canonical_path.display());
         }
 
+        if let Some(parent) = jar_path.parent() {
+            if !parent.as_os_str().is_empty() {
+                let canonical_parent = std::fs::canonicalize(parent)
+                    .with_context(|| format!("Failed to canonicalize parent of JAR path: {}", parent.display()))?;
+                if !canonical_path.starts_with(&canonical_parent) {
+                    bail!("Path traversal detected: JAR path escapes its parent directory");
+                }
+            }
+        }
+
         let meta = Self::parse_plugin_yml(&canonical_path)
             .with_context(|| format!("Failed to parse plugin.yml from {}", canonical_path.display()))?;
 
@@ -95,6 +105,16 @@ impl JavaPlugin {
             .with_context(|| format!("Failed to canonicalize JAR path: {}", jar_path.display()))?;
         if canonical_path.components().any(|c| c == std::path::Component::ParentDir) {
             bail!("Path traversal detected in canonicalized JAR path: {}", canonical_path.display());
+        }
+
+        if let Some(parent) = jar_path.parent() {
+            if !parent.as_os_str().is_empty() {
+                let canonical_parent = std::fs::canonicalize(parent)
+                    .with_context(|| format!("Failed to canonicalize parent of JAR path: {}", parent.display()))?;
+                if !canonical_path.starts_with(&canonical_parent) {
+                    bail!("Path traversal detected: JAR path escapes its parent directory");
+                }
+            }
         }
         let file = std::fs::File::open(&canonical_path)
             .with_context(|| format!("Failed to open JAR: {}", canonical_path.display()))?;
