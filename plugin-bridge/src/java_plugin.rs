@@ -33,12 +33,8 @@ impl JavaPlugin {
             .context("Failed to get current working directory")?;
         let canonical_current = std::fs::canonicalize(&current_dir)?;
 
-        let temp_dir = std::env::temp_dir();
-        let canonical_temp = std::fs::canonicalize(&temp_dir)
-            .unwrap_or_else(|_| temp_dir.clone());
-
-        if !canonical_path.starts_with(&canonical_current) && !canonical_path.starts_with(&canonical_temp) {
-            bail!("Path traversal detected: JAR path {} must reside within the server working directory or system temp directory", canonical_path.display());
+        if !canonical_path.starts_with(&canonical_current) {
+            bail!("Path traversal detected: JAR path {} must reside within the server working directory", canonical_path.display());
         }
 
         if let Some(parent) = jar_path.parent() {
@@ -123,12 +119,8 @@ impl JavaPlugin {
             .context("Failed to get current working directory")?;
         let canonical_current = std::fs::canonicalize(&current_dir)?;
 
-        let temp_dir = std::env::temp_dir();
-        let canonical_temp = std::fs::canonicalize(&temp_dir)
-            .unwrap_or_else(|_| temp_dir.clone());
-
-        if !canonical_path.starts_with(&canonical_current) && !canonical_path.starts_with(&canonical_temp) {
-            bail!("Path traversal detected: JAR path {} must reside within the server working directory or system temp directory", canonical_path.display());
+        if !canonical_path.starts_with(&canonical_current) {
+            bail!("Path traversal detected: JAR path {} must reside within the server working directory", canonical_path.display());
         }
 
         if let Some(parent) = jar_path.parent() {
