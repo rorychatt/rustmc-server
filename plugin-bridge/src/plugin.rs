@@ -48,21 +48,28 @@ impl PluginManager {
     }
 
     pub fn discover_and_load(&mut self, plugin_dir: &str) -> Result<usize> {
-        if plugin_dir.contains("..") {
+        let path = std::path::Path::new(plugin_dir);
+        if plugin_dir.contains("..") || path.components().any(|c| c == std::path::Component::ParentDir) {
             anyhow::bail!("Path traversal attempt detected in plugin directory: {}", plugin_dir);
         }
 
-        if std::fs::metadata(plugin_dir).is_err() {
-            info!("Plugin directory does not exist: {plugin_dir}, creating it");
-            std::fs::create_dir_all(plugin_dir)?;
+        if std::fs::metadata(path).is_err() {
+            info!("Plugin directory does not exist: {}, creating it", path.display());
+            std::fs::create_dir_all(path)?;
             return Ok(0);
         }
 
-        let canonical_dir = std::fs::canonicalize(plugin_dir)
-            .with_context(|| format!("Failed to canonicalize plugin directory: {plugin_dir}"))?;
+        let canonical_dir = std::fs::canonicalize(path)
+            .with_context(|| format!("Failed to canonicalize plugin directory: {}", path.display()))?;
 
-        if canonical_dir.components().any(|c| c == std::path::Component::ParentDir) {
-            anyhow::bail!("Path traversal detected in plugin directory: {}", canonical_dir.display());
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                let canonical_parent = std::fs::canonicalize(parent)
+                    .with_context(|| format!("Failed to canonicalize parent of plugin directory: {}", parent.display()))?;
+                if !canonical_dir.starts_with(&canonical_parent) {
+                    anyhow::bail!("Path traversal detected: plugin directory escapes its parent directory");
+                }
+            }
         }
 
         let mut jar_paths = Vec::new();
