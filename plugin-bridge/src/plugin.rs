@@ -48,6 +48,9 @@ impl PluginManager {
     }
 
     pub fn discover_and_load(&mut self, plugin_dir: &str) -> Result<usize> {
+        if plugin_dir.contains("..") {
+            anyhow::bail!("Path traversal attempt detected in plugin directory: {}", plugin_dir);
+        }
         let path = Path::new(plugin_dir);
         if path.components().any(|c| c == std::path::Component::ParentDir) {
             anyhow::bail!("Path traversal detected in plugin directory: {}", plugin_dir);
@@ -58,13 +61,27 @@ impl PluginManager {
             return Ok(0);
         }
 
+        let canonical_dir = path.canonicalize()
+            .with_context(|| format!("Failed to canonicalize plugin directory: {plugin_dir}"))?;
+
         let mut jar_paths = Vec::new();
-        for entry in std::fs::read_dir(path)? {
+        for entry in std::fs::read_dir(&canonical_dir)? {
             let entry = entry?;
             let file_path = entry.path();
             if file_path.extension().and_then(|e| e.to_str()) == Some("jar") {
-                info!("Found plugin JAR: {}", file_path.display());
-                jar_paths.push(file_path);
+                let canonical_file = file_path.canonicalize()
+                    .with_context(|| format!("Failed to canonicalize plugin file: {}", file_path.display()))?;
+                
+                if !canonical_file.starts_with(&canonical_dir) {
+                    anyhow::bail!(
+                        "Path traversal detected! Plugin file {} is outside plugin directory {}",
+                        canonical_file.display(),
+                        canonical_dir.display()
+                    );
+                }
+
+                info!("Found plugin JAR: {}", canonical_file.display());
+                jar_paths.push(canonical_file);
             }
         }
 
