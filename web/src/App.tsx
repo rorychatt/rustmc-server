@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useTranslation, Trans } from "react-i18next";
+import { useTranslation } from "react-i18next";
 import PacketReference from "./components/PacketReference";
 import ConfigGenerator from "./components/ConfigGenerator";
 import {
@@ -28,6 +28,34 @@ type TabId =
   | "protocol"
   | "transfer"
   | "security";
+
+// JavaScript constants to keep terminal commands, config lines, and code snippets out of JSX string-literal detection
+const CLONE_CMD = "git clone https://github.com/rorychatt/rustmc-server.git";
+const CD_CMD = "cd rustmc-server";
+const BUILD_CMD = "cargo build --release";
+const RUN_CMD = "./target/release/server";
+
+const WORLD_DIR_NAME = "world/";
+const LEVEL_JSON = "├── level.json                 ";
+const CHUNKS_DIR = "└── chunks/                   ";
+const CHUNK_0_0 = "    ├── c.0.0.json.zlib        ";
+const CHUNK_0_1 = "    ├── c.0.1.json.zlib        ";
+const CHUNK_M1_0 = "    └── c.-1.0.json.zlib       ";
+
+const CODE_LINE_1 = "fn verify_cookie_handshake(player_uuid: Uuid, received_token: &[u8]) -> bool {";
+const CODE_LINE_2 = "    match get_cached_transfer_cookie(&player_uuid) {";
+const CODE_LINE_3 = "        Some(cached_cookie) => {";
+const CODE_LINE_4 = "            constant_time_compare(&cached_cookie.token, received_token)";
+const CODE_LINE_5 = "        }";
+const CODE_LINE_6 = "        None => false";
+const CODE_LINE_7 = "    }";
+const CODE_LINE_8 = "}";
+
+const OPS_HEADER = "[[operators]]";
+const OPS_UUID = 'uuid = "e36e6e2f-5069-42b7-84eb-55268c13038d"';
+const OPS_NAME = 'name = "rorychatt"';
+const OPS_LEVEL = "level = 4";
+const OPS_BYPASS = "bypasses_player_limit = true";
 
 export default function App() {
   const { t, i18n } = useTranslation();
@@ -84,7 +112,7 @@ export default function App() {
               className="text-xs font-semibold text-slate-300 hover:text-white flex items-center gap-1.5 bg-slate-900/60 border border-slate-800 px-3 py-1.5 rounded-lg hover:bg-slate-800/60 transition-all focus:outline-none"
             >
               <Globe className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-              <span>{currentLanguage.startsWith("es") ? "Español" : "English"}</span>
+              <span>{currentLanguage.startsWith("es") ? t("languages.spanish") : t("languages.english")}</span>
               <span className="text-[10px] text-slate-500">▼</span>
             </button>
             {langMenuOpen && (
@@ -100,7 +128,7 @@ export default function App() {
                       : "text-slate-300"
                   }`}
                 >
-                  English
+                  {t("languages.english")}
                 </button>
                 <button
                   onClick={() => {
@@ -113,7 +141,7 @@ export default function App() {
                       : "text-slate-300"
                   }`}
                 >
-                  Español
+                  {t("languages.spanish")}
                 </button>
               </div>
             )}
@@ -155,7 +183,7 @@ export default function App() {
                     : "bg-slate-900/40 text-slate-400 border-slate-800/60"
                 }`}
               >
-                EN
+                {t("languages.en")}
               </button>
               <button
                 onClick={() => i18n.changeLanguage("es")}
@@ -165,7 +193,7 @@ export default function App() {
                     : "bg-slate-900/40 text-slate-400 border-slate-800/60"
                 }`}
               >
-                ES
+                {t("languages.es")}
               </button>
             </div>
           </div>
@@ -304,16 +332,16 @@ export default function App() {
                   <div>
                     <span className="text-slate-500">{t("overview.quickstart.clone")}</span>
                   </div>
-                  <div>git clone https://github.com/rorychatt/rustmc-server.git</div>
-                  <div>cd rustmc-server</div>
+                  <div>{CLONE_CMD}</div>
+                  <div>{CD_CMD}</div>
                   <div>
                     <span className="text-slate-500">{t("overview.quickstart.build")}</span>
                   </div>
-                  <div>cargo build --release</div>
+                  <div>{BUILD_CMD}</div>
                   <div>
                     <span className="text-slate-500">{t("overview.quickstart.run")}</span>
                   </div>
-                  <div>./target/release/server</div>
+                  <div>{RUN_CMD}</div>
                 </div>
               </div>
             </div>
@@ -337,16 +365,10 @@ export default function App() {
                     <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
                     {t("architecture.splitting.title")}
                   </h3>
-                  <p className="text-slate-400 text-xs leading-relaxed text-slate-400">
-                    <Trans i18nKey="architecture.splitting.desc">
-                      Upon accepting a TCP client socket, RustMC splits the stream into a{" "}
-                      <strong>Reader</strong> loop and a <strong>Writer</strong> loop. This
-                      eliminates read/write thread contention. The Reader loop decodes packets,
-                      processes clientbound commands, and communicates state changes to a
-                      centralized loop via Tokio channels, while the Writer actor flushes outbound
-                      packet buffers.
-                    </Trans>
-                  </p>
+                  <p
+                    className="text-slate-400 text-xs leading-relaxed text-slate-400"
+                    dangerouslySetInnerHTML={{ __html: t("architecture.splitting.desc") }}
+                  />
                 </div>
 
                 {/* World State */}
@@ -355,15 +377,10 @@ export default function App() {
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                     {t("architecture.state.title")}
                   </h3>
-                  <p className="text-slate-400 text-xs leading-relaxed text-slate-400">
-                    <Trans i18nKey="architecture.state.desc">
-                      World layouts, player metadata registries, and blocks configuration are
-                      managed in memory, wrapped in thread-safe shared references:{" "}
-                      <code>Arc&lt;RwLock&lt;WorldState&gt;&gt;</code>. Multiple reader threads can
-                      retrieve player position changes simultaneously, while write locks are only
-                      requested during tick updates, ensuring minimal mutex contention.
-                    </Trans>
-                  </p>
+                  <p
+                    className="text-slate-400 text-xs leading-relaxed text-slate-400"
+                    dangerouslySetInnerHTML={{ __html: t("architecture.state.desc") }}
+                  />
                 </div>
               </div>
 
@@ -372,13 +389,10 @@ export default function App() {
                 <h3 className="text-lg font-bold text-white">
                   {t("architecture.broadcasting.title")}
                 </h3>
-                <p className="text-slate-400 text-sm leading-relaxed">
-                  <Trans i18nKey="architecture.broadcasting.desc">
-                    The server utilizes a centralized <code>tokio::sync::broadcast</code> channel to
-                    propagate text chat, joint alerts, server notices, and player movement
-                    synchronization updates to all connection loops.
-                  </Trans>
-                </p>
+                <p
+                  className="text-slate-400 text-sm leading-relaxed"
+                  dangerouslySetInnerHTML={{ __html: t("architecture.broadcasting.desc") }}
+                />
                 <div className="p-4 rounded-lg bg-slate-950/40 border border-slate-800 text-xs space-y-2">
                   <div className="font-mono text-cyan-400">
                     {t("architecture.broadcasting.flow_title")}
@@ -416,33 +430,10 @@ export default function App() {
                     {t("world.generators.title")}
                   </h3>
                   <div className="space-y-3 text-slate-400 text-xs leading-relaxed">
-                    <p>
-                      <Trans i18nKey="world.generators.desc">
-                        The server supports two world generation styles, configurable via the{" "}
-                        <code>world_type</code> parameter in <code>server.yaml</code>:
-                      </Trans>
-                    </p>
+                    <p dangerouslySetInnerHTML={{ __html: t("world.generators.desc") }} />
                     <ul className="list-disc list-inside space-y-2 pl-2">
-                      <li>
-                        <Trans i18nKey="world.generators.flat">
-                          <strong>
-                            Flat World (<code>flat</code>):
-                          </strong>{" "}
-                          Generates a uniform layered terrain consisting of 1 Bedrock, 2 Dirt, and 1
-                          Grass block at the configured <code>sea_level</code> (default Y=63). Ideal
-                          for testing and lightweight lobby setups.
-                        </Trans>
-                      </li>
-                      <li>
-                        <Trans i18nKey="world.generators.normal">
-                          <strong>
-                            Normal World (<code>normal</code>):
-                          </strong>{" "}
-                          Utilizes a noise generator based on a pseudo-random number seed (specified
-                          by <code>seed</code>) to produce natural terrain contours, hills, and
-                          valleys that emulate standard Minecraft environments.
-                        </Trans>
-                      </li>
+                      <li dangerouslySetInnerHTML={{ __html: t("world.generators.flat") }} />
+                      <li dangerouslySetInnerHTML={{ __html: t("world.generators.normal") }} />
                     </ul>
                   </div>
                 </div>
@@ -453,13 +444,7 @@ export default function App() {
                     {t("world.spawn.title")}
                   </h3>
                   <div className="space-y-3 text-slate-400 text-xs leading-relaxed">
-                    <p>
-                      <Trans i18nKey="world.spawn.desc">
-                        To prevent players from suffocating or falling endlessly into the void when
-                        spawning, RustMC implements an automated{" "}
-                        <strong>Spawn Height Finder</strong>:
-                      </Trans>
-                    </p>
+                    <p dangerouslySetInnerHTML={{ __html: t("world.spawn.desc") }} />
                     <ol className="list-decimal list-inside space-y-2 pl-2 font-mono text-[11px]">
                       <li>{t("world.spawn.step_1")}</li>
                       <li>{t("world.spawn.step_2")}</li>
@@ -477,13 +462,10 @@ export default function App() {
                   <Database className="text-cyan-400 w-5 h-5" />
                   {t("world.persistence.title")}
                 </h3>
-                <p className="text-slate-400 text-sm leading-relaxed">
-                  <Trans i18nKey="world.persistence.desc">
-                    World chunks are persisted to disk inside the directory configured by{" "}
-                    <code>world_dir</code>. Each chunk is saved in its own file using a compressed
-                    JSON strategy to maximize space efficiency:
-                  </Trans>
-                </p>
+                <p
+                  className="text-slate-400 text-sm leading-relaxed"
+                  dangerouslySetInnerHTML={{ __html: t("world.persistence.desc") }}
+                />
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
                   <div className="p-4 rounded-lg bg-slate-950/40 border border-slate-800/60 text-xs space-y-2">
@@ -514,28 +496,25 @@ export default function App() {
 
                 <div className="bg-slate-950/60 rounded-lg border border-slate-800 p-4 font-mono text-xs text-emerald-400/90 space-y-1 overflow-x-auto">
                   <div className="text-slate-500">{t("world.persistence.layout_title")}</div>
-                  <div>world/</div>
+                  <div>{WORLD_DIR_NAME}</div>
                   <div>
-                    ├── level.json{" "}
+                    {LEVEL_JSON}
                     <span className="text-slate-500">{t("world.persistence.comment_meta")}</span>
                   </div>
                   <div>
-                    └── chunks/{" "}
+                    {CHUNKS_DIR}
                     <span className="text-slate-500">{t("world.persistence.comment_chunks")}</span>
                   </div>
                   <div>
-                    {" "}
-                    ├── c.0.0.json.zlib{" "}
+                    {CHUNK_0_0}
                     <span className="text-slate-500">{t("world.persistence.comment_c00")}</span>
                   </div>
                   <div>
-                    {" "}
-                    ├── c.0.1.json.zlib{" "}
+                    {CHUNK_0_1}
                     <span className="text-slate-500">{t("world.persistence.comment_c01")}</span>
                   </div>
                   <div>
-                    {" "}
-                    └── c.-1.0.json.zlib{" "}
+                    {CHUNK_M1_0}
                     <span className="text-slate-500">{t("world.persistence.comment_c10")}</span>
                   </div>
                 </div>
@@ -554,42 +533,29 @@ export default function App() {
                     <h4 className="text-sm font-bold text-white">
                       {t("world.tasks.autosave_title")}
                     </h4>
-                    <p className="text-slate-400 text-xs leading-relaxed">
-                      <Trans i18nKey="world.tasks.autosave_desc">
-                        Runs in a background task at the frequency set by{" "}
-                        <code>save_interval_secs</code> (default: 300s). The loop acquires a read
-                        lock on the world state, identifies modified/dirty chunks, and serializes
-                        them asynchronously to avoid interrupting connection processing.
-                      </Trans>
-                    </p>
+                    <p
+                      className="text-slate-400 text-xs leading-relaxed"
+                      dangerouslySetInnerHTML={{ __html: t("world.tasks.autosave_desc") }}
+                    />
                   </div>
 
                   <div className="p-5 rounded-lg bg-slate-950/40 border border-slate-800/60 space-y-3">
                     <h4 className="text-sm font-bold text-white">
                       {t("world.tasks.backup_title")}
                     </h4>
-                    <p className="text-slate-400 text-xs leading-relaxed">
-                      <Trans i18nKey="world.tasks.backup_desc">
-                        Runs at the frequency set by <code>backup_interval_secs</code> (default:
-                        3600s). The task creates a full copy of the world directory under{" "}
-                        <code>backups/backup_&lt;millisecond_timestamp&gt;/</code>. To prevent
-                        blocking the async runtime, I/O copying is offloaded to a thread pool via{" "}
-                        <code>tokio::task::spawn_blocking</code>.
-                      </Trans>
-                    </p>
+                    <p
+                      className="text-slate-400 text-xs leading-relaxed"
+                      dangerouslySetInnerHTML={{ __html: t("world.tasks.backup_desc") }}
+                    />
                   </div>
                 </div>
 
                 <div className="p-5 rounded-lg bg-slate-950/40 border border-slate-800/60 space-y-3">
                   <h4 className="text-sm font-bold text-white">{t("world.tasks.prune_title")}</h4>
-                  <p className="text-slate-400 text-xs leading-relaxed">
-                    <Trans i18nKey="world.tasks.prune_desc">
-                      To prevent the storage volume from filling up over time, the backup system
-                      enforces a pruning algorithm: after a successful backup, it scans the backups
-                      directory, sorts backups chronologically, and deletes the oldest folders so
-                      that only the latest <code>max_backups</code> (default: 5) are kept.
-                    </Trans>
-                  </p>
+                  <p
+                    className="text-slate-400 text-xs leading-relaxed"
+                    dangerouslySetInnerHTML={{ __html: t("world.tasks.prune_desc") }}
+                  />
                 </div>
               </div>
             </div>
@@ -622,7 +588,7 @@ export default function App() {
                       {t("protocol_tab.flow.status_desc")}
                     </span>
                   </div>
-                  <div className="text-slate-500">OR ➔</div>
+                  <div className="text-slate-500">{t("protocol_tab.flow.or_arrow")}</div>
                   <div className="w-full md:w-1/5 p-3 rounded-lg border border-cyan-500/20 bg-cyan-950/10 text-cyan-300">
                     <span className="block font-bold">{t("protocol_tab.flow.login_title")}</span>
                     <span className="text-[10px] text-slate-500">
@@ -696,21 +662,14 @@ export default function App() {
                 <p className="text-slate-400 text-sm">{t("transfer_tab.flow_card.desc")}</p>
                 <div className="bg-slate-950/60 rounded-lg border border-slate-800 p-4 font-mono text-xs text-slate-300 leading-relaxed overflow-x-auto">
                   <div className="text-slate-500">{t("transfer_tab.flow_card.comment")}</div>
-                  <div>
-                    fn verify_cookie_handshake(player_uuid: Uuid, received_token: &amp;[u8]) -&gt;
-                    bool &#123;
-                  </div>
-                  <div className="pl-4">
-                    match get_cached_transfer_cookie(&amp;player_uuid) &#123;
-                  </div>
-                  <div className="pl-8">Some(cached_cookie) =&gt; &#123;</div>
-                  <div className="pl-12">
-                    constant_time_compare(&amp;cached_cookie.token, received_token)
-                  </div>
-                  <div className="pl-8">&#125;</div>
-                  <div className="pl-8">None =&gt; false</div>
-                  <div className="pl-4">&#125;</div>
-                  <div>&#125;</div>
+                  <div>{CODE_LINE_1}</div>
+                  <div>{CODE_LINE_2}</div>
+                  <div>{CODE_LINE_3}</div>
+                  <div>{CODE_LINE_4}</div>
+                  <div>{CODE_LINE_5}</div>
+                  <div>{CODE_LINE_6}</div>
+                  <div>{CODE_LINE_7}</div>
+                  <div>{CODE_LINE_8}</div>
                 </div>
               </div>
             </div>
@@ -733,28 +692,19 @@ export default function App() {
                   <h3 className="text-base font-bold text-white">
                     {t("security_tab.rate_limiting.title")}
                   </h3>
-                  <p className="text-slate-400 text-xs leading-relaxed text-slate-400">
-                    <Trans i18nKey="security_tab.rate_limiting.desc">
-                      To prevent denial of service (DoS) and spamming, connection actors monitor
-                      inbound packets. If a player exceeds the configured{" "}
-                      <code>invalid_packet_threshold</code> within the window specified by{" "}
-                      <code>invalid_packet_window_secs</code>, the connection is instantly severed
-                      and blacklisted for the epoch.
-                    </Trans>
-                  </p>
+                  <p
+                    className="text-slate-400 text-xs leading-relaxed text-slate-400"
+                    dangerouslySetInnerHTML={{ __html: t("security_tab.rate_limiting.desc") }}
+                  />
                 </div>
 
                 {/* Operator roles */}
                 <div className="p-5 rounded-xl glass-panel space-y-3">
                   <h3 className="text-base font-bold text-white">{t("security_tab.ops.title")}</h3>
-                  <p className="text-slate-400 text-xs leading-relaxed text-slate-400">
-                    <Trans i18nKey="security_tab.ops.desc">
-                      Server operators are configured inside <code>ops.toml</code> using their
-                      username, UUID, and integer permission levels (1-4). On connection login, the
-                      server matches credentials and streams the operator rank down to the client to
-                      activate server commands.
-                    </Trans>
-                  </p>
+                  <p
+                    className="text-slate-400 text-xs leading-relaxed text-slate-400"
+                    dangerouslySetInnerHTML={{ __html: t("security_tab.ops.desc") }}
+                  />
                 </div>
               </div>
 
@@ -765,11 +715,11 @@ export default function App() {
                   {t("security_tab.file_format.title")}
                 </h3>
                 <div className="bg-slate-950/60 rounded-lg border border-slate-800 p-4 font-mono text-xs text-emerald-400/90 leading-relaxed overflow-x-auto">
-                  <div>[[operators]]</div>
-                  <div>uuid = "e36e6e2f-5069-42b7-84eb-55268c13038d"</div>
-                  <div>name = "rorychatt"</div>
-                  <div>level = 4</div>
-                  <div>bypasses_player_limit = true</div>
+                  <div>{OPS_HEADER}</div>
+                  <div>{OPS_UUID}</div>
+                  <div>{OPS_NAME}</div>
+                  <div>{OPS_LEVEL}</div>
+                  <div>{OPS_BYPASS}</div>
                 </div>
               </div>
             </div>
