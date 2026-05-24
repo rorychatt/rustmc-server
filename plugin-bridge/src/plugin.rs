@@ -49,6 +49,9 @@ impl PluginManager {
 
     pub fn discover_and_load(&mut self, plugin_dir: &str) -> Result<usize> {
         let path = Path::new(plugin_dir);
+        if path.components().any(|c| c == std::path::Component::ParentDir) {
+            anyhow::bail!("Path traversal detected in plugin directory: {}", plugin_dir);
+        }
         if !path.exists() {
             info!("Plugin directory does not exist: {plugin_dir}, creating it");
             std::fs::create_dir_all(path)?;
