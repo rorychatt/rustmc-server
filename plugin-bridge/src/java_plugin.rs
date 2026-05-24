@@ -8,7 +8,7 @@ use tracing::{debug, info, warn};
 
 use super::events::EventBus;
 use super::jvm::JvmManager;
-use super::plugin::{validate_and_sanitize_path, Plugin, PluginMeta};
+use super::plugin::{Plugin, PluginMeta};
 
 pub struct JavaPlugin {
     jvm: &'static JavaVM,
@@ -22,8 +22,27 @@ impl JavaPlugin {
         let current_dir = std::env::current_dir()
             .context("Failed to get current working directory")?;
         let canonical_current = std::fs::canonicalize(&current_dir)?;
-        let canonical_path = validate_and_sanitize_path(&canonical_current, jar_path)
-            .with_context(|| format!("Path traversal check failed for JAR path: {}", jar_path.display()))?;
+
+        if jar_path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            bail!("Path traversal attempt detected in JAR path: {}", jar_path.display());
+        }
+
+        let resolved = if jar_path.is_absolute() {
+            jar_path.to_path_buf()
+        } else {
+            canonical_current.join(jar_path)
+        };
+
+        if !resolved.starts_with(&canonical_current) {
+            bail!("Path traversal detected: JAR path must reside within the server working directory");
+        }
+
+        let canonical_path = std::fs::canonicalize(&resolved)
+            .with_context(|| format!("Failed to canonicalize JAR path: {}", jar_path.display()))?;
+
+        if !canonical_path.starts_with(&canonical_current) {
+            bail!("Path traversal detected: JAR path {} must reside within the server working directory", canonical_path.display());
+        }
 
         let meta = Self::parse_plugin_yml(&canonical_path)
             .with_context(|| format!("Failed to parse plugin.yml from {}", canonical_path.display()))?;
@@ -79,15 +98,60 @@ impl JavaPlugin {
     }
 
     pub fn new_from_jar_meta(jar_path: &Path) -> Result<PluginMeta> {
-        Self::parse_plugin_yml(jar_path)
+        let current_dir = std::env::current_dir()
+            .context("Failed to get current working directory")?;
+        let canonical_current = std::fs::canonicalize(&current_dir)?;
+
+        if jar_path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            bail!("Path traversal attempt detected in JAR path: {}", jar_path.display());
+        }
+
+        let resolved = if jar_path.is_absolute() {
+            jar_path.to_path_buf()
+        } else {
+            canonical_current.join(jar_path)
+        };
+
+        if !resolved.starts_with(&canonical_current) {
+            bail!("Path traversal detected: JAR path must reside within the server working directory");
+        }
+
+        let canonical_path = std::fs::canonicalize(&resolved)
+            .with_context(|| format!("Failed to canonicalize JAR path: {}", jar_path.display()))?;
+
+        if !canonical_path.starts_with(&canonical_current) {
+            bail!("Path traversal detected: JAR path {} must reside within the server working directory", canonical_path.display());
+        }
+
+        Self::parse_plugin_yml(&canonical_path)
     }
 
     fn parse_plugin_yml(jar_path: &Path) -> Result<PluginMeta> {
         let current_dir = std::env::current_dir()
             .context("Failed to get current working directory")?;
         let canonical_current = std::fs::canonicalize(&current_dir)?;
-        let canonical_path = validate_and_sanitize_path(&canonical_current, jar_path)
-            .with_context(|| format!("Path traversal check failed for JAR path: {}", jar_path.display()))?;
+
+        if jar_path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            bail!("Path traversal attempt detected in JAR path: {}", jar_path.display());
+        }
+
+        let resolved = if jar_path.is_absolute() {
+            jar_path.to_path_buf()
+        } else {
+            canonical_current.join(jar_path)
+        };
+
+        if !resolved.starts_with(&canonical_current) {
+            bail!("Path traversal detected: JAR path must reside within the server working directory");
+        }
+
+        let canonical_path = std::fs::canonicalize(&resolved)
+            .with_context(|| format!("Failed to canonicalize JAR path: {}", jar_path.display()))?;
+
+        if !canonical_path.starts_with(&canonical_current) {
+            bail!("Path traversal detected: JAR path {} must reside within the server working directory", canonical_path.display());
+        }
+
         let file = std::fs::File::open(&canonical_path)
             .with_context(|| format!("Failed to open JAR: {}", canonical_path.display()))?;
 
