@@ -80,7 +80,6 @@ impl PalettedContainer {
                     VarInt(entry).write(writer)?;
                 }
             }
-            VarInt(self.data.len() as i32).write(writer)?;
             for &val in &self.data {
                 writer.write_all(&val.to_be_bytes())?;
             }
@@ -162,12 +161,20 @@ pub fn encode_chunk_data(chunk: &Chunk) -> io::Result<Packet> {
         let block_count = section.non_air_count();
         chunk_section_data.extend_from_slice(&block_count.to_be_bytes());
 
+        // Count fluid blocks (water and lava)
+        let fluid_count = section
+            .blocks()
+            .iter()
+            .filter(|&&state| state == BlockState::WATER || state == BlockState::LAVA)
+            .count() as u16;
+        chunk_section_data.extend_from_slice(&fluid_count.to_be_bytes());
+
         let block_palette = PalettedContainer::from_blocks(section.blocks());
         block_palette.write(&mut chunk_section_data)?;
 
-        // Biomes: single-value palette (Plains = 1)
+        // Biomes: single-value palette (Plains = 40)
         chunk_section_data.push(0); // bits_per_entry = 0
-        VarInt(1).write(&mut chunk_section_data)?; // Plains biome ID
+        VarInt(40).write(&mut chunk_section_data)?; // Plains biome ID
     }
 
     VarInt(chunk_section_data.len() as i32).write(&mut data)?;
@@ -531,21 +538,12 @@ mod tests {
                     println!("    Palette[{}]: {}", i, p_val);
                 }
                 
-                let mut val = 0;
-                let mut shift = 0;
-                loop {
-                    let mut b = [0u8; 1];
-                    std::io::Read::read_exact(c, &mut b).unwrap();
-                    val |= ((b[0] & 0x7F) as i32) << shift;
-                    if (b[0] & 0x80) == 0 {
-                        break;
-                    }
-                    shift += 7;
-                }
-                let data_len = val;
+                let values_per_long = 64 / bits_per_entry as usize;
+                let entry_count: usize = if container_name == "Blocks" { 4096 } else { 64 };
+                let num_longs = entry_count.div_ceil(values_per_long);
                 
-                println!("  Data array len: {}", data_len);
-                for _ in 0..data_len {
+                println!("  Data array len: {}", num_longs);
+                for _ in 0..num_longs {
                     let mut long_bytes = [0u8; 8];
                     std::io::Read::read_exact(c, &mut long_bytes).unwrap();
                 }
@@ -556,7 +554,15 @@ mod tests {
             let mut block_count_bytes = [0u8; 2];
             std::io::Read::read_exact(&mut section_cursor, &mut block_count_bytes).unwrap();
             let block_count = u16::from_be_bytes(block_count_bytes);
-            println!("Section {}, block_count: {}", sec_idx, block_count);
+
+            let mut fluid_count_bytes = [0u8; 2];
+            std::io::Read::read_exact(&mut section_cursor, &mut fluid_count_bytes).unwrap();
+            let fluid_count = u16::from_be_bytes(fluid_count_bytes);
+
+            println!(
+                "Section {}, block_count: {}, fluid_count: {}",
+                sec_idx, block_count, fluid_count
+            );
 
             read_container(&mut section_cursor, "Blocks", sec_idx);
             read_container(&mut section_cursor, "Biomes", sec_idx);

@@ -156,6 +156,13 @@ async fn test_login_flow() {
             "Expected player info update packet"
         );
 
+        let border_init = client.read_packet().await?;
+        assert_eq!(
+            border_init.id,
+            play_cb::INITIALIZE_WORLD_BORDER,
+            "Expected initialize world border packet"
+        );
+
         let sync_pos = client.read_packet().await?;
         assert_eq!(
             sync_pos.id,
@@ -734,11 +741,25 @@ async fn complete_login_flow_with_client(client: &mut TestClient, username: &str
         .await
         .expect("Failed to read player info update");
 
+    // Read Initialize World Border
+    let border_init = client
+        .read_packet()
+        .await
+        .expect("Failed to read initialize world border");
+    assert_eq!(border_init.id, play_cb::INITIALIZE_WORLD_BORDER);
+
     // Read sync position
     let _sync_pos = client
         .read_packet()
         .await
         .expect("Failed to read sync position");
+
+    // Read sync inventory
+    let _sync_inv = client
+        .read_packet()
+        .await
+        .expect("Failed to read sync inventory");
+    assert_eq!(_sync_inv.id, play_cb::SET_CONTAINER_CONTENT);
 }
 
 #[tokio::test]

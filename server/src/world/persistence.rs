@@ -144,6 +144,52 @@ fn prune_old_backups(backups_dir: &Path, max_backups: usize) -> std::io::Result<
     Ok(())
 }
 
+use uuid::Uuid;
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct InventorySlot {
+    pub slot: i32,
+    pub item_id: String,
+    pub count: u8,
+    pub nbt: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct PlayerData {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub yaw: f32,
+    pub pitch: f32,
+    pub on_ground: bool,
+    pub is_sneaking: bool,
+    pub is_sprinting: bool,
+    pub selected_slot: u8,
+    pub op_level: u8,
+    pub view_distance: i32,
+    pub gamemode: Option<i32>,
+    pub inventory: Vec<InventorySlot>,
+}
+
+pub fn save_player_data(world_dir: &Path, uuid: Uuid, player_data: &PlayerData) -> anyhow::Result<()> {
+    let player_dir = world_dir.join("playerdata");
+    fs::create_dir_all(&player_dir)?;
+    let file_path = player_dir.join(format!("{}.json", uuid));
+    let file = fs::File::create(file_path)?;
+    serde_json::to_writer_pretty(file, player_data)?;
+    Ok(())
+}
+
+pub fn load_player_data(world_dir: &Path, uuid: Uuid) -> anyhow::Result<Option<PlayerData>> {
+    let file_path = world_dir.join("playerdata").join(format!("{}.json", uuid));
+    if !file_path.exists() {
+        return Ok(None);
+    }
+    let file = fs::File::open(file_path)?;
+    let player_data: PlayerData = serde_json::from_reader(file)?;
+    Ok(Some(player_data))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -152,6 +152,16 @@ fn validate_packet_ids_against_official_report() {
         "play/clientbound/chunk_batch_start mismatch"
     );
     assert_eq!(
+        play::clientbound::SET_CONTAINER_CONTENT,
+        get_protocol_id(&json, "play", "clientbound", "container_set_content"),
+        "play/clientbound/container_set_content mismatch"
+    );
+    assert_eq!(
+        play::clientbound::SET_CONTAINER_SLOT,
+        get_protocol_id(&json, "play", "clientbound", "container_set_slot"),
+        "play/clientbound/container_set_slot mismatch"
+    );
+    assert_eq!(
         play::clientbound::COOKIE_REQUEST,
         get_protocol_id(&json, "play", "clientbound", "cookie_request"),
         "play/clientbound/cookie_request mismatch"

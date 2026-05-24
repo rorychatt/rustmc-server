@@ -56,6 +56,62 @@ impl VarInt {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VarLong(pub i64);
+
+impl VarLong {
+    pub fn read(reader: &mut impl Read) -> io::Result<Self> {
+        let mut result: i64 = 0;
+        let mut shift: u32 = 0;
+        loop {
+            let mut buf = [0u8; 1];
+            reader.read_exact(&mut buf)?;
+            let byte = buf[0];
+            result |= ((byte & 0x7F) as i64) << shift;
+            if byte & 0x80 == 0 {
+                break;
+            }
+            shift += 7;
+            if shift >= 64 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "VarLong too long",
+                ));
+            }
+        }
+        Ok(VarLong(result))
+    }
+
+    pub fn write(&self, writer: &mut impl Write) -> io::Result<()> {
+        let mut value = self.0 as u64;
+        loop {
+            let mut byte = (value & 0x7F) as u8;
+            value >>= 7;
+            if value != 0 {
+                byte |= 0x80;
+            }
+            writer.write_all(&[byte])?;
+            if value == 0 {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn size(&self) -> usize {
+        let mut value = self.0 as u64;
+        let mut size = 0;
+        loop {
+            size += 1;
+            value >>= 7;
+            if value == 0 {
+                break;
+            }
+        }
+        size
+    }
+}
+
 pub fn read_string(reader: &mut impl Read) -> io::Result<String> {
     read_string_with_max(reader, 32767)
 }

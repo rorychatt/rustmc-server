@@ -23,6 +23,12 @@ struct RawState {
     properties: HashMap<String, String>,
 }
 
+#[derive(Deserialize)]
+struct RawItem {
+    id: i32,
+    name: String,
+}
+
 fn main() {
     println!("cargo:rerun-if-changed=data/block_states.json");
 
@@ -158,4 +164,31 @@ fn main() {
 
     // Generate block count constant
     writeln!(w, "pub const BLOCK_COUNT: usize = {};", blocks.len()).unwrap();
+
+    // --- ITEM REGISTRY GENERATION ---
+    println!("cargo:rerun-if-changed=data/items.json");
+
+    let items_path = Path::new("data/items.json");
+    let items_str = fs::read_to_string(items_path).expect("Failed to read data/items.json");
+    let raw_items: Vec<RawItem> = serde_json::from_str(&items_str).expect("Failed to parse items.json");
+
+    let items_dest_path = Path::new(&out_dir).join("item_registry_generated.rs");
+    let items_file = fs::File::create(&items_dest_path).unwrap();
+    let mut iw = BufWriter::new(items_file);
+
+    let mut namespaced_keys = Vec::new();
+    let mut value_strings = Vec::new();
+    for item in &raw_items {
+        namespaced_keys.push(format!("minecraft:{}", item.name));
+        value_strings.push(item.id.to_string());
+    }
+
+    writeln!(iw, "pub static ITEMS: phf::Map<&'static str, i32> = ").unwrap();
+    let mut items_map = phf_codegen::Map::new();
+    for (i, item) in raw_items.iter().enumerate() {
+        items_map.entry(&item.name, &value_strings[i]);
+        items_map.entry(&namespaced_keys[i], &value_strings[i]);
+    }
+    write!(iw, "{}", items_map.build()).unwrap();
+    writeln!(iw, ";").unwrap();
 }

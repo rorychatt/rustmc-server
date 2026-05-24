@@ -28,6 +28,39 @@ pub enum BroadcastEvent {
         source_chunk_x: i32,
         source_chunk_z: i32,
     },
+    SystemMessage {
+        target_uuid: Option<Uuid>, // None means broadcast to all
+        message: String,
+    },
+    WorldBorderCenter {
+        x: f64,
+        z: f64,
+    },
+    WorldBorderLerpSize {
+        old_size: f64,
+        new_size: f64,
+        lerp_time: i64,
+    },
+    WorldBorderWarningTime {
+        warning_time: i32,
+    },
+    WorldBorderWarningBlocks {
+        warning_blocks: i32,
+    },
+    PlayerJoin {
+        uuid: Uuid,
+        name: String,
+        gamemode: i32,
+    },
+    PlayerLeave {
+        uuid: Uuid,
+    },
+    TeleportPlayer {
+        target_uuid: Uuid,
+        x: f64,
+        y: f64,
+        z: f64,
+    },
 }
 
 #[cfg(test)]

@@ -33,7 +33,7 @@ export default function PacketReference() {
             Minecraft Protocol Packets
           </h2>
           <p className="text-slate-400 mt-1 text-sm">
-            Interactive guide to Minecraft 1.20.5+ (Protocol 775) packet framing implemented in RustMC.
+            Interactive guide to Minecraft 26.1.2 (Protocol 775) packet framing implemented in RustMC.
           </p>
         </div>
       </div>

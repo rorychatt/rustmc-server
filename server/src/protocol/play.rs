@@ -1,6 +1,6 @@
 use super::packet::Packet;
 use super::packet_ids::play::clientbound as ids;
-use super::types::{read_string, read_string_with_max, write_string, VarInt};
+use super::types::{read_string, read_string_with_max, write_string, VarInt, VarLong};
 use std::io::{self, Cursor, Read, Write};
 
 #[derive(Debug, Clone)]
@@ -80,6 +80,25 @@ pub fn encode_player_info_update(uuid: uuid::Uuid, name: &str, game_mode: i32) -
     VarInt(game_mode).write(&mut data).unwrap();
     // Action 0x08: Update Listed
     data.push(1); // listed = true
+    Packet::new(ids::PLAYER_INFO_UPDATE, data)
+}
+
+pub fn encode_players_info_update(players: &[(uuid::Uuid, String, i32)]) -> Packet {
+    let mut data = Vec::new();
+    // Actions bitmask: 0x01 (Add Player) | 0x04 (Update Game Mode) | 0x08 (Update Listed)
+    data.push(0x01 | 0x04 | 0x08);
+    VarInt(players.len() as i32).write(&mut data).unwrap(); // Number of players
+    for (uuid, name, game_mode) in players {
+        // UUID (128-bit, big-endian)
+        data.extend_from_slice(uuid.as_bytes());
+        // Action 0x01: Add Player
+        write_string(&mut data, name).unwrap(); // Player name
+        VarInt(0).write(&mut data).unwrap(); // Number of properties (0)
+                                             // Action 0x04: Update Game Mode
+        VarInt(*game_mode).write(&mut data).unwrap();
+        // Action 0x08: Update Listed
+        data.push(1); // listed = true
+    }
     Packet::new(ids::PLAYER_INFO_UPDATE, data)
 }
 
@@ -436,6 +455,87 @@ fn read_i16(reader: &mut impl Read) -> io::Result<i16> {
     Ok(i16::from_be_bytes(buf))
 }
 
+pub fn encode_player_info_remove(uuids: &[uuid::Uuid]) -> Packet {
+    let mut data = Vec::new();
+    VarInt(uuids.len() as i32).write(&mut data).unwrap();
+    for uuid in uuids {
+        data.extend_from_slice(uuid.as_bytes());
+    }
+    Packet::new(ids::PLAYER_INFO_REMOVE, data)
+}
+
+pub fn encode_initialize_world_border(
+    x: f64,
+    z: f64,
+    old_size: f64,
+    new_size: f64,
+    lerp_time: i64,
+    portal_boundary: i32,
+    warning_time: i32,
+    warning_blocks: i32,
+) -> Packet {
+    let mut data = Vec::new();
+    data.extend_from_slice(&x.to_be_bytes());
+    data.extend_from_slice(&z.to_be_bytes());
+    data.extend_from_slice(&old_size.to_be_bytes());
+    data.extend_from_slice(&new_size.to_be_bytes());
+    VarLong(lerp_time).write(&mut data).unwrap();
+    VarInt(portal_boundary).write(&mut data).unwrap();
+    VarInt(warning_time).write(&mut data).unwrap();
+    VarInt(warning_blocks).write(&mut data).unwrap();
+    Packet::new(ids::INITIALIZE_WORLD_BORDER, data)
+}
+
+pub fn encode_set_world_border_center(x: f64, z: f64) -> Packet {
+    let mut data = Vec::new();
+    data.extend_from_slice(&x.to_be_bytes());
+    data.extend_from_slice(&z.to_be_bytes());
+    Packet::new(ids::SET_WORLD_BORDER_CENTER, data)
+}
+
+pub fn encode_set_world_border_size(size: f64) -> Packet {
+    let mut data = Vec::new();
+    data.extend_from_slice(&size.to_be_bytes());
+    Packet::new(ids::SET_WORLD_BORDER_SIZE, data)
+}
+
+pub fn encode_item_stack(
+    writer: &mut impl Write,
+    item: &Option<crate::world::persistence::InventorySlot>,
+) -> io::Result<()> {
+    match item {
+        None => {
+            writer.write_all(&[0])?; // present = false
+        }
+        Some(slot) => {
+            writer.write_all(&[1])?; // present = true
+            let numeric_id = crate::world::item_registry::ItemRegistry::get_id(&slot.item_id).unwrap_or(1);
+            VarInt(numeric_id).write(writer)?;
+            writer.write_all(&[slot.count])?;
+            VarInt(0).write(writer)?; // added components count
+            VarInt(0).write(writer)?; // removed components count
+        }
+    }
+    Ok(())
+}
+
+pub fn encode_container_set_content(
+    window_id: i32,
+    state_id: i32,
+    slots: &[Option<crate::world::persistence::InventorySlot>],
+    carried: &Option<crate::world::persistence::InventorySlot>,
+) -> io::Result<Packet> {
+    let mut data = Vec::new();
+    VarInt(window_id).write(&mut data)?;
+    VarInt(state_id).write(&mut data)?;
+    VarInt(slots.len() as i32).write(&mut data)?;
+    for slot in slots {
+        encode_item_stack(&mut data, slot)?;
+    }
+    encode_item_stack(&mut data, carried)?;
+    Ok(Packet::new(ids::SET_CONTAINER_CONTENT, data))
+}
+
 #[cfg(test)]
 mod tests {
     use super::ids;
@@ -540,6 +640,28 @@ mod tests {
 
         // Verify actions bitmask
         assert_eq!(packet.data[0], 0x01 | 0x04 | 0x08);
+    }
+
+    #[test]
+    fn test_container_set_content() {
+        let slot = crate::world::persistence::InventorySlot {
+            slot: 0,
+            item_id: "minecraft:diamond_sword".to_string(),
+            count: 1,
+            nbt: None,
+        };
+        let slots = vec![Some(slot), None];
+        let packet = encode_container_set_content(0, 1, &slots, &None).unwrap();
+        assert_eq!(packet.id, ids::SET_CONTAINER_CONTENT);
+        assert!(!packet.data.is_empty());
+
+        let mut cursor = Cursor::new(&packet.data);
+        let window_id = VarInt::read(&mut cursor).unwrap().0;
+        let state_id = VarInt::read(&mut cursor).unwrap().0;
+        let slots_len = VarInt::read(&mut cursor).unwrap().0;
+        assert_eq!(window_id, 0);
+        assert_eq!(state_id, 1);
+        assert_eq!(slots_len, 2);
     }
 
     #[test]

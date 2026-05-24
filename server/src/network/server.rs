@@ -91,27 +91,43 @@ impl Server {
         });
 
         loop {
-            match listener.accept().await {
-                Ok((stream, addr)) => {
-                    let world = self.world.clone();
-                    let operators = self.operators.clone();
-                    let broadcast_tx = self.broadcast_tx.clone();
-                    let broadcast_rx = self.broadcast_tx.subscribe();
-                    let config = {
-                        let cfg = self.config.read().await;
-                        cfg.clone()
-                    };
-                    tokio::spawn(async move {
-                        let connection =
-                            Connection::new(addr, world, operators, broadcast_tx, config);
-                        connection.handle(stream, broadcast_rx).await;
-                    });
+            tokio::select! {
+                res = listener.accept() => {
+                    match res {
+                        Ok((stream, addr)) => {
+                            let world = self.world.clone();
+                            let operators = self.operators.clone();
+                            let broadcast_tx = self.broadcast_tx.clone();
+                            let broadcast_rx = self.broadcast_tx.subscribe();
+                            let config = {
+                                let cfg = self.config.read().await;
+                                cfg.clone()
+                            };
+                            tokio::spawn(async move {
+                                let connection =
+                                    Connection::new(addr, world, operators, broadcast_tx, config);
+                                connection.handle(stream, broadcast_rx).await;
+                            });
+                        }
+                        Err(e) => {
+                            error!("Failed to accept connection: {}", e);
+                        }
+                    }
                 }
-                Err(e) => {
-                    error!("Failed to accept connection: {}", e);
+                _ = tokio::signal::ctrl_c() => {
+                    info!("Ctrl+C received, shutting down gracefully...");
+                    break;
                 }
             }
         }
+
+        info!("Saving all world data before shutdown...");
+        match World::save_all_async(self.world.clone()).await {
+            Ok(_) => info!("World data saved successfully. Goodbye!"),
+            Err(e) => error!("Failed to save world data on shutdown: {}", e),
+        }
+
+        Ok(())
     }
 
     async fn world_tick_loop(world: Arc<RwLock<World>>) {

@@ -1,4 +1,5 @@
 pub mod block_registry;
+pub mod item_registry;
 pub mod chunk;
 pub mod persistence;
 
@@ -28,6 +29,8 @@ pub struct Player {
     pub chunks_per_tick: f32,
     pub op_level: u8,
     pub view_distance: i32,
+    pub gamemode: Option<i32>,
+    pub inventory: Vec<persistence::InventorySlot>,
 }
 
 pub struct World {
@@ -41,6 +44,14 @@ pub struct World {
     pub sea_level: i32,
     pub world_dir: Option<std::path::PathBuf>,
     pub db: Option<Arc<redb::Database>>,
+    pub border_x: f64,
+    pub border_z: f64,
+    pub border_size: f64,
+    pub border_target_size: f64,
+    pub border_speed: i64,
+    pub border_portal_boundary: i32,
+    pub border_warning_time: i32,
+    pub border_warning_blocks: i32,
 }
 
 impl World {
@@ -81,6 +92,14 @@ impl World {
             sea_level,
             world_dir,
             db,
+            border_x: 0.0,
+            border_z: 0.0,
+            border_size: 60_000_000.0,
+            border_target_size: 60_000_000.0,
+            border_speed: 0,
+            border_portal_boundary: 29999984,
+            border_warning_time: 15,
+            border_warning_blocks: 5,
         };
         // Load level metadata if it exists
         if let Some(ref dir) = world.world_dir {
@@ -116,15 +135,50 @@ impl World {
         let entity_id = self.next_entity_id;
         self.next_entity_id += 1;
 
-        // Dynamic spawn height based on terrain structure
+        let mut spawn_x = 0.0;
         let mut spawn_y = 64.0;
-        let chunk_pos = ChunkPos::from_block(0, 0);
-        if let Some(chunk) = self.get_chunk(&chunk_pos) {
-            for abs_y in (0..384).rev() {
-                let block = chunk.get_block(0, abs_y, 0);
-                if block != BlockState::AIR && block != BlockState::WATER {
-                    spawn_y = (abs_y as f64 - 64.0) + 1.0;
-                    break;
+        let mut spawn_z = 0.0;
+        let mut yaw = 0.0;
+        let mut pitch = 0.0;
+        let mut on_ground = false;
+        let mut is_sneaking = false;
+        let mut is_sprinting = false;
+        let mut selected_slot = 0;
+        let mut final_op_level = op_level;
+        let mut final_view_distance = view_distance;
+        let mut final_gamemode = None;
+        let mut inventory = Vec::new();
+        let mut has_loaded = false;
+
+        if let Some(ref dir) = self.world_dir {
+            if let Ok(Some(data)) = persistence::load_player_data(dir, uuid) {
+                spawn_x = data.x;
+                spawn_y = data.y;
+                spawn_z = data.z;
+                yaw = data.yaw;
+                pitch = data.pitch;
+                on_ground = data.on_ground;
+                is_sneaking = data.is_sneaking;
+                is_sprinting = data.is_sprinting;
+                selected_slot = data.selected_slot;
+                final_op_level = data.op_level;
+                final_view_distance = data.view_distance;
+                final_gamemode = data.gamemode;
+                inventory = data.inventory;
+                has_loaded = true;
+            }
+        }
+
+        if !has_loaded {
+            // Dynamic spawn height based on terrain structure
+            let chunk_pos = ChunkPos::from_block(0, 0);
+            if let Some(chunk) = self.get_chunk(&chunk_pos) {
+                for abs_y in (0..384).rev() {
+                    let block = chunk.get_block(0, abs_y, 0);
+                    if block != BlockState::AIR && block != BlockState::WATER {
+                        spawn_y = (abs_y as f64 - 64.0) + 1.0;
+                        break;
+                    }
                 }
             }
         }
@@ -135,26 +189,49 @@ impl World {
                 uuid,
                 name,
                 entity_id,
-                x: 0.0,
+                x: spawn_x,
                 y: spawn_y,
-                z: 0.0,
-                yaw: 0.0,
-                pitch: 0.0,
-                on_ground: false,
-                is_sneaking: false,
-                is_sprinting: false,
-                selected_slot: 0,
+                z: spawn_z,
+                yaw,
+                pitch,
+                on_ground,
+                is_sneaking,
+                is_sprinting,
+                selected_slot,
                 loaded_chunks: HashSet::new(),
                 chunks_per_tick: 25.0,
-                op_level,
-                view_distance,
+                op_level: final_op_level,
+                view_distance: final_view_distance,
+                gamemode: final_gamemode,
+                inventory,
             },
         );
         entity_id
     }
 
     pub fn remove_player(&mut self, uuid: &Uuid) {
-        self.players.remove(uuid);
+        if let Some(player) = self.players.remove(uuid) {
+            if let Some(ref dir) = self.world_dir {
+                let data = persistence::PlayerData {
+                    x: player.x,
+                    y: player.y,
+                    z: player.z,
+                    yaw: player.yaw,
+                    pitch: player.pitch,
+                    on_ground: player.on_ground,
+                    is_sneaking: player.is_sneaking,
+                    is_sprinting: player.is_sprinting,
+                    selected_slot: player.selected_slot,
+                    op_level: player.op_level,
+                    view_distance: player.view_distance,
+                    gamemode: player.gamemode,
+                    inventory: player.inventory.clone(),
+                };
+                if let Err(e) = persistence::save_player_data(dir, *uuid, &data) {
+                    tracing::error!("Failed to save player data for {}: {:?}", uuid, e);
+                }
+            }
+        }
     }
 
     pub fn player_count(&self) -> usize {
@@ -314,6 +391,25 @@ impl World {
                 sea_level: self.sea_level,
             };
             persistence::save_level_info(dir, &level_info)?;
+
+            for (&uuid, player) in &self.players {
+                let data = persistence::PlayerData {
+                    x: player.x,
+                    y: player.y,
+                    z: player.z,
+                    yaw: player.yaw,
+                    pitch: player.pitch,
+                    on_ground: player.on_ground,
+                    is_sneaking: player.is_sneaking,
+                    is_sprinting: player.is_sprinting,
+                    selected_slot: player.selected_slot,
+                    op_level: player.op_level,
+                    view_distance: player.view_distance,
+                    gamemode: player.gamemode,
+                    inventory: player.inventory.clone(),
+                };
+                persistence::save_player_data(dir, uuid, &data)?;
+            }
         }
         if let Some(ref db) = self.db {
             let chunks_to_save: Vec<Arc<Chunk>> = {
@@ -335,7 +431,7 @@ impl World {
     }
 
     pub async fn save_all_async(world: Arc<RwLock<Self>>) -> anyhow::Result<()> {
-        let (db, level_info, world_dir, chunks_to_save) = {
+        let (db, level_info, world_dir, chunks_to_save, players_to_save) = {
             let w = world.read().await;
             let db = w.db.clone();
             let level_info = persistence::LevelInfo {
@@ -355,12 +451,39 @@ impl World {
                 }
                 list
             };
-            (db, level_info, world_dir, chunks_to_save)
+            let players_to_save: Vec<(Uuid, persistence::PlayerData)> = w
+                .players
+                .iter()
+                .map(|(&uuid, player)| {
+                    (
+                        uuid,
+                        persistence::PlayerData {
+                            x: player.x,
+                            y: player.y,
+                            z: player.z,
+                            yaw: player.yaw,
+                            pitch: player.pitch,
+                            on_ground: player.on_ground,
+                            is_sneaking: player.is_sneaking,
+                            is_sprinting: player.is_sprinting,
+                            selected_slot: player.selected_slot,
+                            op_level: player.op_level,
+                            view_distance: player.view_distance,
+                            gamemode: player.gamemode,
+                            inventory: player.inventory.clone(),
+                        },
+                    )
+                })
+                .collect();
+            (db, level_info, world_dir, chunks_to_save, players_to_save)
         };
 
         tokio::task::spawn_blocking(move || {
             if let Some(ref dir) = world_dir {
                 persistence::save_level_info(dir, &level_info)?;
+                for (uuid, data) in players_to_save {
+                    persistence::save_player_data(dir, uuid, &data)?;
+                }
             }
             if let Some(ref db) = db {
                 for chunk in chunks_to_save {
@@ -686,6 +809,50 @@ mod tests {
         let mut world2 = World::new_with_dir("flat".to_string(), 0, 63, Some(path.to_path_buf()));
         let loaded = world2.get_or_generate_chunk(pos);
         assert_eq!(loaded.get_block(0, 4, 0), BlockState::STONE);
+    }
+
+    #[test]
+    fn test_player_data_persistence() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+
+        let mut world = World::new_with_dir("flat".to_string(), 0, 63, Some(path.to_path_buf()));
+        let uuid = Uuid::new_v4();
+
+        // Add player and update position/state
+        world.add_player(uuid, "TestPlayer".to_string(), 8);
+        world.update_player_position(&uuid, 10.0, 70.0, 20.0);
+        world.update_player_rotation(&uuid, 45.0, -10.0);
+        {
+            let player = world.players.get_mut(&uuid).unwrap();
+            player.gamemode = Some(1);
+            player.inventory.push(persistence::InventorySlot {
+                slot: 0,
+                item_id: "minecraft:diamond_sword".to_string(),
+                count: 1,
+                nbt: None,
+            });
+        }
+
+        // Remove player, which should trigger a save
+        world.remove_player(&uuid);
+
+        // Verify player is removed from memory
+        assert_eq!(world.player_count(), 0);
+
+        // Load new world from the same directory to verify serialization/deserialization
+        let mut world2 = World::new_with_dir("flat".to_string(), 0, 63, Some(path.to_path_buf()));
+        world2.add_player(uuid, "TestPlayer".to_string(), 8);
+        let player = world2.players.get(&uuid).unwrap();
+        assert_eq!(player.x, 10.0);
+        assert_eq!(player.y, 70.0);
+        assert_eq!(player.z, 20.0);
+        assert_eq!(player.yaw, 45.0);
+        assert_eq!(player.pitch, -10.0);
+        assert_eq!(player.gamemode, Some(1));
+        assert_eq!(player.inventory.len(), 1);
+        assert_eq!(player.inventory[0].item_id, "minecraft:diamond_sword");
     }
 }
 

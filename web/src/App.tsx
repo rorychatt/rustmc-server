@@ -57,7 +57,7 @@ export default function App() {
             <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
               RustMC <span className="text-xs bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 px-2 py-0.5 rounded font-mono font-bold">v26.1.2</span>
             </h1>
-            <p className="text-[10px] text-slate-400 font-mono">Minecraft 1.20.5+ Protocol v775</p>
+            <p className="text-[10px] text-slate-400 font-mono">Minecraft 26.1.2 Protocol v775</p>
           </div>
         </div>
 
@@ -151,7 +151,7 @@ export default function App() {
                     Custom Lightweight Minecraft Server In <span className="text-gradient-cyan">Rust</span>
                   </h2>
                   <p className="text-slate-400 text-sm md:text-base leading-relaxed">
-                    RustMC is a custom, highly modular, thread-safe Minecraft server built from the ground up in Rust. Designed to support Minecraft 1.20.5+ (Protocol 775) status querying, handshakes, login compression, configuration syncing, and flat world multi-player sandbox interaction.
+                    RustMC is a custom, highly modular, thread-safe Minecraft server built from the ground up in Rust. Designed to support Minecraft 26.1.2 (Protocol 775) status querying, handshakes, login compression, configuration syncing, and flat world multi-player sandbox interaction.
                   </p>
                   <div className="flex flex-wrap gap-4 pt-2">
                     <button

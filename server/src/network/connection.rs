@@ -230,6 +230,150 @@ impl Connection {
                                     }
                                 }
                             }
+                            Ok(BroadcastEvent::SystemMessage { target_uuid, message }) => {
+                                let targeted = match target_uuid {
+                                    Some(uuid) => self.player_uuid == Some(uuid),
+                                    None => true,
+                                };
+                                if targeted {
+                                    if target_uuid.is_some() && message.starts_with("KICKED: ") {
+                                        let reason = &message[8..];
+                                        info!("Kicking player {}: {}", self.player_name.as_deref().unwrap_or(""), reason);
+                                        let packet = play::encode_system_chat_message(&message).unwrap();
+                                        let _ = self.write_packet(&mut writer, &packet).await;
+                                        break;
+                                    }
+                                    let packet = play::encode_system_chat_message(&message).unwrap();
+                                    if let Err(e) = self.write_packet(&mut writer, &packet).await {
+                                        error!("Failed to send system message to {}: {}", self.addr, e);
+                                        break;
+                                    }
+                                }
+                            }
+                            Ok(BroadcastEvent::WorldBorderCenter { x, z }) => {
+                                let packet = play::encode_set_world_border_center(x, z);
+                                if let Err(e) = self.write_packet(&mut writer, &packet).await {
+                                    error!("Failed to send world border center to {}: {}", self.addr, e);
+                                    break;
+                                }
+                            }
+                            Ok(BroadcastEvent::WorldBorderLerpSize { old_size, new_size, lerp_time }) => {
+                                if lerp_time == 0 {
+                                    let packet = play::encode_set_world_border_size(new_size);
+                                    if let Err(e) = self.write_packet(&mut writer, &packet).await {
+                                        error!("Failed to send world border size update to {}: {}", self.addr, e);
+                                        break;
+                                    }
+                                } else {
+                                    let border_info = {
+                                        let world = self.world.read().await;
+                                        (
+                                            world.border_x,
+                                            world.border_z,
+                                            world.border_portal_boundary,
+                                            world.border_warning_time,
+                                            world.border_warning_blocks,
+                                        )
+                                    };
+                                    let packet = play::encode_initialize_world_border(
+                                        border_info.0,
+                                        border_info.1,
+                                        old_size,
+                                        new_size,
+                                        lerp_time,
+                                        border_info.2,
+                                        border_info.3,
+                                        border_info.4,
+                                    );
+                                    if let Err(e) = self.write_packet(&mut writer, &packet).await {
+                                        error!("Failed to send world border lerp update to {}: {}", self.addr, e);
+                                        break;
+                                    }
+                                }
+                            }
+                            Ok(BroadcastEvent::WorldBorderWarningTime { warning_time }) => {
+                                let border_info = {
+                                    let world = self.world.read().await;
+                                    (
+                                        world.border_x,
+                                        world.border_z,
+                                        world.border_size,
+                                        world.border_target_size,
+                                        world.border_speed,
+                                        world.border_portal_boundary,
+                                        world.border_warning_blocks,
+                                    )
+                                };
+                                let packet = play::encode_initialize_world_border(
+                                    border_info.0,
+                                    border_info.1,
+                                    border_info.2,
+                                    border_info.3,
+                                    border_info.4,
+                                    border_info.5,
+                                    warning_time,
+                                    border_info.6,
+                                );
+                                if let Err(e) = self.write_packet(&mut writer, &packet).await {
+                                    error!("Failed to send world border warning time to {}: {}", self.addr, e);
+                                    break;
+                                }
+                            }
+                            Ok(BroadcastEvent::WorldBorderWarningBlocks { warning_blocks }) => {
+                                let border_info = {
+                                    let world = self.world.read().await;
+                                    (
+                                        world.border_x,
+                                        world.border_z,
+                                        world.border_size,
+                                        world.border_target_size,
+                                        world.border_speed,
+                                        world.border_portal_boundary,
+                                        world.border_warning_time,
+                                    )
+                                };
+                                let packet = play::encode_initialize_world_border(
+                                    border_info.0,
+                                    border_info.1,
+                                    border_info.2,
+                                    border_info.3,
+                                    border_info.4,
+                                    border_info.5,
+                                    border_info.6,
+                                    warning_blocks,
+                                );
+                                if let Err(e) = self.write_packet(&mut writer, &packet).await {
+                                    error!("Failed to send world border warning blocks to {}: {}", self.addr, e);
+                                    break;
+                                }
+                            }
+                            Ok(BroadcastEvent::PlayerJoin { uuid, name, gamemode }) => {
+                                if self.player_uuid != Some(uuid) {
+                                    let packet = play::encode_player_info_update(uuid, &name, gamemode);
+                                    if let Err(e) = self.write_packet(&mut writer, &packet).await {
+                                        error!("Failed to send player info join update to {}: {}", self.addr, e);
+                                        break;
+                                    }
+                                }
+                            }
+                            Ok(BroadcastEvent::PlayerLeave { uuid }) => {
+                                if self.player_uuid != Some(uuid) {
+                                    let packet = play::encode_player_info_remove(&[uuid]);
+                                    if let Err(e) = self.write_packet(&mut writer, &packet).await {
+                                        error!("Failed to send player info leave update to {}: {}", self.addr, e);
+                                        break;
+                                    }
+                                }
+                            }
+                            Ok(BroadcastEvent::TeleportPlayer { target_uuid, x, y, z }) => {
+                                if self.player_uuid == Some(target_uuid) {
+                                    let packet = play::encode_player_position_and_look(x, y, z, 0.0, 0.0, 0, 0);
+                                    if let Err(e) = self.write_packet(&mut writer, &packet).await {
+                                        error!("Failed to send teleport sync to {}: {}", self.addr, e);
+                                        break;
+                                    }
+                                }
+                            }
                             Err(_) => {}
                         }
                     }
@@ -286,6 +430,17 @@ impl Connection {
                     }
                 }
             }
+        }
+
+        if let Some(uuid) = self.player_uuid {
+            info!(
+                "Player {} ({}) disconnected, cleaning up",
+                self.player_name.as_deref().unwrap_or("Unknown"),
+                uuid
+            );
+            let mut world = self.world.write().await;
+            world.remove_player(&uuid);
+            let _ = self.broadcast_tx.send(BroadcastEvent::PlayerLeave { uuid });
         }
     }
 
@@ -649,20 +804,32 @@ impl Connection {
             ops.get_op_level(&uuid)
         };
 
-        let entity_id = {
+        let (entity_id, spawn_x, spawn_y, spawn_z, spawn_yaw, spawn_pitch, loaded_gamemode, player_inventory) = {
             let mut world = self.world.write().await;
-            world.add_player_with_op_level(uuid, name.clone(), op_level, self.view_distance)
+            let eid = world.add_player_with_op_level(uuid, name.clone(), op_level, self.view_distance);
+            let player = world.players.get(&uuid).unwrap();
+            (
+                eid,
+                player.x,
+                player.y,
+                player.z,
+                player.yaw,
+                player.pitch,
+                player.gamemode,
+                player.inventory.clone(),
+            )
         };
 
         // 1. Login (Play) packet
         let is_flat = self.config.gameplay.world_type == "flat";
+        let game_mode = loaded_gamemode.unwrap_or_else(|| self.config.gameplay.gamemode_id());
         let login_play = play::encode_login_play(play::LoginPlayParams {
             entity_id,
             view_distance: self.view_distance,
             simulation_distance: self.config.gameplay.simulation_distance,
             max_players: self.config.gameplay.max_players,
             hardcore: self.config.gameplay.hardcore,
-            game_mode: self.config.gameplay.gamemode_id(),
+            game_mode,
             sea_level: self.config.gameplay.sea_level,
             is_flat,
         })?;
@@ -674,26 +841,95 @@ impl Connection {
             self.write_packet(writer, &cookie_request).await?;
         }
 
-        // 2. Player Info Update (required for client to finalize join)
-        let player_info =
-            play::encode_player_info_update(uuid, &name, self.config.gameplay.gamemode_id());
-        self.write_packet(writer, &player_info).await?;
+        // 2. Sync Player Info (Tab-List)
+        let players_to_sync = {
+            let world = self.world.read().await;
+            world.players.iter().map(|(u, p)| (*u, p.name.clone(), p.gamemode.unwrap_or(game_mode))).collect::<Vec<_>>()
+        };
+        if !players_to_sync.is_empty() {
+            let player_info = play::encode_players_info_update(&players_to_sync);
+            self.write_packet(writer, &player_info).await?;
+        }
+
+        // Broadcast to all other players that this player has joined
+        let _ = self.broadcast_tx.send(BroadcastEvent::PlayerJoin {
+            uuid,
+            name: name.clone(),
+            gamemode: game_mode,
+        });
+
+        // Initialize world border for the client
+        let border_info = {
+            let world = self.world.read().await;
+            (
+                world.border_x,
+                world.border_z,
+                world.border_size,
+                world.border_target_size,
+                world.border_speed,
+                world.border_portal_boundary,
+                world.border_warning_time,
+                world.border_warning_blocks,
+            )
+        };
+        let border_init = play::encode_initialize_world_border(
+            border_info.0,
+            border_info.1,
+            border_info.2,
+            border_info.3,
+            border_info.4,
+            border_info.5,
+            border_info.6,
+            border_info.7,
+        );
+        self.write_packet(writer, &border_init).await?;
 
         // 3. Synchronize Player Position
-        let pos = play::encode_player_position_and_look(0.0, 64.0, 0.0, 0.0, 0.0, 0, 0);
+        let pos = play::encode_player_position_and_look(spawn_x, spawn_y, spawn_z, spawn_yaw, spawn_pitch, 0, 0);
         self.write_packet(writer, &pos).await?;
 
-        // 4. Game Event (Start waiting for level chunks, event=13, value=0)
+        // 4. Sync Player Inventory
+        let mut slots = vec![None; 46];
+        for slot in &player_inventory {
+            let nbt_slot = slot.slot;
+            let proto_slot = if (0..=8).contains(&nbt_slot) {
+                Some(nbt_slot + 36)
+            } else if (9..=35).contains(&nbt_slot) {
+                Some(nbt_slot)
+            } else if nbt_slot == 100 {
+                Some(8)
+            } else if nbt_slot == 101 {
+                Some(7)
+            } else if nbt_slot == 102 {
+                Some(6)
+            } else if nbt_slot == 103 {
+                Some(5)
+            } else if nbt_slot == -106 || nbt_slot == 150 || nbt_slot == 99 {
+                Some(45)
+            } else {
+                None
+            };
+
+            if let Some(p_slot) = proto_slot {
+                if (0..46).contains(&p_slot) {
+                    slots[p_slot as usize] = Some(slot.clone());
+                }
+            }
+        }
+        let container_content = play::encode_container_set_content(0, 1, &slots, &None)?;
+        self.write_packet(writer, &container_content).await?;
+
+        // 5. Game Event (Start waiting for level chunks, event=13, value=0)
         let game_event = play::encode_game_event(13, 0.0);
         self.write_packet(writer, &game_event).await?;
 
-        // 5. Set Center Chunk (required before sending chunk data)
-        let player_chunk_x = 0;
-        let player_chunk_z = 0;
+        // 6. Set Center Chunk (required before sending chunk data)
+        let player_chunk_x = (spawn_x as i32) >> 4;
+        let player_chunk_z = (spawn_z as i32) >> 4;
         let center_chunk = play::encode_set_center_chunk(player_chunk_x, player_chunk_z);
         self.write_packet(writer, &center_chunk).await?;
 
-        // 6. Chunk Batch Start
+        // 7. Chunk Batch Start
         let batch_start = play::encode_chunk_batch_start();
         self.write_packet(writer, &batch_start).await?;
 
@@ -921,14 +1157,16 @@ impl Connection {
             }
             CHAT_COMMAND => {
                 let command = play::ChatCommand::decode(data)?;
-                let has_permission = if let Some(uuid) = self.player_uuid {
-                    let world = self.world.read().await;
-                    world.players.get(&uuid).is_some_and(|p| p.op_level >= 3)
-                } else {
-                    false
-                };
+                debug!("Received chat command: {}", command.command);
 
                 if command.command.starts_with("transfer ") {
+                    let has_permission = if let Some(uuid) = self.player_uuid {
+                        let world = self.world.read().await;
+                        world.players.get(&uuid).is_some_and(|p| p.op_level >= 3)
+                    } else {
+                        false
+                    };
+
                     if !has_permission {
                         let msg = play::encode_system_chat_message(
                             "You don't have permission to use this command.",
@@ -965,126 +1203,25 @@ impl Connection {
                             }
                         }
                     }
-                } else if command.command.starts_with("op ") {
-                    if !has_permission {
-                        let msg = play::encode_system_chat_message(
-                            "You don't have permission to use this command.",
-                        )?;
-                        self.write_packet(writer, &msg).await?;
+                } else {
+                    let op_level = if let Some(uuid) = self.player_uuid {
+                        let world = self.world.read().await;
+                        world.players.get(&uuid).map(|p| p.op_level).unwrap_or(0)
                     } else {
-                        let parts: Vec<&str> = command.command.splitn(3, ' ').collect();
-                        let target_name = parts[1];
-                        let level: u8 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(3);
+                        0
+                    };
 
-                        let target_uuid = {
-                            let world = self.world.read().await;
-                            world
-                                .players
-                                .iter()
-                                .find(|(_, p)| p.name == target_name)
-                                .map(|(uuid, _)| *uuid)
-                        };
+                    let ctx = crate::commands::CommandContext {
+                        uuid: self.player_uuid,
+                        name: self.player_name.clone().unwrap_or_else(|| "Console".to_string()),
+                        op_level,
+                        world: self.world.clone(),
+                        broadcast_tx: self.broadcast_tx.clone(),
+                        stop_signal_tx: None,
+                    };
 
-                        let target_uuid = match target_uuid {
-                            Some(uuid) => Some(uuid),
-                            None => {
-                                let ops = self.operators.read().await;
-                                ops.find_uuid_by_name(target_name)
-                            }
-                        };
-
-                        let target_uuid = match target_uuid {
-                            Some(uuid) => Some(uuid),
-                            None => {
-                                crate::uuid_resolver::resolve_uuid_from_mojang(target_name).await
-                            }
-                        };
-
-                        if let Some(target_uuid) = target_uuid {
-                            {
-                                let mut ops = self.operators.write().await;
-                                ops.set_op_level(target_uuid, target_name.to_string(), level);
-                                ops.save();
-                            }
-                            {
-                                let mut world = self.world.write().await;
-                                if let Some(player) = world.players.get_mut(&target_uuid) {
-                                    player.op_level = level;
-                                }
-                            }
-                            let msg = play::encode_system_chat_message(&format!(
-                                "Set {} as operator level {}",
-                                target_name, level
-                            ))?;
-                            self.write_packet(writer, &msg).await?;
-                        } else {
-                            let msg = play::encode_system_chat_message(&format!(
-                                "Could not resolve player '{}' (not online, not in ops.toml, and Mojang API lookup failed)",
-                                target_name
-                            ))?;
-                            self.write_packet(writer, &msg).await?;
-                        }
-                    }
-                } else if command.command.starts_with("deop ") {
-                    if !has_permission {
-                        let msg = play::encode_system_chat_message(
-                            "You don't have permission to use this command.",
-                        )?;
-                        self.write_packet(writer, &msg).await?;
-                    } else {
-                        let target_name = &command.command[5..];
-
-                        let target_uuid = {
-                            let world = self.world.read().await;
-                            world
-                                .players
-                                .iter()
-                                .find(|(_, p)| p.name == target_name)
-                                .map(|(uuid, _)| *uuid)
-                        };
-
-                        let target_uuid = match target_uuid {
-                            Some(uuid) => Some(uuid),
-                            None => {
-                                let ops = self.operators.read().await;
-                                ops.find_uuid_by_name(target_name)
-                            }
-                        };
-
-                        let target_uuid = match target_uuid {
-                            Some(uuid) => Some(uuid),
-                            None => {
-                                crate::uuid_resolver::resolve_uuid_from_mojang(target_name).await
-                            }
-                        };
-
-                        if let Some(target_uuid) = target_uuid {
-                            {
-                                let mut ops = self.operators.write().await;
-                                ops.remove_op(&target_uuid);
-                                ops.save();
-                            }
-                            {
-                                let mut world = self.world.write().await;
-                                if let Some(player) = world.players.get_mut(&target_uuid) {
-                                    player.op_level = 0;
-                                }
-                            }
-                            let msg = play::encode_system_chat_message(&format!(
-                                "Removed {} as operator",
-                                target_name
-                            ))?;
-                            self.write_packet(writer, &msg).await?;
-                        } else {
-                            let msg = play::encode_system_chat_message(&format!(
-                                "Could not resolve player '{}' (not online, not in ops.toml, and Mojang API lookup failed)",
-                                target_name
-                            ))?;
-                            self.write_packet(writer, &msg).await?;
-                        }
-                    }
+                    crate::commands::handle_command(&ctx, &command.command).await;
                 }
-                debug!("Received chat command: {}", command.command);
             }
             CHAT_MESSAGE => {
                 let chat = play::ChatMessage::decode(data)?;
