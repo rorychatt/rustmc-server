@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useTranslation } from "react-i18next";
+import { useTranslation, Trans } from "react-i18next";
 import PacketReference from "./components/PacketReference";
 import ConfigGenerator from "./components/ConfigGenerator";
 import {
@@ -42,7 +42,8 @@ const CHUNK_0_0 = "    ├── c.0.0.json.zlib        ";
 const CHUNK_0_1 = "    ├── c.0.1.json.zlib        ";
 const CHUNK_M1_0 = "    └── c.-1.0.json.zlib       ";
 
-const CODE_LINE_1 = "fn verify_cookie_handshake(player_uuid: Uuid, received_token: &[u8]) -> bool {";
+const CODE_LINE_1 =
+  "fn verify_cookie_handshake(player_uuid: Uuid, received_token: &[u8]) -> bool {";
 const CODE_LINE_2 = "    match get_cached_transfer_cookie(&player_uuid) {";
 const CODE_LINE_3 = "        Some(cached_cookie) => {";
 const CODE_LINE_4 = "            constant_time_compare(&cached_cookie.token, received_token)";
@@ -112,7 +113,9 @@ export default function App() {
               className="text-xs font-semibold text-slate-300 hover:text-white flex items-center gap-1.5 bg-slate-900/60 border border-slate-800 px-3 py-1.5 rounded-lg hover:bg-slate-800/60 transition-all focus:outline-none"
             >
               <Globe className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-              <span>{currentLanguage.startsWith("es") ? t("languages.spanish") : t("languages.english")}</span>
+              <span>
+                {currentLanguage.startsWith("es") ? t("languages.spanish") : t("languages.english")}
+              </span>
               <span className="text-[10px] text-slate-500">▼</span>
             </button>
             {langMenuOpen && (
@@ -365,10 +368,12 @@ export default function App() {
                     <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
                     {t("architecture.splitting.title")}
                   </h3>
-                  <p
-                    className="text-slate-400 text-xs leading-relaxed text-slate-400"
-                    dangerouslySetInnerHTML={{ __html: t("architecture.splitting.desc") }}
-                  />
+                  <p className="text-slate-400 text-xs leading-relaxed">
+                    <Trans
+                      i18nKey="architecture.splitting.desc"
+                      components={{ strong: <strong /> }}
+                    />
+                  </p>
                 </div>
 
                 {/* World State */}
@@ -377,10 +382,9 @@ export default function App() {
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                     {t("architecture.state.title")}
                   </h3>
-                  <p
-                    className="text-slate-400 text-xs leading-relaxed text-slate-400"
-                    dangerouslySetInnerHTML={{ __html: t("architecture.state.desc") }}
-                  />
+                  <p className="text-slate-400 text-xs leading-relaxed">
+                    <Trans i18nKey="architecture.state.desc" components={{ code: <code /> }} />
+                  </p>
                 </div>
               </div>
 
@@ -389,10 +393,9 @@ export default function App() {
                 <h3 className="text-lg font-bold text-white">
                   {t("architecture.broadcasting.title")}
                 </h3>
-                <p
-                  className="text-slate-400 text-sm leading-relaxed"
-                  dangerouslySetInnerHTML={{ __html: t("architecture.broadcasting.desc") }}
-                />
+                <p className="text-slate-400 text-sm leading-relaxed">
+                  <Trans i18nKey="architecture.broadcasting.desc" components={{ code: <code /> }} />
+                </p>
                 <div className="p-4 rounded-lg bg-slate-950/40 border border-slate-800 text-xs space-y-2">
                   <div className="font-mono text-cyan-400">
                     {t("architecture.broadcasting.flow_title")}
