@@ -77,6 +77,9 @@ impl JavaPlugin {
     }
 
     fn parse_plugin_yml(jar_path: &Path) -> Result<PluginMeta> {
+        if jar_path.components().any(|c| c == std::path::Component::ParentDir) {
+            bail!("Path traversal detected in JAR path: {}", jar_path.display());
+        }
         let file = std::fs::File::open(jar_path)
             .with_context(|| format!("Failed to open JAR: {}", jar_path.display()))?;
 
