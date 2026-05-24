@@ -62,6 +62,21 @@ impl PluginManager {
         let canonical_dir = std::fs::canonicalize(path)
             .with_context(|| format!("Failed to canonicalize plugin directory: {}", path.display()))?;
 
+        let current_dir = std::env::current_dir()
+            .context("Failed to get current working directory")?;
+        let canonical_current = std::fs::canonicalize(&current_dir)?;
+
+        let temp_dir = std::env::temp_dir();
+        let canonical_temp = std::fs::canonicalize(&temp_dir)
+            .unwrap_or_else(|_| temp_dir.clone());
+
+        if !canonical_dir.starts_with(&canonical_current) && !canonical_dir.starts_with(&canonical_temp) {
+            anyhow::bail!(
+                "Path traversal detected: plugin directory {} must reside within the server working directory or system temp directory",
+                canonical_dir.display()
+            );
+        }
+
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {
                 let canonical_parent = std::fs::canonicalize(parent)
