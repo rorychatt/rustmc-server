@@ -17,22 +17,18 @@ pub struct JavaPlugin {
     jar_path: PathBuf,
 }
 
-fn sanitize_jar_path(jar_path: &Path) -> Result<PathBuf> {
-    let jar_str = jar_path.to_string_lossy();
-    if jar_str.contains("..") || jar_path.components().any(|c| c == std::path::Component::ParentDir) {
-        bail!("Path traversal detected in JAR path: {}", jar_path.display());
-    }
-    let canonical = jar_path.canonicalize()
-        .with_context(|| format!("Failed to canonicalize JAR path: {}", jar_path.display()))?;
-    if canonical.components().any(|c| c == std::path::Component::ParentDir) {
-        bail!("Path traversal detected in canonicalized JAR path: {}", canonical.display());
-    }
-    Ok(canonical)
-}
-
 impl JavaPlugin {
     pub fn new(jvm: &'static JavaVM, jar_path: &Path) -> Result<Self> {
-        let canonical_path = sanitize_jar_path(jar_path)?;
+        let jar_str = jar_path.to_string_lossy();
+        if jar_str.contains("..") || jar_path.components().any(|c| c == std::path::Component::ParentDir) {
+            bail!("Path traversal detected in JAR path: {}", jar_path.display());
+        }
+        let canonical_path = std::fs::canonicalize(jar_path)
+            .with_context(|| format!("Failed to canonicalize JAR path: {}", jar_path.display()))?;
+        if canonical_path.components().any(|c| c == std::path::Component::ParentDir) {
+            bail!("Path traversal detected in canonicalized JAR path: {}", canonical_path.display());
+        }
+
         let meta = Self::parse_plugin_yml(&canonical_path)
             .with_context(|| format!("Failed to parse plugin.yml from {}", canonical_path.display()))?;
 
@@ -91,7 +87,15 @@ impl JavaPlugin {
     }
 
     fn parse_plugin_yml(jar_path: &Path) -> Result<PluginMeta> {
-        let canonical_path = sanitize_jar_path(jar_path)?;
+        let jar_str = jar_path.to_string_lossy();
+        if jar_str.contains("..") || jar_path.components().any(|c| c == std::path::Component::ParentDir) {
+            bail!("Path traversal detected in JAR path: {}", jar_path.display());
+        }
+        let canonical_path = std::fs::canonicalize(jar_path)
+            .with_context(|| format!("Failed to canonicalize JAR path: {}", jar_path.display()))?;
+        if canonical_path.components().any(|c| c == std::path::Component::ParentDir) {
+            bail!("Path traversal detected in canonicalized JAR path: {}", canonical_path.display());
+        }
         let file = std::fs::File::open(&canonical_path)
             .with_context(|| format!("Failed to open JAR: {}", canonical_path.display()))?;
 

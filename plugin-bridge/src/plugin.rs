@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use jni::JavaVM;
 use std::collections::HashMap;
-use std::path::PathBuf;
+
 use std::sync::Arc;
 use tracing::{error, info, warn};
 
@@ -29,17 +29,6 @@ pub struct PluginManager {
     jvm: Option<&'static JavaVM>,
 }
 
-fn sanitize_plugin_path(plugin_dir: &str) -> Result<PathBuf> {
-    if plugin_dir.contains("..") {
-        anyhow::bail!("Path traversal attempt detected in plugin directory: {}", plugin_dir);
-    }
-    let path = PathBuf::from(plugin_dir);
-    if path.components().any(|c| c == std::path::Component::ParentDir) {
-        anyhow::bail!("Path traversal detected in plugin directory components: {}", plugin_dir);
-    }
-    Ok(path)
-}
-
 impl PluginManager {
     pub fn new(event_bus: Arc<EventBus>) -> Self {
         Self {
@@ -59,22 +48,29 @@ impl PluginManager {
     }
 
     pub fn discover_and_load(&mut self, plugin_dir: &str) -> Result<usize> {
-        let path = sanitize_plugin_path(plugin_dir)?;
-        if !path.exists() {
-            info!("Plugin directory does not exist: {}, creating it", path.display());
-            std::fs::create_dir_all(&path)?;
+        if plugin_dir.contains("..") {
+            anyhow::bail!("Path traversal attempt detected in plugin directory: {}", plugin_dir);
+        }
+
+        if std::fs::metadata(plugin_dir).is_err() {
+            info!("Plugin directory does not exist: {plugin_dir}, creating it");
+            std::fs::create_dir_all(plugin_dir)?;
             return Ok(0);
         }
 
-        let canonical_dir = path.canonicalize()
-            .with_context(|| format!("Failed to canonicalize plugin directory: {}", path.display()))?;
+        let canonical_dir = std::fs::canonicalize(plugin_dir)
+            .with_context(|| format!("Failed to canonicalize plugin directory: {plugin_dir}"))?;
+
+        if canonical_dir.components().any(|c| c == std::path::Component::ParentDir) {
+            anyhow::bail!("Path traversal detected in plugin directory: {}", canonical_dir.display());
+        }
 
         let mut jar_paths = Vec::new();
         for entry in std::fs::read_dir(&canonical_dir)? {
             let entry = entry?;
             let file_path = entry.path();
             if file_path.extension().and_then(|e| e.to_str()) == Some("jar") {
-                let canonical_file = file_path.canonicalize()
+                let canonical_file = std::fs::canonicalize(&file_path)
                     .with_context(|| format!("Failed to canonicalize plugin file: {}", file_path.display()))?;
                 
                 if !canonical_file.starts_with(&canonical_dir) {
@@ -91,7 +87,7 @@ impl PluginManager {
         }
 
         if jar_paths.is_empty() {
-            info!("No plugin JARs found in {}", path.display());
+            info!("No plugin JARs found in {}", canonical_dir.display());
             return Ok(0);
         }
 
