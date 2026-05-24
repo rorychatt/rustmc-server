@@ -107,16 +107,33 @@ impl PluginManager {
             .context("Failed to get current working directory")?;
         let canonical_current = std::fs::canonicalize(&current_dir)?;
         
-        let final_path = validate_and_sanitize_path(&canonical_current, std::path::Path::new(plugin_dir))?;
+        let path = std::path::Path::new(plugin_dir);
 
-        if std::fs::metadata(&final_path).is_err() {
-            info!("Plugin directory does not exist: {}, creating it", final_path.display());
-            std::fs::create_dir_all(&final_path)?;
-            return Ok(0);
+        if path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            anyhow::bail!("Path traversal attempt detected in plugin directory: {}", plugin_dir);
         }
 
-        let canonical_dir = std::fs::canonicalize(&final_path)
-            .with_context(|| format!("Failed to canonicalize plugin directory: {}", final_path.display()))?;
+        let resolved = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            canonical_current.join(path)
+        };
+
+        if !resolved.starts_with(&canonical_current) {
+            anyhow::bail!("Path traversal detected: resolved path escapes base directory");
+        }
+
+        if std::fs::metadata(&resolved).is_err() {
+            info!("Plugin directory does not exist: {}, creating it", resolved.display());
+            std::fs::create_dir_all(&resolved)?;
+        }
+
+        let canonical_dir = std::fs::canonicalize(&resolved)
+            .with_context(|| format!("Failed to canonicalize plugin directory: {}", resolved.display()))?;
+
+        if !canonical_dir.starts_with(&canonical_current) {
+            anyhow::bail!("Path traversal detected: canonical path escapes base directory");
+        }
 
         let mut jar_paths = Vec::new();
         for entry in std::fs::read_dir(&canonical_dir)? {
